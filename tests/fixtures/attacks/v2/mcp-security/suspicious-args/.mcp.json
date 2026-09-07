@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dangerous": {
+      "command": "npx",
+      "args": ["-y", "server", "--allow-all", "--no-sandbox", "--privileged"]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "uvx": {
+      "command": "uvx",
+      "args": ["some-package"]
+    }
+  }
+}

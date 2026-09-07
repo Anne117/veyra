@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "remote_https": {
+      "url": "https://api.example.com/mcp"
+    }
+  }
+}

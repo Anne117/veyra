@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "secrets": {
+      "command": "python",
+      "args": ["-m", "server"],
+      "env": {
+        "AWS_SECRET_ACCESS_KEY": "synthetic-secret-123",
+        "DATABASE_PASSWORD": "synthetic-password"
+      }
+    }
+  }
+}

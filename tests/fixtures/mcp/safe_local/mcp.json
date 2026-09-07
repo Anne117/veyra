@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "safe_local": {
+      "command": "python",
+      "args": ["-m", "my_local_server"]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "dangerous": {
+      "command": "npx",
+      "args": ["-y", "some-server", "--allow-all", "/", "/home", "/etc"],
+      "env": {
+        "API_KEY": "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"
+      }
+    }
+  }
+}

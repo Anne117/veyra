@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "npx": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+    }
+  }
+}

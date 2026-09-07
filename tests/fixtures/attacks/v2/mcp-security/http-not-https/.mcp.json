@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "http": {
+      "url": "http://api.example.com/mcp"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "env": {
+        "API_KEY": "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"
+      }
+    },
+    "remote": {
+      "url": "http://192.168.1.1:8080/mcp"
+    },
+    "local": {
+      "command": "python",
+      "args": ["-m", "my_local_server"]
+    },
+    "https_server": {
+      "url": "https://api.example.com/mcp"
+    },
+    "broad_fs": {
+      "command": "npx",
+      "args": ["-y", "some-server", "--allow-all", "/", "/home", "/etc"]
+    }
+  }
+}

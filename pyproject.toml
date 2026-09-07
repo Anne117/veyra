@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentshield"
+version = "0.1.0"
+description = "Security scanner for AI agent skills and MCP-related resources."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "AgentShield Contributors" }]
+keywords = ["security", "scanner", "ai-agents", "skills", "mcp", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+
+[project.scripts]
+agentshield = "agentshield.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "PyYAML>=6.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentshield"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

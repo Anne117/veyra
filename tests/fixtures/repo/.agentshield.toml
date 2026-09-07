@@ -1,0 +1,4 @@
+[ignore]
+servers = ["dangerous"]
+domains = ["trusted.example.com"]
+rules = ["AS-MCP-010"]

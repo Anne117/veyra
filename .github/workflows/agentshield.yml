@@ -1,0 +1,64 @@
+name: AgentShield
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write   # required to upload SARIF to GitHub Code Scanning
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install AgentShield
+        run: |
+          # Install AgentShield from the checked-out repository itself.
+          # The package is not published on PyPI, so we install locally.
+          pip install --quiet .
+
+      - name: Run AgentShield scan
+        id: scan
+        run: |
+          # Generate the machine-readable JSON report and the SARIF report.
+          # Exit code: 0 = no HIGH/CRITICAL, 1 = HIGH, 2 = CRITICAL.
+          set +e
+          agentshield scan . --format json > agentshield-report.json
+          echo "json_exit=$?" >> "$GITHUB_OUTPUT"
+          agentshield scan . --format sarif > agentshield-report.sarif
+          echo "sarif_exit=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          echo "--- JSON report ---"
+          cat agentshield-report.json
+
+      - name: Upload AgentShield JSON report
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentshield-report
+          path: agentshield-report.json
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: agentshield-report.sarif
+
+      - name: Fail on findings
+        run: |
+          # Fail the workflow on HIGH/CRITICAL findings (exit code 1 or 2).
+          # To change the threshold, pass --fail-on to the scan command above
+          # (e.g. --fail-on CRITICAL to only fail on critical findings).
+          code="${{ steps.scan.outputs.json_exit }}"
+          echo "AgentShield exit code: $code"
+          if [ "$code" -ne 0 ]; then
+            echo "::error::AgentShield found HIGH or CRITICAL findings. See the agentshield-report artifact."
+            exit "$code"
+          fi

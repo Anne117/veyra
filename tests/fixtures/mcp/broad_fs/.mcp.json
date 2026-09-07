@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "broad_fs": {
+      "command": "npx",
+      "args": ["-y", "some-server", "--allow-all", "/", "/home", "/etc"]
+    }
+  }
+}
