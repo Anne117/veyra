@@ -333,6 +333,15 @@ def build_from_actions(actions: List, subject_id: str = "<agent>") -> SecurityGr
                 label=dest,
             )
             graph.add_edge(subject_node.id, ep_node.id, EdgeType.SENDS_TO)
+            # The action genuinely sends the named object to the endpoint, so
+            # record object -> endpoint data flow for object-continuity paths.
+            if obj:
+                obj_node = graph.get_or_create(
+                    _node_id(NodeType.DATA, obj),
+                    NodeType.DATA,
+                    label=obj,
+                )
+                graph.add_edge(obj_node.id, ep_node.id, EdgeType.SENDS_TO)
         elif cat == "DOWNLOAD":
             if action.destination:
                 dest = action.destination.strip()

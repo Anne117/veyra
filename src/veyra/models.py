@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from veyra.graph.path import AttackPath
 
 
 class Severity(str, Enum):
@@ -88,7 +91,7 @@ class Finding:
 class ScanResult:
     target: str
     findings: List[Finding] = field(default_factory=list)
-    attack_paths: List[Any] = field(default_factory=list)
+    attack_paths: List["AttackPath"] = field(default_factory=list)
 
     @property
     def score(self) -> int:

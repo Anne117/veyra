@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from veyra.correlation import correlate
 from veyra.cwe import cwe_for
@@ -136,34 +136,63 @@ def scan_path(target: str) -> ScanResult:
 
 
 def _build_attack_paths(findings: List[Finding], file_texts: List[tuple]) -> List:
-    """Construct a SecurityGraph from findings + step-sequence actions and return
-    the discovered attack paths.
+    """Construct attack paths from the Security Graph, analyzed PER COMPONENT.
 
-    The findings graph (semantic edges) is merged with the intra-file
-    step-sequence action graph (data-flow relationships). Deterministic; never
-    modifies the findings.
+    The scanner scans many files; findings and step-sequence actions belong to
+    the specific file/component that produced them. Merging everything into a
+    single global graph would let unrelated files cross-link through shared
+    object names (e.g. two files both using ``DATA:report`` or the same
+    endpoint), creating accidental cross-file attack paths.
+
+    To preserve attribution and prevent cross-file paths, we group findings and
+    actions by component identity (the same normalized path the graph builder
+    uses) and analyze each component's graph independently. This guarantees
+    that a path is attributable to the actual file that contains the relevant
+    actions/findings.
+
+    Deterministic; never modifies the findings.
     """
+    from veyra.graph.builder import _component_id
     from veyra.step_sequence import _extract_action, _split_actions
 
-    graph = build_from_findings(findings, source="<agent>")
+    # Group findings by component.
+    findings_by_component: Dict[str, List[Finding]] = {}
+    for f in findings:
+        findings_by_component.setdefault(_component_id(f.file), []).append(f)
+
+    # Group step-sequence actions by component (same normalized path).
+    actions_by_component: Dict[str, List] = {}
     for text, path in file_texts:
-        actions = []
+        key = _component_id(path)
         for line in text.splitlines():
             for segment in _split_actions(line):
                 action = _extract_action(segment)
                 if action is not None:
-                    actions.append(action)
-        if not actions:
-            continue
-        # Merge the action graph's nodes/edges into the findings graph.
-        action_graph = build_from_actions(actions, subject_id=path)
-        for node in action_graph.nodes.values():
-            if graph.get_node(node.id) is None:
-                graph.get_or_create(node.id, node.type, label=node.label)
-        for edge in action_graph.edges:
-            graph.add_edge(edge.source, edge.target, edge.type,
-                           attributes=dict(edge.attributes))
-    return PathAnalyzer(graph).analyze()
+                    actions_by_component.setdefault(key, []).append(action)
+
+    all_paths = []
+    for key in set(findings_by_component) | set(actions_by_component):
+        comp_findings = findings_by_component.get(key, [])
+        comp_actions = actions_by_component.get(key, [])
+
+        # Findings graph for this component.
+        graph = build_from_findings(comp_findings, source="<agent>")
+
+        # Merge this component's action graph. subject_id=key so the action SKILL
+        # node id matches the findings SKILL node id (both = SKILL:<normalized path>),
+        # connecting object data-flow to the same component.
+        if comp_actions:
+            action_graph = build_from_actions(comp_actions, subject_id=key)
+            for node in action_graph.nodes.values():
+                if graph.get_node(node.id) is None:
+                    graph.get_or_create(node.id, node.type, label=node.label)
+            for edge in action_graph.edges:
+                graph.add_edge(edge.source, edge.target, edge.type,
+                               attributes=dict(edge.attributes))
+
+        all_paths.extend(PathAnalyzer(graph).analyze())
+
+    return all_paths
 
 
 def _confidence_for(f: Finding) -> Confidence:
