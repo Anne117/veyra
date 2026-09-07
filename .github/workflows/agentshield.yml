@@ -22,7 +22,9 @@ jobs:
 
       - name: Install AgentShield with dev dependencies
         run: |
-          pip install --quiet ".[dev]"
+          # Editable install so the Attack Lab corpus path (derived from
+          # __file__) resolves to the repo's tests/fixtures/attacks/.
+          pip install --quiet -e ".[dev]"
 
       - name: Run test suite
         run: |
