@@ -6,14 +6,32 @@ Constructs a SecurityGraph from existing scanner data:
 
 The builder is deterministic, typed, and additive. It never changes the
 scanner, rules, correlation, or Attack Lab behavior.
+
+Node identity is SEMANTIC: the same real entity (endpoint URL, sensitive
+path, MCP server name) always yields the same node id, regardless of which
+rule or finding discovered it. When a finding does not carry enough concrete
+identity to name a real entity, the finding is preserved as an ACTION node
+rather than fabricating a fake endpoint/secret.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional
 
 from veyra.graph.models import EdgeType, Node, NodeType, SecurityGraph
 from veyra.models import Finding
+
+_URL = re.compile(r"https?://[^\s'\"]+", re.IGNORECASE)
+
+# Sensitive-path patterns used to derive a concrete SECRET identity.
+_SECRET_PATH = re.compile(
+    r"(?:\.env\b|\.aws\S*|\.ssh\S*|credentials\S*|id_rsa|id_ed25519|\.pem\b|\.key\b)",
+    re.IGNORECASE,
+)
+
+# MCP server name extraction: description like "MCP server 'filesystem' ...".
+_MCP_SERVER_NAME = re.compile(r"server\s+'([^']+)'", re.IGNORECASE)
 
 
 def _node_id(type_: NodeType, key: str) -> str:
@@ -21,58 +39,77 @@ def _node_id(type_: NodeType, key: str) -> str:
     return f"{type_.value}:{key}"
 
 
-# Map rule IDs to (subject node type, object node type, edge type).
-# Used to derive graph relationships from findings.
-_RULE_GRAPH_MAP: Dict[str, tuple] = {
-    # Hardcoded secret in a file -> that file CONTAINS a Secret.
-    "AS-001": (NodeType.SKILL, NodeType.SECRET, EdgeType.CONTAINS),
-    # Sensitive credential file access -> Skill READS a Secret.
-    "AS-006": (NodeType.SKILL, NodeType.SECRET, EdgeType.READS),
-    # Encoded content executed -> Skill EXECUTES an Action.
-    "AS-007": (NodeType.SKILL, NodeType.ACTION, EdgeType.EXECUTES),
-    # Shell execution -> Skill EXECUTES an Action.
-    "AS-002": (NodeType.SKILL, NodeType.ACTION, EdgeType.EXECUTES),
-    # Network activity -> Skill USES an Endpoint.
-    "AS-003": (NodeType.SKILL, NodeType.ENDPOINT, EdgeType.USES),
-    # Prompt injection -> Skill CONTAINS an Action (manipulative instruction).
-    "AS-004": (NodeType.SKILL, NodeType.ACTION, EdgeType.CONTAINS),
-    # Suspicious URL -> Skill USES an Endpoint.
-    "AS-005": (NodeType.SKILL, NodeType.ENDPOINT, EdgeType.USES),
-    # MCP config findings -> SKILL USES an MCP Server.
-    "AS-MCP-001": (NodeType.SKILL, NodeType.MCPSERVER, EdgeType.USES),
-    "AS-MCP-002": (NodeType.SKILL, NodeType.MCPSERVER, EdgeType.USES),
-    "AS-MCP-003": (NodeType.SKILL, NodeType.MCPSERVER, EdgeType.USES),
-    "AS-MCP-004": (NodeType.SKILL, NodeType.MCPSERVER, EdgeType.USES),
-    "AS-MCP-006": (NodeType.SKILL, NodeType.MCPSERVER, EdgeType.USES),
-    "AS-MCP-007": (NodeType.SKILL, NodeType.MCPSERVER, EdgeType.USES),
-    "AS-MCP-008": (NodeType.SKILL, NodeType.MCPSERVER, EdgeType.USES),
-    # Correlation chains: exfiltration -> Skill SENDS_TO an Endpoint.
-    "AS-CHAIN-001": (NodeType.SKILL, NodeType.ENDPOINT, EdgeType.SENDS_TO),
-    # Download-and-execute -> Skill FLOWS_TO an Action.
-    "AS-CHAIN-002": (NodeType.SKILL, NodeType.ACTION, EdgeType.FLOWS_TO),
-    # Remote MCP execution -> Skill TRUSTS an MCP Server.
-    "AS-CHAIN-003": (NodeType.SKILL, NodeType.MCPSERVER, EdgeType.TRUSTS),
-    # Source-to-sink -> Skill SENDS_TO an Endpoint.
-    "AS-CHAIN-004": (NodeType.SKILL, NodeType.ENDPOINT, EdgeType.SENDS_TO),
+def _extract_endpoint(finding: Finding) -> Optional[str]:
+    """Extract a concrete endpoint URL from a finding, or None."""
+    # Look first in matched_text (the exact source line), then evidence.
+    for text in (getattr(finding, "matched_text", "") or "", finding.evidence or ""):
+        m = _URL.search(text)
+        if m:
+            return m.group(0)
+    return None
+
+
+def _extract_secret(finding: Finding) -> Optional[str]:
+    """Extract a concrete sensitive-path secret identity, or None."""
+    for text in (getattr(finding, "matched_text", "") or "", finding.evidence or ""):
+        m = _SECRET_PATH.search(text)
+        if m:
+            return m.group(0).lower()
+    return None
+
+
+def _extract_mcp_server(finding: Finding) -> Optional[str]:
+    """Extract a concrete MCP server name from a finding description, or None."""
+    m = _MCP_SERVER_NAME.search(finding.description or "")
+    if m:
+        return m.group(1)
+    return None
+
+
+def _component_id(file_path: str) -> str:
+    """Path-unique, machine-agnostic component identity.
+
+    Normalizes separators and resolves the full given path so that
+    service-a/critical.py and service-b/critical.py remain distinct nodes.
+    """
+    return (file_path or "<unknown>").replace("\\", "/").rstrip("/") or "<unknown>"
+
+
+# Map rule ID -> (object node type, edge type) for the FINDING's semantics.
+# Node identity comes from _extract_* helpers, NOT from the rule ID.
+_RULE_EDGE_MAP: Dict[str, tuple] = {
+    "AS-001": (NodeType.SECRET, EdgeType.CONTAINS),
+    "AS-006": (NodeType.SECRET, EdgeType.READS),
+    "AS-007": (NodeType.ACTION, EdgeType.EXECUTES),
+    "AS-002": (NodeType.ACTION, EdgeType.EXECUTES),
+    "AS-003": (NodeType.ENDPOINT, EdgeType.USES),
+    "AS-004": (NodeType.ACTION, EdgeType.CONTAINS),
+    "AS-005": (NodeType.ENDPOINT, EdgeType.USES),
+    "AS-MCP-001": (NodeType.MCPSERVER, EdgeType.USES),
+    "AS-MCP-002": (NodeType.MCPSERVER, EdgeType.USES),
+    "AS-MCP-003": (NodeType.MCPSERVER, EdgeType.USES),
+    "AS-MCP-004": (NodeType.MCPSERVER, EdgeType.USES),
+    "AS-MCP-006": (NodeType.MCPSERVER, EdgeType.USES),
+    "AS-MCP-007": (NodeType.MCPSERVER, EdgeType.USES),
+    "AS-MCP-008": (NodeType.MCPSERVER, EdgeType.USES),
+    "AS-CHAIN-001": (NodeType.ENDPOINT, EdgeType.SENDS_TO),
+    "AS-CHAIN-002": (NodeType.ACTION, EdgeType.FLOWS_TO),
+    "AS-CHAIN-003": (NodeType.MCPSERVER, EdgeType.TRUSTS),
+    "AS-CHAIN-004": (NodeType.ENDPOINT, EdgeType.SENDS_TO),
 }
-
-
-def _subject_key(file_path: str) -> str:
-    """Subject node label derived from the source file path."""
-    # Use the basename (e.g. SKILL.md) plus a short path hash-free form.
-    return file_path.split("/")[-1].split("\\")[-1] or file_path
 
 
 def build_from_findings(findings: List[Finding], source: str = "<agent>") -> SecurityGraph:
     """Build a SecurityGraph from a list of findings.
 
     `source` is the top-level subject (default '<agent>'). Each finding is
-    mapped through `_RULE_GRAPH_MAP` to a (subject, object, edge) relationship.
-    Deterministic: same findings -> same graph.
+    mapped through `_RULE_EDGE_MAP` using a SEMANTIC object identity extracted
+    from the finding. If no concrete identity can be extracted, the finding is
+    preserved as an ACTION node (rule-free key) rather than fabricating a fake
+    endpoint/secret. Deterministic: same findings -> same graph.
     """
     graph = SecurityGraph()
 
-    # Top-level agent node.
     agent_node = graph.get_or_create(
         _node_id(NodeType.AGENT, source),
         NodeType.AGENT,
@@ -81,30 +118,53 @@ def build_from_findings(findings: List[Finding], source: str = "<agent>") -> Sec
 
     for f in findings:
         rule = f.rule_id
-        if rule not in _RULE_GRAPH_MAP:
+        if rule not in _RULE_EDGE_MAP:
             continue
 
-        subject_type, object_type, edge_type = _RULE_GRAPH_MAP[rule]
+        object_type, edge_type = _RULE_EDGE_MAP[rule]
 
-        # Subject: for the agent-level findings we use the source file as a
-        # SKILL node contained by the agent; otherwise fall back to the agent.
-        subject_key = _subject_key(f.file) if f.file else source
-        subject_node = graph.get_or_create(
-            _node_id(subject_type, subject_key),
-            subject_type,
-            label=subject_key,
+        # Component (skill) identity is the full normalized path.
+        skill_key = _component_id(f.file)
+        skill_node = graph.get_or_create(
+            _node_id(NodeType.SKILL, skill_key),
+            NodeType.SKILL,
+            label=skill_key,
         )
-        if subject_node.id != agent_node.id:
-            graph.add_edge(agent_node.id, subject_node.id, EdgeType.CONTAINS)
+        if skill_node.id != agent_node.id:
+            graph.add_edge(agent_node.id, skill_node.id, EdgeType.CONTAINS)
 
-        # Object label/key.
-        object_key = f"{rule}:{object_type.value}"  # stable, evidence-free key
-        object_node = graph.get_or_create(
-            _node_id(object_type, object_key),
-            object_type,
-            label=f"{object_type.value} ({rule})",
-        )
-        graph.add_edge(subject_node.id, object_node.id, edge_type)
+        # Resolve a concrete semantic identity for the object, if possible.
+        object_id = None
+        object_label = ""
+        if object_type == NodeType.ENDPOINT:
+            url = _extract_endpoint(f)
+            if url:
+                object_id = _node_id(NodeType.ENDPOINT, url)
+                object_label = url
+        elif object_type == NodeType.SECRET:
+            secret = _extract_secret(f)
+            if secret:
+                object_id = _node_id(NodeType.SECRET, secret)
+                object_label = secret
+        elif object_type == NodeType.MCPSERVER:
+            server = _extract_mcp_server(f)
+            if server:
+                object_id = _node_id(NodeType.MCPSERVER, server)
+                object_label = server
+
+        if object_id is None:
+            # No concrete entity identity: preserve the finding as an ACTION
+            # node keyed by file:line (rule-free, unique, deterministic).
+            action_key = f"{skill_key}:{f.line or 0}:{edge_type.value}"
+            object_id = _node_id(NodeType.ACTION, action_key)
+            object_label = f"{rule} ({edge_type.value})"
+            if object_id not in graph.nodes:
+                graph.get_or_create(object_id, NodeType.ACTION, label=object_label)
+            graph.add_edge(skill_node.id, object_id, edge_type)
+            continue
+
+        object_node = graph.get_or_create(object_id, object_type, label=object_label)
+        graph.add_edge(skill_node.id, object_id, edge_type)
 
     return graph
 
