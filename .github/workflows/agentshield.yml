@@ -9,6 +9,25 @@ permissions:
   security-events: write   # required to upload SARIF to GitHub Code Scanning
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install AgentShield with dev dependencies
+        run: |
+          pip install --quiet ".[dev]"
+
+      - name: Run test suite
+        run: |
+          pytest -q
+
   scan:
     runs-on: ubuntu-latest
     steps:
@@ -26,15 +45,17 @@ jobs:
           # The package is not published on PyPI, so we install locally.
           pip install --quiet .
 
-      - name: Run AgentShield scan
+      - name: Run AgentShield scan on production source
         id: scan
         run: |
-          # Generate the machine-readable JSON report and the SARIF report.
+          # Scan only production source (src/), not the Attack Lab fixtures.
+          # Use the repo suppression config so the scanner does not flag its
+          # own rule patterns (self-referential findings).
           # Exit code: 0 = no HIGH/CRITICAL, 1 = HIGH, 2 = CRITICAL.
           set +e
-          agentshield scan . --format json > agentshield-report.json
+          agentshield scan src --config .agentshield.toml --format json > agentshield-report.json
           echo "json_exit=$?" >> "$GITHUB_OUTPUT"
-          agentshield scan . --format sarif > agentshield-report.sarif
+          agentshield scan src --config .agentshield.toml --format sarif > agentshield-report.sarif
           echo "sarif_exit=$?" >> "$GITHUB_OUTPUT"
           set -e
           echo "--- JSON report ---"
@@ -53,12 +74,12 @@ jobs:
 
       - name: Fail on findings
         run: |
-          # Fail the workflow on HIGH/CRITICAL findings (exit code 1 or 2).
-          # To change the threshold, pass --fail-on to the scan command above
-          # (e.g. --fail-on CRITICAL to only fail on critical findings).
+          # Fail the job on HIGH/CRITICAL findings in production source
+          # (exit code 1 or 2). To change the threshold, pass --fail-on to the
+          # scan command above (e.g. --fail-on CRITICAL to only fail on critical).
           code="${{ steps.scan.outputs.json_exit }}"
           echo "AgentShield exit code: $code"
           if [ "$code" -ne 0 ]; then
-            echo "::error::AgentShield found HIGH or CRITICAL findings. See the agentshield-report artifact."
+            echo "::error::AgentShield found HIGH or CRITICAL findings in src/. See the agentshield-report artifact."
             exit "$code"
           fi

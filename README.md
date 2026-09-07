@@ -246,19 +246,35 @@ mkdir -p .github/workflows
 cp agentshield/.github/workflows/agentshield.yml .github/workflows/
 ```
 
+The workflow has two jobs:
+
+**`test`** — installs the project with dev dependencies (`pip install ".[dev]"`)
+and runs the full test suite (`pytest -q`).
+
+**`scan`** — installs the project (`pip install .`), scans **production source
+only** (`src/`), uploads the JSON report as a `agentshield-report` artifact and
+the SARIF report to **GitHub Code Scanning**, and fails on HIGH/CRITICAL
+findings in `src/`.
+
+The scan uses the repository's `.agentshield.toml` suppression config so the
+scanner does not flag its own rule patterns (self-referential findings in the
+rule modules). The Attack Lab fixtures under `tests/` are intentionally **not**
+scanned — they are the adversarial corpus, not production code.
+
 The workflow:
 
 1. Installs AgentShield **from the checked-out repository** (`pip install .`).
    The package is not published on PyPI, so the workflow installs it locally
    from the repo it is scanning.
-2. Scans the repository.
-3. Prints a readable report in CI logs.
-4. Uploads the JSON report as a `agentshield-report` artifact.
-5. Uploads the SARIF report to **GitHub Code Scanning** via
+2. Runs the full test suite (test job).
+3. Scans `src/` (scan job).
+4. Prints a readable report in CI logs.
+5. Uploads the JSON report as a `agentshield-report` artifact.
+6. Uploads the SARIF report to **GitHub Code Scanning** via
    `github/codeql-action/upload-sarif@v3`.
-6. Fails the workflow on HIGH findings by default (exit code 1 or 2).
-7. Supports a configurable threshold via `--fail-on` in the scan step.
-8. Never executes scanned Skills or MCP servers, and makes no outbound
+7. Fails the scan job on HIGH findings by default (exit code 1 or 2).
+8. Supports a configurable threshold via `--fail-on` in the scan step.
+9. Never executes scanned Skills or MCP servers, and makes no outbound
    network requests during the scan.
 
 The workflow requests the `security-events: write` permission, which is
