@@ -53,14 +53,14 @@ scanned Skills or MCP servers and never makes network requests during a scan.
 
 ```mermaid
 flowchart LR
-    A[Input path] --> B[Static parsing]
+    A[Input] --> B[Static parsing]
     B --> C[Rule detection]
     C --> D[Correlation]
     D --> E[Step-sequence analysis]
     E --> F[Obfuscation analysis]
-    F --> G[Metadata enrichment]
-    G --> H[Suppression]
-    H --> I[Risk scoring]
+    F --> G[Security Graph]
+    G --> H[Attack Path Analyzer]
+    H --> I[Metadata + suppression]
     I --> J[Terminal / JSON / SARIF]
 ```
 
@@ -76,12 +76,19 @@ The pipeline (see `src/veyra/scanner.py`):
    single file, including multi-action line splitting.
 5. **Obfuscation analysis** — decode base64/ROT13 and flag only when the decoded
    content participates in an execution or fetch/execute context.
-6. **Metadata enrichment** — attach MITRE ATT&CK, CWE, confidence, and matched
-   evidence.
-7. **Suppression** — apply `.veyra.toml` allowlist after findings are
-   generated.
-8. **Risk scoring** — deterministic severity-weighted score capped at 100.
-9. **Reporting** — terminal, JSON, or SARIF 2.1.0.
+6. **Security Graph** — build a directed graph of nodes (Agent, Skill, Tool,
+   MCP Server, Data, Secret, Endpoint, Action) and edges (contains, uses,
+   calls, reads, writes, sends-to, executes, produces, flows-to, trusts). Node
+   identity is **semantic** (a real URL/path/secret resolves to one node), and
+   findings/actions are analyzed **per component** to prevent cross-file
+   correlation.
+7. **Attack Path Analyzer** — deterministically enumerate truthful, contiguous
+   graph walks (`READS → FLOWS_TO → SENDS_TO`), classify each into explicit
+   security semantics, and attach asset/sink/explanation.
+8. **Metadata + suppression** — attach MITRE ATT&CK, CWE, confidence, and
+   matched evidence; apply the `.veyra.toml` allowlist.
+9. **Risk scoring** — deterministic severity-weighted score capped at 100.
+10. **Reporting** — terminal, JSON, or SARIF 2.1.0.
 
 ## 🧩 Detection table
 
@@ -392,9 +399,11 @@ derived from the score:
 
 - **Static analysis only** — no runtime behavior, no network calls during scan.
 - **Heuristic, not exhaustive** — will miss some attacks and may flag benign code.
-- **Line-based** — multi-line constructs are not fully analyzed.
-- **Limited cross-file / data-flow analysis** — step-sequence analysis is
-  intra-file only; there is no taint tracking or variable/function analysis.
+- **Line-based rules** — multi-line constructs are not fully analyzed.
+- **Attack-path analysis is intra-file and data-flow only** — Step-sequence +
+  Security Graph analysis runs per component (per file). There is no
+  cross-file/cross-component provenance join, no taint tracking, and no
+  variable/function-level data flow beyond `READS → FLOWS_TO → SENDS_TO`.
 - **No runtime execution analysis** — dynamic code execution and malicious MCP
   server runtime behavior are out of scope.
 - **MCP config is parsed structurally** (JSON/YAML); MCP server manifests and
@@ -406,16 +415,19 @@ derived from the score:
 
 Prioritized technical work:
 
-- [ ] Stronger data-flow / semantic analysis (multi-line, cross-file).
+- [ ] Cross-component/cross-file data-flow provenance join (currently
+  intra-file only).
+- [ ] Attack-path risk prioritization (ranking by exposure + sensitivity).
+- [ ] Stronger data-flow / semantic analysis (multi-line, taint tracking).
 - [ ] MCP server manifest and tool-schema analysis.
 - [ ] Additional Attack Lab coverage (more attack classes, more benign lookalikes).
-- [ ] Regression testing and CI hardening.
 - [ ] Richer language support (more shell, PowerShell, and config formats).
 - [ ] Plugin / custom rule architecture.
 
 Future product ideas (not yet committed): a web dashboard, registry/repository
 scanning, and runtime analysis. These are explicitly **not** part of the current
-MVP.
+MVP. See `docs/data-flow-architecture-audit.md` for the Security Graph design
+and `docs/threat-model.md` for the security model.
 
 ## 🛠️ Development
 
