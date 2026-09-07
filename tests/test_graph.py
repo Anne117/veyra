@@ -13,16 +13,17 @@ from veyra.models import Confidence, Finding, Severity
 from veyra.step_sequence import Action
 
 
-def _finding(rule_id="AS-001", file="SKILL.md"):
+def _finding(rule_id="AS-001", file="SKILL.md", title="Hardcoded secret", description="d", matched_text=""):
     return Finding(
         rule_id=rule_id,
         severity=Severity.HIGH,
-        title="t",
-        description="d",
+        title=title,
+        description=description,
         file=file,
         evidence="e",
         remediation="r",
         confidence=Confidence.MEDIUM,
+        matched_text=matched_text,
     )
 
 
@@ -113,8 +114,9 @@ def test_build_from_findings_agent_contains_skill():
 
 
 def test_build_from_findings_skips_unmapped_rules():
-    g = build_from_findings([_finding("AS-UNKNOWN")])
-    # only the agent node is created (no mapped rule)
+    """A finding with no matching semantic signal is left out of the graph."""
+    g = build_from_findings([_finding("AS-UNKNOWN", title="Unrelated code style")])
+    # only the agent node is created (no semantic signal matched)
     assert len(g.nodes) == 1
 
 
@@ -134,11 +136,11 @@ def test_build_from_findings_no_fabricated_entity_without_identity():
 
 # --- Findings identity: unified semantic nodes -----------------------------
 
-def _endpoint_finding(rule_id, file, url):
+def _endpoint_finding(rule_id, file, url, title="External network access"):
     return Finding(
         rule_id=rule_id,
         severity=Severity.HIGH,
-        title="t",
+        title=title,
         description="d",
         file=file,
         evidence=f"seen at {url}",
@@ -216,7 +218,7 @@ def test_secret_finding_semantic_identity():
     f = Finding(
         rule_id="AS-006",
         severity=Severity.HIGH,
-        title="t",
+        title="Sensitive credential file access",
         description="sensitive credential file access",
         file="skill.md",
         evidence="access",
@@ -234,7 +236,7 @@ def test_mcp_finding_semantic_identity():
     f = Finding(
         rule_id="AS-MCP-004",
         severity=Severity.HIGH,
-        title="t",
+        title="MCP server executes a dynamic package",
         description="MCP server 'filesystem' runs a dynamic package",
         file=".mcp.json",
         evidence="npx",
@@ -332,3 +334,93 @@ def test_no_flows_to_without_input_output_relationship():
     ])
     flows = [e for e in g.edges if e.type == EdgeType.FLOWS_TO]
     assert flows == []
+
+
+# --- Semantic signal decoupling (rule-ID independent) ----------------------
+
+def test_same_semantic_edge_from_different_rules():
+    """Two different rules expressing the same semantic relationship -> same edge."""
+    url = "https://example.com/upload"
+    g = build_from_findings([
+        _endpoint_finding("AS-003", "a.py", url, title="External network access"),
+        _endpoint_finding("AS-CHAIN-001", "b.py", url, title="Potential secret exfiltration chain"),
+    ])
+    # Same endpoint node, and the SENDS_TO/USES edges both point to it.
+    endpoints = [n for n in g.nodes.values() if n.type == NodeType.ENDPOINT]
+    assert len(endpoints) == 1
+
+
+def test_hypothetical_rule_with_equivalent_semantics_detected():
+    """A new/unknown rule with equivalent semantic evidence maps without a rule edit."""
+    f = Finding(
+        rule_id="FUTURE-RULE-999",  # not in any mapping
+        severity=Severity.HIGH,
+        title="Data exfiltration chain",  # semantic -> sends-to-endpoint
+        description="sends data to external url",
+        file="x.py",
+        evidence="seen at https://example.com/upload",
+        remediation="r",
+    )
+    g = build_from_findings([f])
+    endpoints = [n for n in g.nodes.values() if n.type == NodeType.ENDPOINT]
+    assert len(endpoints) == 1
+    assert endpoints[0].id == "ENDPOINT:https://example.com/upload"
+
+
+def test_rule_id_is_metadata_not_identity():
+    """rule_id is retained as edge metadata but not in the endpoint node id."""
+    url = "https://example.com/upload"
+    g = build_from_findings([_endpoint_finding("AS-003", "x.py", url)])
+    endpoints = [n for n in g.nodes.values() if n.type == NodeType.ENDPOINT]
+    assert "AS-" not in endpoints[0].id
+    # The edge to that endpoint carries rule_id as metadata.
+    edges_to_endpoint = [e for e in g.edges if e.target == endpoints[0].id]
+    assert edges_to_endpoint
+    assert "AS-003" in edges_to_endpoint[0].attributes.get("rule_ids", [])
+
+
+def test_severity_and_confidence_reach_edge():
+    """severity and confidence are carried onto the graph edge."""
+    f = _endpoint_finding("AS-003", "x.py", "https://example.com/upload")
+    f.severity = Severity.CRITICAL
+    f.confidence = Confidence.HIGH
+    g = build_from_findings([f])
+    ep = [n for n in g.nodes.values() if n.type == NodeType.ENDPOINT][0]
+    edge = [e for e in g.edges if e.target == ep.id][0]
+    assert edge.attributes["severity"] == "CRITICAL"
+    assert edge.attributes["confidence"] == "HIGH"
+
+
+def test_duplicate_equivalent_edges_deduplicated():
+    """Two findings with the same semantic edge (uses-endpoint) collapse into one."""
+    url = "https://example.com/upload"
+    g = build_from_findings([
+        # AS-003 "External network access" -> uses-endpoint (USES)
+        _endpoint_finding("AS-003", "a.py", url, title="External network access"),
+        # A hypothetical rule with equivalent semantics -> same USES edge.
+        _endpoint_finding("FUTURE-RULE-999", "a.py", url, title="Suspicious URL"),
+    ])
+    # Same component a.py -> same endpoint, same edge type: one deduplicated edge.
+    edges_to_ep = [e for e in g.edges if e.target == f"ENDPOINT:{url}"]
+    assert len(edges_to_ep) == 1
+    # Aggregated metadata: both rule_ids preserved deterministically.
+    assert set(edges_to_ep[0].attributes["rule_ids"]) == {"AS-003", "FUTURE-RULE-999"}
+    assert edges_to_ep[0].attributes["files"] == ["a.py"]
+
+
+def test_ambiguous_finding_no_fabricated_semantics():
+    """An ambiguous/unsupported finding is not turned into a fake semantic edge."""
+    f = Finding(
+        rule_id="AS-004",
+        severity=Severity.HIGH,
+        title="Prompt injection",
+        description="instruction asks agent to override system",
+        file="x.md",
+        evidence="ignore previous instructions",
+        remediation="r",
+    )
+    g = build_from_findings([f])
+    # No endpoint/secret/mcp fabricated; only a preserved ACTION node + skill/agent.
+    assert not any(n.type in (NodeType.ENDPOINT, NodeType.SECRET, NodeType.MCPSERVER)
+                   for n in g.nodes.values())
+    assert any(n.type == NodeType.ACTION for n in g.nodes.values())
