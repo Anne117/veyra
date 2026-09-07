@@ -285,3 +285,50 @@ def test_build_from_actions_deterministic():
     g1 = build_from_actions(_actions())
     g2 = build_from_actions(_actions())
     assert g1.to_dict() == g2.to_dict()
+
+
+# --- Data-flow edges (FLOWS_TO) -------------------------------------------
+
+def test_transform_produces_flows_to():
+    """TRANSFORM input -> output produces a FLOWS_TO edge between the DATA nodes."""
+    g = build_from_actions([
+        Action(verb="transform", object="data", destination=None, category="TRANSFORM", output="report"),
+    ])
+    flows = [e for e in g.edges if e.type == EdgeType.FLOWS_TO]
+    assert len(flows) == 1
+    assert flows[0].source == "DATA:data"
+    assert flows[0].target == "DATA:report"
+
+
+def test_multiple_transforms_chain_flows_to():
+    """Multiple transformations produce a chain of FLOWS_TO edges."""
+    g = build_from_actions([
+        Action(verb="transform", object="data", destination=None, category="TRANSFORM", output="report"),
+        Action(verb="transform", object="report", destination=None, category="TRANSFORM", output="export"),
+    ])
+    flows = [(e.source, e.target) for e in g.edges if e.type == EdgeType.FLOWS_TO]
+    assert ("DATA:data", "DATA:report") in flows
+    assert ("DATA:report", "DATA:export") in flows
+
+
+def test_source_transform_sink_traceable():
+    """read data -> transform -> send result: connected path in the graph."""
+    g = build_from_actions([
+        Action(verb="read", object="config", destination=None, category="SOURCE"),
+        Action(verb="transform", object="config", destination=None, category="TRANSFORM", output="report"),
+        Action(verb="send", object="report", destination="https://example.com/upload", category="NETWORK"),
+    ])
+    # FLOWS_TO: DATA:config -> DATA:report
+    assert any(e.source == "DATA:config" and e.target == "DATA:report" and e.type == EdgeType.FLOWS_TO for e in g.edges)
+    # SENDS_TO: subject -> ENDPOINT
+    assert any(e.target == "ENDPOINT:https://example.com/upload" and e.type == EdgeType.SENDS_TO for e in g.edges)
+
+
+def test_no_flows_to_without_input_output_relationship():
+    """A TRANSFORM without an output, or non-transform actions, must not emit FLOWS_TO."""
+    g = build_from_actions([
+        Action(verb="transform", object="data", destination=None, category="TRANSFORM", output=None),
+        Action(verb="read", object="config", destination=None, category="SOURCE"),
+    ])
+    flows = [e for e in g.edges if e.type == EdgeType.FLOWS_TO]
+    assert flows == []

@@ -210,14 +210,24 @@ def build_from_actions(actions: List, subject_id: str = "<agent>") -> SecurityGr
                 label=obj,
             )
             graph.add_edge(subject_node.id, obj_node.id, EdgeType.READS)
-        elif cat == "TRANSFORM" and action.output:
+        elif cat == "TRANSFORM" and action.object and action.output:
+            obj = action.object.strip()
             out = action.output.strip()
+            # The input object (DATA) is transformed into the output object.
+            in_node = graph.get_or_create(
+                _node_id(NodeType.DATA, obj),
+                NodeType.DATA,
+                label=obj,
+            )
             out_node = graph.get_or_create(
                 _node_id(NodeType.DATA, out),
                 NodeType.DATA,
                 label=out,
             )
+            # Subject produces the output...
             graph.add_edge(subject_node.id, out_node.id, EdgeType.PRODUCES)
+            # ...and the input FLOWS_TO the output (data-flow relationship).
+            graph.add_edge(in_node.id, out_node.id, EdgeType.FLOWS_TO)
         elif cat == "NETWORK" and action.destination:
             dest = action.destination.strip()
             ep_node = graph.get_or_create(
