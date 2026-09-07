@@ -206,7 +206,12 @@ veyra scan ./path --format json
       ],
       "severity": "HIGH",
       "confidence": "MEDIUM",
-      "title": "Secret exposed to external endpoint"
+      "title": "Secret exposed to external endpoint",
+      "attack_type": "SECRET_EXFILTRATION",
+      "entry_node": "SKILL:skill",
+      "asset_node": "SECRET:token",
+      "sink_node": "ENDPOINT:https://example.com",
+      "explanation": "A secret flows to an external endpoint."
     }
   ]
 }
@@ -226,6 +231,20 @@ derived object which is SENDS_TO an external endpoint. Shared-skill correlation
 alone (a skill reads a secret *and* also contacts an endpoint) is not reported
 as a proven path.
 
+Each path is classified into explicit security semantics:
+
+- `SECRET_EXFILTRATION` — a secret flows to an external endpoint.
+- `DATA_EXFILTRATION` — sensitive data flows to an external endpoint.
+- `SECRET_TO_EXECUTION` — a secret reaches an execution action.
+- `DATA_TO_EXECUTION` — sensitive data reaches an execution action.
+- `UNKNOWN` — the path does not satisfy any proven pattern (assigned only when
+  no classification can be defensibly applied).
+
+A path exposes its `attack_type`, `entry_node`, `asset_node`, `sink_node`, and a
+deterministic `explanation`. The classifier never fabricates an asset or sink
+that is not present in the path, and never treats `USES` (a request) or
+`PRODUCES` (skill output) as exfiltration/data-flow.
+
 Terminal output shows a concise section when paths exist:
 
 ```
@@ -233,6 +252,7 @@ Attack Paths
 -----------
   [HIGH] Secret exposed to external endpoint
     SKILL:skill → SECRET:token → DATA:payload → ENDPOINT:https://example.com
+    (SECRET_EXFILTRATION: A secret flows to an external endpoint.)
 ```
 
 Attack path severity is informational and does **not** change the scan score,

@@ -28,7 +28,8 @@ No database, no LLM, no runtime analysis.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Tuple
+from enum import Enum
+from typing import Dict, List, Optional, Set, Tuple
 
 from veyra.graph.models import Edge, EdgeType, NodeType, SecurityGraph
 from veyra.models import Confidence, Severity
@@ -55,6 +56,83 @@ _SEV_RANK = {Severity.CRITICAL.value: 4, Severity.HIGH.value: 3,
              Severity.MEDIUM.value: 2, Severity.LOW.value: 1, Severity.INFO.value: 0}
 _CONF_RANK = {Confidence.HIGH.value: 2, Confidence.MEDIUM.value: 1, Confidence.LOW.value: 0}
 
+# Deterministic explanations keyed by attack type.
+_EXPLANATIONS = {
+    "DATA_EXFILTRATION": "Sensitive data flows to an external endpoint.",
+    "SECRET_EXFILTRATION": "A secret flows to an external endpoint.",
+    "SECRET_TO_EXECUTION": "A secret reaches an execution action.",
+    "DATA_TO_EXECUTION": "Sensitive data reaches an execution action.",
+}
+
+
+class AttackType(str, Enum):
+    """Deterministic classification of a proven attack path."""
+    UNKNOWN = "UNKNOWN"
+    DATA_EXFILTRATION = "DATA_EXFILTRATION"
+    SECRET_EXFILTRATION = "SECRET_EXFILTRATION"
+    SECRET_TO_EXECUTION = "SECRET_TO_EXECUTION"
+    DATA_TO_EXECUTION = "DATA_TO_EXECUTION"
+
+
+def _node_kind(node_id: str) -> Optional[str]:
+    """Return the node-type prefix of an id (e.g. 'SECRET'), or None."""
+    if ":" in node_id:
+        return node_id.split(":", 1)[0]
+    return None
+
+
+def classify_path(path: "AttackPath") -> "AttackPath":
+    """Deterministically classify an AttackPath into explicit security semantics.
+
+    Classification is conservative: it only assigns a type when the actual
+    (already-contiguous) path structure AND its edges prove the relationship.
+    It never fabricates an asset/sink not present among the path's real nodes,
+    and never treats USES/PRODUCES as exfiltration or data flow.
+    """
+    nodes = path.nodes
+    if not nodes or not path.is_contiguous:
+        path.attack_type = AttackType.UNKNOWN
+        return path
+
+    path.entry_node = nodes[0]
+    sink = nodes[-1]
+    sink_kind = _node_kind(sink)
+
+    # Edge types actually present in the walk.
+    edge_types = [e[2] for e in path.edges]
+
+    # --- Exfiltration: a SENDS_TO edge to an ENDPOINT from the asset lineage ---
+    if sink_kind == "ENDPOINT" and "SENDS_TO" in edge_types:
+        # The asset is the first SECRET/DATA in the node walk.
+        origin = next((n for n in nodes if _node_kind(n) in ("SECRET", "DATA")), None)
+        if origin:
+            kind = _node_kind(origin)
+            if kind == "SECRET":
+                path.attack_type = AttackType.SECRET_EXFILTRATION
+            elif kind == "DATA":
+                path.attack_type = AttackType.DATA_EXFILTRATION
+            if path.attack_type is not AttackType.UNKNOWN:
+                path.asset_node = origin
+                path.sink_node = sink
+
+    # --- Execution: EXECUTES edge to an ACTION sink ---
+    elif sink_kind == "ACTION" and "EXECUTES" in edge_types:
+        for (src, tgt, etype) in path.associated_edges:
+            if etype == "READS" and _node_kind(tgt) in ("SECRET", "DATA"):
+                asset_kind = _node_kind(tgt)
+                if asset_kind == "SECRET":
+                    path.attack_type = AttackType.SECRET_TO_EXECUTION
+                elif asset_kind == "DATA":
+                    path.attack_type = AttackType.DATA_TO_EXECUTION
+                if path.attack_type is not AttackType.UNKNOWN:
+                    path.asset_node = tgt
+                    path.sink_node = sink
+                break
+
+    if path.attack_type is not AttackType.UNKNOWN:
+        path.explanation = _EXPLANATIONS[path.attack_type.value]
+    return path
+
 
 @dataclass
 class AttackPath:
@@ -72,6 +150,11 @@ class AttackPath:
     confidence: Confidence = Confidence.MEDIUM
     title: str = ""
     description: str = ""
+    attack_type: AttackType = AttackType.UNKNOWN
+    entry_node: str = ""
+    asset_node: str = ""
+    sink_node: str = ""
+    explanation: str = ""
 
     @property
     def is_contiguous(self) -> bool:
@@ -92,6 +175,11 @@ class AttackPath:
             "confidence": self.confidence.value,
             "title": self.title,
             "description": self.description,
+            "attack_type": self.attack_type.value,
+            "entry_node": self.entry_node,
+            "asset_node": self.asset_node,
+            "sink_node": self.sink_node,
+            "explanation": self.explanation,
         }
 
 
@@ -110,13 +198,21 @@ class PathAnalyzer:
     # --- Public API ---------------------------------------------------------
 
     def analyze(self) -> List[AttackPath]:
-        """Return all discovered attack paths, deduplicated and deterministically ordered."""
+        """Return all discovered attack paths, deduplicated and deterministically ordered.
+
+        Each returned path is classified into explicit security semantics.
+        """
         paths: List[AttackPath] = []
         for skill_id, skill_node in self.graph.nodes.items():
             if skill_node.type != NodeType.SKILL:
                 continue
             paths.extend(self._analyze_skill(skill_id))
-        return self._dedupe(paths)
+        paths = self._dedupe(paths)
+        for p in paths:
+            classify_path(p)
+        # De-duplication ordering is unaffected by classification (classification
+        # is derived purely from the already-ordered node/edge sequences).
+        return paths
 
     # --- Per-skill analysis -------------------------------------------------
 

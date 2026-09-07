@@ -14,7 +14,7 @@ from veyra.graph.models import (
     NodeType,
     SecurityGraph,
 )
-from veyra.graph.path import AttackPath, PathAnalyzer
+from veyra.graph.path import AttackPath, AttackType, PathAnalyzer, classify_path
 
 __all__ = [
     "build_from_actions",
@@ -25,5 +25,7 @@ __all__ = [
     "NodeType",
     "SecurityGraph",
     "AttackPath",
+    "AttackType",
     "PathAnalyzer",
+    "classify_path",
 ]
