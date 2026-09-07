@@ -1,32 +1,77 @@
 # AgentShield
 
-**Security scanner for AI agent skills and MCP-related resources.**
+**Security scanner for AI agent Skills and MCP resources.**
 
 AgentShield is an early-stage (MVP) static-analysis tool that inspects AI agent
 skills — `SKILL.md` files, markdown, YAML/JSON/TOML config, Python/JS/TS code,
 and shell scripts — for security issues such as hardcoded secrets, dangerous
-command execution, network access, prompt injection, and suspicious URLs.
+command execution, network access, prompt injection, suspicious URLs, sensitive
+credential access, and obfuscated payloads.
 
-> **Status: early MVP.** AgentShield is a heuristic scanner, not a proven
-> security standard. It does **not** detect all malicious skills and can
-> produce false positives. Treat its output as a starting point for review,
-> not as a definitive verdict.
+> **Status: early MVP.** AgentShield is a heuristic static scanner, not a
+> complete malware detector and not a security standard. It does **not** detect
+> all malicious skills and can produce false positives. Treat its output as a
+> starting point for human review, not as a definitive verdict.
 
-## Why AI agent skills need security scanning
+[![CI](https://github.com/Anne117/agentshield/actions/workflows/agentshield.yml/badge.svg)](https://github.com/Anne117/agentshield/actions/workflows/agentshield.yml)
+
+## Why AgentShield
 
 AI agents increasingly load third-party skills and configuration that instruct
 them to take actions. A malicious or compromised skill can:
 
 - Embed **hardcoded secrets** that get committed to source control.
 - Instruct the agent to **execute arbitrary commands** (`curl | bash`).
-- Make **unexpected network requests** or exfiltrate local files.
+- Make **unexpected network requests** or **exfiltrate local files**.
 - Use **prompt injection** to override the host agent's system instructions.
 - Point to **suspicious URLs** (raw IPs, shorteners, executable downloads).
+- Read **sensitive credential files** (`.env`, `~/.aws`, `~/.ssh`).
+- Hide a **download-and-execute chain** across multiple steps.
+- Ship **obfuscated payloads** (base64/ROT13) that decode to dangerous actions.
+- Configure a **dangerous MCP server** (remote endpoint, dynamic package
+  execution, secrets passed to the server, broad filesystem access).
 
 AgentShield scans these resources statically so you can review them before
 trusting an agent to load them.
 
-## What the MVP detects
+## How it works
+
+AgentShield is a deterministic, static analysis pipeline. It never executes
+scanned Skills or MCP servers and never makes network requests during a scan.
+
+```mermaid
+flowchart LR
+    A[Input path] --> B[Static parsing]
+    B --> C[Rule detection]
+    C --> D[Correlation]
+    D --> E[Step-sequence analysis]
+    E --> F[Obfuscation analysis]
+    F --> G[Metadata enrichment]
+    G --> H[Suppression]
+    H --> I[Risk scoring]
+    I --> J[Terminal / JSON / SARIF]
+```
+
+The pipeline (see `src/agentshield/scanner.py`):
+
+1. **Static parsing** — walk the target, skip VCS/build/vendor dirs, skip
+   binary and oversized files, decode UTF-8.
+2. **Rule detection** — line rules (AS-001…AS-006) and file rules
+   (AS-MCP-*, AS-007) produce findings.
+3. **Correlation** — combine primitive signals into higher-level attack chains
+   (AS-CHAIN-001/002/003).
+4. **Step-sequence analysis** — detect ordered multi-stage attacks inside a
+   single file, including multi-action line splitting.
+5. **Obfuscation analysis** — decode base64/ROT13 and flag only when the decoded
+   content participates in an execution or fetch/execute context.
+6. **Metadata enrichment** — attach MITRE ATT&CK, CWE, confidence, and matched
+   evidence.
+7. **Suppression** — apply `.agentshield.toml` allowlist after findings are
+   generated.
+8. **Risk scoring** — deterministic severity-weighted score capped at 100.
+9. **Reporting** — terminal, JSON, or SARIF 2.1.0.
+
+## Detection table
 
 | Rule | ID | Severity examples |
 |------|----|-------------------|
@@ -38,19 +83,32 @@ trusting an agent to load them.
 | Sensitive credential file access (`.env`, `~/.aws`, `~/.ssh`, credential/private-key files) | AS-006 | HIGH |
 | Encoded content executed/fetched (base64/ROT13 + execution/fetch context) | AS-007 | CRITICAL / HIGH |
 | MCP config: remote endpoints, HTTP, local/dynamic exec, secrets, broad FS, suspicious args, trust info | AS-MCP-001…010 | HIGH / MEDIUM / LOW / INFO |
+| Attack chains: secret exfiltration, download-and-execute, remote MCP execution | AS-CHAIN-001…003 | CRITICAL / HIGH |
 
-|Matched secrets are **redacted** in reports — full secrets never appear.
+Matched secrets are **redacted** in reports — full secrets never appear.
 
-Findings with an approved mapping also carry **MITRE ATT&CK** metadata
-(e.g. `AS-001 → T1552.001 Credentials In Files`), shown in terminal output,
-JSON, and SARIF. See `docs/mitre-attack-mapping.md` for the full mapping.
+## Findings
 
-Every finding also carries:
-- **CWE** IDs (where defensible) — see `docs/finding-model.md`.
-- **Confidence** (HIGH/MEDIUM/LOW) — how reliably the behavior matches the rule
-  (distinct from severity, which is how dangerous it is).
-- **Matched text** — the exact source line that triggered the rule (redacted
-  for secrets).
+Every finding carries structured metadata to help a security engineer triage
+quickly and consistently across terminal, JSON, and SARIF output.
+
+| Field | Meaning |
+|-------|---------|
+| `rule_id` | The rule that fired (e.g. `AS-001`, `AS-MCP-006`, `AS-CHAIN-002`). |
+| `severity` | **How dangerous the behavior is** (`CRITICAL`/`HIGH`/`MEDIUM`/`LOW`/`INFO`). |
+| `confidence` | **How reliably AgentShield matched the behavior** (`HIGH`/`MEDIUM`/`LOW`). |
+| `cwe` | CWE IDs (only where defensible; never fabricated). |
+| `mitre` | Approved MITRE ATT&CK mappings (only where justified). |
+| `matched_text` | The exact source line that triggered the rule (redacted for secrets). |
+| `evidence` | Rule-specific evidence (secrets are redacted). |
+| `remediation` | Recommended fix. |
+| `suppressed` | Whether the finding was suppressed by `.agentshield.toml`. |
+
+**Severity vs. confidence:** severity answers *how dangerous the behavior is*;
+confidence answers *how reliably the behavior matches the rule*. They are
+independent. A high-severity finding can be low-confidence, and vice versa.
+
+See `docs/finding-model.md` for the full field reference and the CWE mapping.
 
 ## MCP security analysis
 
@@ -77,36 +135,6 @@ MCP-specific rules (IDs `AS-MCP-001` … `AS-MCP-010`):
 > Remote endpoints are flagged MEDIUM with context; only concrete risk signals
 > (plain HTTP, secrets passed, broad FS access, dangerous flags) raise severity.
 
-### MCP example
-
-```bash
-agentshield scan ./project/.mcp.json
-```
-
-```
-AgentShield Security Report
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Target: ./project/.mcp.json
-Risk: HIGH
-Score: 60/100
-
-MEDIUM    AS-MCP-001  Remote MCP endpoint
-          .mcp.json:3
-          MCP server 'remote' connects to a remote endpoint. ...
-          Evidence: Remote endpoint: https://api.example.com/mcp
-
-HIGH      AS-MCP-002  HTTP endpoint without HTTPS
-          .mcp.json:3
-          MCP server 'http_server' uses plain HTTP, which transmits data unencrypted.
-          Evidence: Plain HTTP endpoint: http://api.example.com/mcp
-
-HIGH      AS-MCP-006  Secret passed to MCP server
-          .mcp.json:3
-          MCP server 'filesystem' receives 'API_KEY', which looks like a secret.
-          Evidence: Secret-like env var: API_KEY
-```
-
 MCP scanning is **fully static**: AgentShield never executes MCP commands,
 never starts MCP servers, never connects to endpoints, never downloads
 packages, and never resolves or contacts remote URLs.
@@ -127,37 +155,20 @@ Requires Python 3.9+.
 ```bash
 agentshield scan ./path/to/skill
 agentshield scan ./path/to/skill --format json
+agentshield scan ./path/to/skill --format sarif > report.sarif
 ```
 
-### Example output
+### Exit codes (CI-friendly)
 
-```
-AgentShield Security Report
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- `0` — no HIGH/CRITICAL findings
+- `1` — at least one HIGH finding
+- `2` — at least one CRITICAL finding
 
-Target: ./example-skill
-Risk: HIGH
-Score: 72/100
+The failure threshold is configurable with `--fail-on`:
 
-CRITICAL  AS-001  Hardcoded secret
-          example/SKILL.md:42
-          API credential detected
-          Evidence: sk-proj-********
-
-HIGH      AS-002  Remote command execution
-          scripts/install.py:18
-          Remote content is downloaded and executed
-
-MEDIUM    AS-003  External network access
-          scripts/main.py:31
-          HTTP request detected
-
-Summary
--------
-Critical: 1
-High:     1
-Medium:   0
-Low:      0
+```bash
+agentshield scan ./path --fail-on CRITICAL   # only fail on critical
+agentshield scan ./path --fail-on MEDIUM    # fail on medium or higher
 ```
 
 ### JSON output
@@ -179,40 +190,10 @@ agentshield scan ./path --format json
 ### SARIF output
 
 AgentShield emits **SARIF 2.1.0** for compatibility with GitHub Code Scanning
-and other SARIF-compatible security tooling:
-
-```bash
-agentshield scan ./path --format sarif > agentshield-report.sarif
-```
-
-SARIF mapping:
-
-| AgentShield | SARIF |
-|-------------|-------|
-| `rule_id` | `rule.id` / `result.ruleId` |
-| `title` | `rule.name` / `result.message` |
-| `description` | `rule.shortDescription` / `rule.fullDescription` |
-| `severity` | `result.level` (CRITICAL/HIGH→`error`, MEDIUM→`warning`, LOW/INFO→`note`) |
-| `file` | `artifactLocation.uri` |
-| `line` | `region.startLine` |
-| `remediation` | `rule.help` |
-
-Suppressed findings are preserved via SARIF's `suppressions` array — they are
-never silently turned into clean results. Secrets remain redacted. SARIF
-generation is fully static (no network requests, no code execution).
-
-### Exit codes (CI-friendly)
-
-- `0` — no HIGH/CRITICAL findings
-- `1` — at least one HIGH finding
-- `2` — at least one CRITICAL finding
-
-The failure threshold is configurable with `--fail-on`:
-
-```bash
-agentshield scan ./path --fail-on CRITICAL   # only fail on critical
-agentshield scan ./path --fail-on MEDIUM    # fail on medium or higher
-```
+and other SARIF-compatible security tooling. SARIF generation is fully static
+(no network requests, no code execution). Suppressed findings are preserved via
+SARIF's `suppressions` array — they are never silently turned into clean
+results. Secrets remain redacted.
 
 ## Suppression / allowlist
 
@@ -232,34 +213,59 @@ rules = ["AS-MCP-010"]            # ignore specific rule IDs
 - Terminal output shows `[SUPPRESSED]` lines; JSON output includes
   `"suppressed": true` and a `"suppressed"` count in the summary.
 - Suppression is **never silent** — it is always visible in the report.
-- Suppression only affects matching findings; unrelated findings are untouched.
+
+## Attack Lab
+
+AgentShield ships an internal adversarial corpus (`tests/fixtures/attacks/`)
+and an evaluator (`agentshield attack-lab`) that measures detection on that
+corpus.
+
+**On the current 95-case internal Attack Lab corpus:**
+
+| Metric | Value |
+|--------|-------|
+| Total cases | 95 |
+| Detected | 86 |
+| Partially detected | 7 |
+| Missed | 2 |
+| False positives | 0 |
+| Detection rate | 90.5% |
+
+> This figure is **only** for the current 95-case internal Attack Lab corpus. It
+> is **not** a measure of real-world detection accuracy. Real skills are far
+> more varied, and the corpus does not cover every attack pattern. A clean scan
+> does **not** guarantee a resource is safe.
+
+The Attack Lab is a regression harness: every future scanner change must keep
+previously detected cases detected and avoid new false positives. See
+`docs/attack-lab.md` and `docs/attack-lab-v2.md`.
 
 ## GitHub Action
 
-AgentShield ships a GitHub Action workflow that scans a repository on every
-push and pull request. See `.github/workflows/agentshield.yml`.
-
-To enable it in your repository, copy the workflow file into your repo:
-
-```bash
-mkdir -p .github/workflows
-cp agentshield/.github/workflows/agentshield.yml .github/workflows/
-```
+AgentShield ships a GitHub Action workflow that runs on every push and pull
+request. See `.github/workflows/agentshield.yml`.
 
 The workflow has two jobs:
 
-**`test`** — installs the project with dev dependencies (`pip install ".[dev]"`)
-and runs the full test suite (`pytest -q`).
+**`test`** — installs the project with dev dependencies (`pip install -e ".[dev]"`)
+and runs the full test suite (`pytest -q`), including the Attack Lab regression
+tests.
 
 **`scan`** — installs the project (`pip install .`), scans **production source
 only** (`src/`), uploads the JSON report as a `agentshield-report` artifact and
 the SARIF report to **GitHub Code Scanning**, and fails on HIGH/CRITICAL
 findings in `src/`.
 
+**Why the scan targets `src/` and not `tests/`:** the `tests/` directory
+contains intentionally malicious Attack Lab fixtures. Scanning those fixtures
+would produce self-referential findings — the scanner flagging its own test
+corpus. This is **not** a reason to weaken scanner rules; it is a deliberate
+choice to scan only production code in CI.
+
 The scan uses the repository's `.agentshield.toml` suppression config so the
 scanner does not flag its own rule patterns (self-referential findings in the
-rule modules). The Attack Lab fixtures under `tests/` are intentionally **not**
-scanned — they are the adversarial corpus, not production code.
+rule modules, e.g. evidence strings like `curl | bash` in `mitre.py`). This is
+a config change only — no scanner logic is modified.
 
 The workflow:
 
@@ -309,24 +315,35 @@ derived from the score:
 - **Static analysis only** — no runtime behavior, no network calls during scan.
 - **Heuristic, not exhaustive** — will miss some attacks and may flag benign code.
 - **Line-based** — multi-line constructs are not fully analyzed.
-- **MCP config is parsed structurally** (JSON/YAML), but other formats are matched on raw text.
-- **No MCP server manifest parsing** beyond the config file itself.
-- **No allowlist/ignore configuration** yet.
+- **Limited cross-file / data-flow analysis** — step-sequence analysis is
+  intra-file only; there is no taint tracking or variable/function analysis.
+- **No runtime execution analysis** — dynamic code execution and malicious MCP
+  server runtime behavior are out of scope.
+- **MCP config is parsed structurally** (JSON/YAML); MCP server manifests and
+  tool schemas are not fully analyzed.
+- **Obfuscation decoding covers only base64/ROT13** with execution/fetch
+  context; arbitrary encodings are not decoded.
 
 ## Roadmap
 
-- [ ] MCP server manifest (`mcp_servers`) analysis
-- [ ] Semantic parsing for YAML/JSON/TOML
-- [ ] Allowlist / ignore rules
-- [ ] SARIF output for CI integration
-- [ ] Multi-line and cross-file analysis
-- [ ] More secret formats and entropy-based detection
-- [ ] Plugin architecture for custom rules
+Prioritized technical work:
+
+- [ ] Stronger data-flow / semantic analysis (multi-line, cross-file).
+- [ ] MCP server manifest and tool-schema analysis.
+- [ ] Additional Attack Lab coverage (more attack classes, more benign lookalikes).
+- [ ] Regression testing and CI hardening.
+- [ ] Richer language support (more shell, PowerShell, and config formats).
+- [ ] Plugin / custom rule architecture.
+
+Future product ideas (not yet committed): a web dashboard, registry/repository
+scanning, and runtime analysis. These are explicitly **not** part of the current
+MVP.
 
 ## Development
 
 ```bash
 .venv/Scripts/python -m pytest -q
+.venv/Scripts/python -m agentshield.cli attack-lab
 ```
 
 ## License

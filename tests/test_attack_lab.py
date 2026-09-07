@@ -240,3 +240,95 @@ def test_benign_clean_detected():
 
     case = _case(is_benign=True)
     assert _classify(case, [_finding("AS-004", "LOW")]) == DETECTED
+
+
+# --- Attack Lab regression baseline ----------------------------------------
+#
+# This is an explicit expected baseline for the current 95-case corpus. It
+# guards against regressions: every future scanner change must keep previously
+# detected cases detected and avoid new false positives. If a case is
+# intentionally PARTIAL or MISSED, that expectation is preserved here unless
+# there is a deliberate, reviewed detection improvement.
+
+EXPECTED_TOTAL = 95
+EXPECTED_FALSE_POSITIVES = 0
+EXPECTED_DETECTED = 86
+EXPECTED_PARTIALLY_DETECTED = 7
+EXPECTED_MISSED = 2
+
+# Per-case expected classifications. Keyed by (category, name).
+# These are the current verified classifications; update deliberately when a
+# detection improvement is made and reviewed.
+EXPECTED_CASE_RESULTS = {
+    # v1 categories
+    ("prompt-injection", "override-instructions"): DETECTED,
+    ("prompt-injection", "disable-security"): DETECTED,
+    ("prompt-injection", "exfiltrate-files"): DETECTED,
+    ("prompt-injection", "benign"): DETECTED,
+    ("shell-execution", "os-system-var"): DETECTED,
+    ("shell-execution", "subprocess-shell"): DETECTED,
+    ("shell-execution", "eval-var"): DETECTED,
+    ("shell-execution", "benign"): DETECTED,
+    ("remote-download", "curl-pipe-bash"): DETECTED,
+    ("remote-download", "wget-pipe-sh"): DETECTED,
+    ("remote-download", "benign"): DETECTED,
+    ("encoded-obfuscation", "base64-exec"): DETECTED,
+    ("encoded-obfuscation", "rot13-exec"): PARTIALLY_DETECTED,
+    ("encoded-obfuscation", "benign"): DETECTED,
+    ("filesystem-access", "broad-fs"): PARTIALLY_DETECTED,
+    ("filesystem-access", "benign"): DETECTED,
+    ("mcp-attacks", "secrets-env"): DETECTED,
+    ("mcp-attacks", "remote-exec"): DETECTED,
+    ("mcp-attacks", "broad-fs-secrets"): DETECTED,
+    ("mcp-attacks", "benign"): DETECTED,
+    ("multi-stage", "data-sync"): DETECTED,
+    ("multi-stage", "download-run"): DETECTED,
+    ("multi-stage", "benign"): DETECTED,
+    ("secret-exfiltration", "env-dump"): DETECTED,
+    ("secret-exfiltration", "read-credentials"): DETECTED,
+    ("secret-exfiltration", "reveal-secrets"): DETECTED,
+    ("secret-exfiltration", "benign"): DETECTED,
+}
+
+
+def test_attack_lab_regression_total():
+    """The corpus size must not regress."""
+    lab = run_attack_lab()
+    s = lab.summary()
+    assert s["total"] == EXPECTED_TOTAL, f"corpus size changed: {s['total']} != {EXPECTED_TOTAL}"
+
+
+def test_attack_lab_regression_no_false_positives():
+    """No unexpected false positives."""
+    lab = run_attack_lab()
+    s = lab.summary()
+    assert s["false_positives"] == EXPECTED_FALSE_POSITIVES, (
+        f"false positives changed: {s['false_positives']} != {EXPECTED_FALSE_POSITIVES}"
+    )
+
+
+def test_attack_lab_regression_counts():
+    """The overall classification counts must match the expected baseline."""
+    lab = run_attack_lab()
+    s = lab.summary()
+    assert s["detected"] == EXPECTED_DETECTED, f"detected changed: {s['detected']} != {EXPECTED_DETECTED}"
+    assert s["partially_detected"] == EXPECTED_PARTIALLY_DETECTED, (
+        f"partially detected changed: {s['partially_detected']} != {EXPECTED_PARTIALLY_DETECTED}"
+    )
+    assert s["missed"] == EXPECTED_MISSED, f"missed changed: {s['missed']} != {EXPECTED_MISSED}"
+
+
+def test_attack_lab_regression_per_case():
+    """Every tracked case must keep its expected classification.
+
+    This is the strongest regression guard: it catches a case silently
+    regressing from DETECTED to PARTIAL/MISSED, or a benign case becoming a
+    false positive. Cases not in the explicit map are still validated for a
+    valid classification bucket by test_attack_lab_classifications_are_valid.
+    """
+    lab = run_attack_lab()
+    by_key = {(c["category"], c["name"]): c["result"] for c in lab.cases}
+    for key, expected in EXPECTED_CASE_RESULTS.items():
+        assert key in by_key, f"case {key} not found in lab results"
+        actual = by_key[key]
+        assert actual == expected, f"case {key} regressed: {actual} != {expected}"

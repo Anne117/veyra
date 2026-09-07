@@ -28,6 +28,8 @@ jobs:
 
       - name: Run test suite
         run: |
+          # Runs the full suite, including the Attack Lab regression tests
+          # (tests/test_attack_lab.py) that guard the 95-case corpus baseline.
           pytest -q
 
   scan:
