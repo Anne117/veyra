@@ -1,4 +1,4 @@
-# AgentShield
+# 🛡️ AgentShield
 
 **Security scanner for AI agent Skills and MCP resources.**
 
@@ -15,7 +15,7 @@ credential access, and obfuscated payloads.
 
 [![CI](https://github.com/Anne117/agentshield/actions/workflows/agentshield.yml/badge.svg)](https://github.com/Anne117/agentshield/actions/workflows/agentshield.yml)
 
-## Why AgentShield
+## 🎯 Why AgentShield
 
 AI agents increasingly load third-party skills and configuration that instruct
 them to take actions. A malicious or compromised skill can:
@@ -34,7 +34,7 @@ them to take actions. A malicious or compromised skill can:
 AgentShield scans these resources statically so you can review them before
 trusting an agent to load them.
 
-## How it works
+## ⚙️ How it works
 
 AgentShield is a deterministic, static analysis pipeline. It never executes
 scanned Skills or MCP servers and never makes network requests during a scan.
@@ -71,7 +71,7 @@ The pipeline (see `src/agentshield/scanner.py`):
 8. **Risk scoring** — deterministic severity-weighted score capped at 100.
 9. **Reporting** — terminal, JSON, or SARIF 2.1.0.
 
-## Detection table
+## 🧩 Detection table
 
 | Rule | ID | Severity examples |
 |------|----|-------------------|
@@ -87,7 +87,7 @@ The pipeline (see `src/agentshield/scanner.py`):
 
 Matched secrets are **redacted** in reports — full secrets never appear.
 
-## Findings
+## 📋 Findings
 
 Every finding carries structured metadata to help a security engineer triage
 quickly and consistently across terminal, JSON, and SARIF output.
@@ -110,7 +110,7 @@ independent. A high-severity finding can be low-confidence, and vice versa.
 
 See `docs/finding-model.md` for the full field reference and the CWE mapping.
 
-## MCP security analysis
+## 🔌 MCP security analysis
 
 AgentShield scans MCP (Model Context Protocol) server configuration files for
 security issues. It supports `.mcp.json`, `mcp.json`, `mcp_servers.json`, and
@@ -139,7 +139,7 @@ MCP scanning is **fully static**: AgentShield never executes MCP commands,
 never starts MCP servers, never connects to endpoints, never downloads
 packages, and never resolves or contacts remote URLs.
 
-## Installation
+## 📦 Installation
 
 ```bash
 # from the project root
@@ -150,7 +150,7 @@ python -m venv .venv
 
 Requires Python 3.9+.
 
-## Usage
+## 🚀 Usage
 
 ```bash
 agentshield scan ./path/to/skill
@@ -195,7 +195,7 @@ and other SARIF-compatible security tooling. SARIF generation is fully static
 SARIF's `suppressions` array — they are never silently turned into clean
 results. Secrets remain redacted.
 
-## Suppression / allowlist
+## 🚫 Suppression / allowlist
 
 You can suppress known-safe findings with a project configuration file,
 `.agentshield.toml`:
@@ -214,7 +214,7 @@ rules = ["AS-MCP-010"]            # ignore specific rule IDs
   `"suppressed": true` and a `"suppressed"` count in the summary.
 - Suppression is **never silent** — it is always visible in the report.
 
-## Attack Lab
+## 🧪 Attack Lab
 
 AgentShield ships an internal adversarial corpus (`tests/fixtures/attacks/`)
 and an evaluator (`agentshield attack-lab`) that measures detection on that
@@ -240,7 +240,7 @@ The Attack Lab is a regression harness: every future scanner change must keep
 previously detected cases detected and avoid new false positives. See
 `docs/attack-lab.md` and `docs/attack-lab-v2.md`.
 
-## GitHub Action
+## 🤖 GitHub Action
 
 AgentShield ships a GitHub Action workflow that runs on every push and pull
 request. See `.github/workflows/agentshield.yml`.
@@ -286,7 +286,7 @@ The workflow:
 The workflow requests the `security-events: write` permission, which is
 required to upload SARIF to Code Scanning.
 
-## Risk score methodology
+## 📊 Risk score methodology
 
 The overall score is a **transparent, deterministic MVP heuristic** — not a
 proven security standard. Each finding contributes a fixed weight by severity:
@@ -310,7 +310,7 @@ derived from the score:
 | 5–24   | LOW |
 | 0–4    | SAFE |
 
-## Current limitations
+## ⚠️ Current limitations
 
 - **Static analysis only** — no runtime behavior, no network calls during scan.
 - **Heuristic, not exhaustive** — will miss some attacks and may flag benign code.
@@ -324,7 +324,7 @@ derived from the score:
 - **Obfuscation decoding covers only base64/ROT13** with execution/fetch
   context; arbitrary encodings are not decoded.
 
-## Roadmap
+## 🗺️ Roadmap
 
 Prioritized technical work:
 
@@ -339,13 +339,13 @@ Future product ideas (not yet committed): a web dashboard, registry/repository
 scanning, and runtime analysis. These are explicitly **not** part of the current
 MVP.
 
-## Development
+## 🛠️ Development
 
 ```bash
 .venv/Scripts/python -m pytest -q
 .venv/Scripts/python -m agentshield.cli attack-lab
 ```
 
-## License
+## 📄 License
 
 MIT — see [LICENSE](LICENSE).
