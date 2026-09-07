@@ -171,7 +171,9 @@ def _build_attack_paths(findings: List[Finding], file_texts: List[tuple]) -> Lis
                     actions_by_component.setdefault(key, []).append(action)
 
     all_paths = []
-    for key in set(findings_by_component) | set(actions_by_component):
+    # Deterministic iteration order across components (set union otherwise
+    # yields nondeterministic ordering on different runs/hash seeds).
+    for key in sorted(set(findings_by_component) | set(actions_by_component)):
         comp_findings = findings_by_component.get(key, [])
         comp_actions = actions_by_component.get(key, [])
 
