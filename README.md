@@ -233,12 +233,19 @@ as a proven path.
 
 Each path is classified into explicit security semantics:
 
-- `SECRET_EXFILTRATION` — a secret flows to an external endpoint.
-- `DATA_EXFILTRATION` — sensitive data flows to an external endpoint.
-- `SECRET_TO_EXECUTION` — a secret reaches an execution action.
-- `DATA_TO_EXECUTION` — sensitive data reaches an execution action.
-- `UNKNOWN` — the path does not satisfy any proven pattern (assigned only when
-  no classification can be defensibly applied).
+- `SECRET_EXFILTRATION` — a secret flows to an external endpoint (proven by
+  a contiguous `READS → [FLOWS_TO] → SENDS_TO` object lineage).
+- `DATA_EXFILTRATION` — sensitive data flows to an external endpoint (same
+  lineage requirement).
+- `CORRELATED_SECRET_EXECUTION` — a secret is read by the skill and the same
+  skill executes an action. This is a **correlation**, not a proven
+  secret→action flow; it is never described as data reaching the action.
+- `UNKNOWN` — the path does not satisfy any proven pattern.
+
+Exfiltration classification is conservative: the asset must be connected to
+the sent object by an actual contiguous edge sequence (READS → FLOWS_TO*
+→ SENDS_TO). A `SENDS_TO` that does not originate from the asset lineage, or
+`USES`/`PRODUCES` edges, never produce an exfiltration type.
 
 A path exposes its `attack_type`, `entry_node`, `asset_node`, `sink_node`, and a
 deterministic `explanation`. The classifier never fabricates an asset or sink

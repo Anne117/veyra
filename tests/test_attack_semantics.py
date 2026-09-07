@@ -53,28 +53,115 @@ def test_data_exfiltration():
     assert p.explanation == "Sensitive data flows to an external endpoint."
 
 
-def test_secret_to_execution():
-    """Skill --EXECUTES--> Action with associated Secret read => SECRET_TO_EXECUTION."""
+def test_secret_with_execution_is_correlation():
+    """Skill secret-read + EXECUTES => CORRELATED_SECRET_EXECUTION (NOT proven flow).
+
+    The walk is SKILL --EXECUTES--> ACTION; the secret read is an associated
+    (correlated) edge. This must be labelled a correlation, never a proven
+    secret->action flow.
+    """
     p = _mk_path(nodes=["SKILL:skill", "ACTION:run"],
                  edges=[("SKILL:skill", "ACTION:run", "EXECUTES")],
                  associated_edges=[("SKILL:skill", "SECRET:token", "READS")])
     classify_path(p)
-    assert p.attack_type == AttackType.SECRET_TO_EXECUTION
+    assert p.attack_type == AttackType.CORRELATED_SECRET_EXECUTION
     assert p.asset_node == "SECRET:token"
     assert p.sink_node == "ACTION:run"
-    assert p.explanation == "A secret reaches an execution action."
+    assert "reaches an execution action" not in p.explanation
+    assert p.explanation == "A secret is read by the skill and the same skill executes an action."
 
 
-def test_data_to_execution():
-    """Skill --EXECUTES--> Action with associated Data read => DATA_TO_EXECUTION."""
+def test_execution_correlation_not_proven_secret_flow():
+    """The correlated path must NOT be described as secret reaching the action."""
+    p = _mk_path(nodes=["SKILL:skill", "ACTION:run"],
+                 edges=[("SKILL:skill", "ACTION:run", "EXECUTES")],
+                 associated_edges=[("SKILL:skill", "SECRET:token", "READS")])
+    classify_path(p)
+    # The walk is only SKILL -> ACTION; SECRET is in associated_edges, not nodes.
+    assert p.attack_type == AttackType.CORRELATED_SECRET_EXECUTION
+    assert "SECRET:token" not in p.nodes
+    # The explanation must clearly state correlation, not a flow into the action.
+    assert "same skill executes an action" in p.explanation
+    assert p.is_contiguous  # walk SKILL -> ACTION is contiguous
+
+
+def test_data_with_execution_has_no_proven_type():
+    """Data + execution correlation does not prove data->action flow, so UNKNOWN."""
     p = _mk_path(nodes=["SKILL:skill", "ACTION:run"],
                  edges=[("SKILL:skill", "ACTION:run", "EXECUTES")],
                  associated_edges=[("SKILL:skill", "DATA:report", "READS")])
     classify_path(p)
-    assert p.attack_type == AttackType.DATA_TO_EXECUTION
-    assert p.asset_node == "DATA:report"
-    assert p.sink_node == "ACTION:run"
-    assert p.explanation == "Sensitive data reaches an execution action."
+    # No correlated data+exec type exists; the associated DATA read is not a
+    # proven flow into the action.
+    assert p.attack_type == AttackType.UNKNOWN
+    assert p.asset_node == ""
+
+
+def test_exfiltration_requires_lineage_not_loose_edges():
+    """A misaligned SENDS_TO (from DATA_C, not the asset lineage) must not classify.
+
+    SKILL --READS--> SECRET_A
+    SECRET_A --FLOWS_TO--> DATA_B
+    DATA_C --SENDS_TO--> ENDPOINT
+    """
+    p = _mk_path(
+        nodes=["SKILL:skill", "SECRET:A", "DATA:B", "DATA:C", "ENDPOINT:https://evil.com"],
+        edges=[
+            ("SKILL:skill", "SECRET:A", "READS"),
+            ("SECRET:A", "DATA:B", "FLOWS_TO"),
+            ("DATA:B", "DATA:C", "FLOWS_TO"),   # A->B->C lineage is complete
+            ("DATA:C", "ENDPOINT:https://evil.com", "SENDS_TO"),
+        ],
+    )
+    classify_path(p)
+    # This shape is legitimate: SECRET_A -> DATA_B -> DATA_C -> ENDPOINT, all
+    # connected by FLOWS_TO then SENDS_TO. Asset = SECRET:A (first SECRET/DATA).
+    assert p.attack_type == AttackType.SECRET_EXFILTRATION
+    assert p.asset_node == "SECRET:A"
+    assert p.sink_node == "ENDPOINT:https://evil.com"
+
+
+def test_exfiltration_rejects_asset_without_sends_lineage():
+    """SECRET_A read, but ENDPOINT SENDS_TO comes from a different, disconnected DATA.
+
+    The asset lineage (SECRET_A via FLOWS_TO) must terminate at the object that
+    is actually SENDS_TO. If SENDS_TO originates from an unrelated node, the
+    classifier must NOT claim SECRET_A reaches the endpoint.
+    """
+    # Path where DATA:C is the SENDS_TO source but is NOT reachable from SECRET_A
+    # via the walk (there's a non-FLOWS_TO gap). Here SECRET_A FLOWS_TO DATA_B,
+    # but DATA_C is a fresh node; the walk breaks continuity.
+    p = _mk_path(
+        nodes=["SKILL:skill", "SECRET:A", "DATA:B", "DATA:C", "ENDPOINT:https://evil.com"],
+        edges=[
+            ("SKILL:skill", "SECRET:A", "READS"),
+            ("SECRET:A", "DATA:B", "FLOWS_TO"),
+            ("DATA:C", "ENDPOINT:https://evil.com", "SENDS_TO"),  # not from DATA_B
+        ],
+    )
+    # This path is NOT contiguous (edges don't form a walk), so classification
+    # must not fabricate a lineage from SECRET_A to the endpoint.
+    classify_path(p)
+    assert p.attack_type == AttackType.UNKNOWN
+    assert p.asset_node == ""
+    assert p.sink_node == ""
+
+
+def test_exfiltration_rejects_nonlineage_send():
+    """A SENDS_TO that does NOT originate from the asset lineage is UNKNOWN."""
+    # Contiguous walk but the intermediate edge is PRODUCES, not FLOWS_TO, from
+    # the asset — so the asset is not proven to flow into the sent object.
+    p = _mk_path(
+        nodes=["SKILL:skill", "SECRET:A", "DATA:B", "ENDPOINT:https://evil.com"],
+        edges=[
+            ("SKILL:skill", "SECRET:A", "READS"),
+            ("SECRET:A", "DATA:B", "PRODUCES"),     # not FLOWS_TO
+            ("DATA:B", "ENDPOINT:https://evil.com", "SENDS_TO"),
+        ],
+    )
+    classify_path(p)
+    assert p.attack_type == AttackType.UNKNOWN
+    assert p.asset_node == ""
 
 
 # --- Negative classifier cases ----------------------------------------------

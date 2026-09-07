@@ -60,8 +60,7 @@ _CONF_RANK = {Confidence.HIGH.value: 2, Confidence.MEDIUM.value: 1, Confidence.L
 _EXPLANATIONS = {
     "DATA_EXFILTRATION": "Sensitive data flows to an external endpoint.",
     "SECRET_EXFILTRATION": "A secret flows to an external endpoint.",
-    "SECRET_TO_EXECUTION": "A secret reaches an execution action.",
-    "DATA_TO_EXECUTION": "Sensitive data reaches an execution action.",
+    "CORRELATED_SECRET_EXECUTION": "A secret is read by the skill and the same skill executes an action.",
 }
 
 
@@ -70,8 +69,11 @@ class AttackType(str, Enum):
     UNKNOWN = "UNKNOWN"
     DATA_EXFILTRATION = "DATA_EXFILTRATION"
     SECRET_EXFILTRATION = "SECRET_EXFILTRATION"
-    SECRET_TO_EXECUTION = "SECRET_TO_EXECUTION"
-    DATA_TO_EXECUTION = "DATA_TO_EXECUTION"
+    CORRELATED_SECRET_EXECUTION = "CORRELATED_SECRET_EXECUTION"
+
+    # SECRET_TO_EXECUTION / DATA_TO_EXECUTION are intentionally NOT defined:
+    # the current architecture only represents secret/data + execution as a
+    # shared-skill correlation, never as a proven contiguous secret->action flow.
 
 
 def _node_kind(node_id: str) -> Optional[str]:
@@ -84,10 +86,20 @@ def _node_kind(node_id: str) -> Optional[str]:
 def classify_path(path: "AttackPath") -> "AttackPath":
     """Deterministically classify an AttackPath into explicit security semantics.
 
-    Classification is conservative: it only assigns a type when the actual
-    (already-contiguous) path structure AND its edges prove the relationship.
-    It never fabricates an asset/sink not present among the path's real nodes,
-    and never treats USES/PRODUCES as exfiltration or data flow.
+    Classification is conservative: a type is assigned only when the actual
+    (already-contiguous) edge SEQUENCE proves the relationship.
+
+    Exfiltration requires object lineage:
+        SKILL --READS--> ASSET
+        ASSET --FLOWS_TO--> ... --FLOWS_TO--> DATA
+        DATA --SENDS_TO--> ENDPOINT
+    or the direct form:
+        SKILL --READS--> ASSET
+        ASSET --SENDS_TO--> ENDPOINT
+
+    A shared-skill correlation (SKILL --EXECUTES--> ACTION plus an associated
+    SKILL --READS--> SECRET) is classified CORRELATED_SECRET_EXECUTION and is
+    NEVER described as proven secret->action flow.
     """
     nodes = path.nodes
     if not nodes or not path.is_contiguous:
@@ -98,40 +110,65 @@ def classify_path(path: "AttackPath") -> "AttackPath":
     sink = nodes[-1]
     sink_kind = _node_kind(sink)
 
-    # Edge types actually present in the walk.
-    edge_types = [e[2] for e in path.edges]
+    # --- Exfiltration: prove object lineage across the contiguous walk ----
+    if sink_kind == "ENDPOINT":
+        result = _classify_exfiltration(path)
+        if result is not None:
+            path.attack_type, path.asset_node = result
+            path.sink_node = sink
 
-    # --- Exfiltration: a SENDS_TO edge to an ENDPOINT from the asset lineage ---
-    if sink_kind == "ENDPOINT" and "SENDS_TO" in edge_types:
-        # The asset is the first SECRET/DATA in the node walk.
-        origin = next((n for n in nodes if _node_kind(n) in ("SECRET", "DATA")), None)
-        if origin:
-            kind = _node_kind(origin)
-            if kind == "SECRET":
-                path.attack_type = AttackType.SECRET_EXFILTRATION
-            elif kind == "DATA":
-                path.attack_type = AttackType.DATA_EXFILTRATION
-            if path.attack_type is not AttackType.UNKNOWN:
-                path.asset_node = origin
-                path.sink_node = sink
-
-    # --- Execution: EXECUTES edge to an ACTION sink ---
-    elif sink_kind == "ACTION" and "EXECUTES" in edge_types:
+    # --- Execution: shared-skill correlation (NOT a proven asset->action flow)
+    elif sink_kind == "ACTION":
+        # The walk is SKILL --EXECUTES--> ACTION. A secret read is only an
+        # associated (correlated) edge anchored on the same skill — it never
+        # proves the secret flowed INTO the action.
         for (src, tgt, etype) in path.associated_edges:
-            if etype == "READS" and _node_kind(tgt) in ("SECRET", "DATA"):
-                asset_kind = _node_kind(tgt)
-                if asset_kind == "SECRET":
-                    path.attack_type = AttackType.SECRET_TO_EXECUTION
-                elif asset_kind == "DATA":
-                    path.attack_type = AttackType.DATA_TO_EXECUTION
-                if path.attack_type is not AttackType.UNKNOWN:
-                    path.asset_node = tgt
-                    path.sink_node = sink
+            if etype == "READS" and _node_kind(tgt) == "SECRET":
+                path.attack_type = AttackType.CORRELATED_SECRET_EXECUTION
+                path.asset_node = tgt
+                path.sink_node = sink
                 break
 
     if path.attack_type is not AttackType.UNKNOWN:
         path.explanation = _EXPLANATIONS[path.attack_type.value]
     return path
+
+
+def _classify_exfiltration(path: "AttackPath"):
+    """Return (AttackType, asset_node) for a proven exfiltration lineage, or None.
+
+    Verifies the actual contiguous edge sequence, NOT a loose "asset present +
+    SENDS_TO present" test. The asset is the first SECRET/DATA in the walk; the
+    edge into it must be READS, the edge into the ENDPOINT must be SENDS_TO
+    from the asset lineage, and every step between must be FLOWS_TO.
+    """
+    nodes = path.nodes
+    edges = path.edges
+
+    # Find the first SECRET/DATA node in the walk (the asset).
+    asset_idx = next((i for i, n in enumerate(nodes) if _node_kind(n) in ("SECRET", "DATA")), None)
+    if asset_idx is None:
+        return None
+    asset = nodes[asset_idx]
+    asset_kind = _node_kind(asset)
+
+    # The edge entering the asset (from the skill) must be READS.
+    if asset_idx < 1 or edges[asset_idx - 1][2] != "READS":
+        return None
+
+    # The terminal edge (into the ENDPOINT) must be SENDS_TO, and its source
+    # must be the last node of the asset lineage (the node before ENDPOINT).
+    if edges[-1][2] != "SENDS_TO":
+        return None
+
+    # Every edge from the asset up to (but not including) the final SENDS_TO
+    # must be a FLOWS_TO link — proving the asset flows into the sent object.
+    for idx in range(asset_idx, len(edges) - 1):
+        if edges[idx][2] != "FLOWS_TO":
+            return None
+
+    return (AttackType.SECRET_EXFILTRATION if asset_kind == "SECRET" else AttackType.DATA_EXFILTRATION,
+            asset)
 
 
 @dataclass
