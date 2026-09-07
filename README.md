@@ -83,7 +83,7 @@ The pipeline (see `src/agentshield/scanner.py`):
 | Sensitive credential file access (`.env`, `~/.aws`, `~/.ssh`, credential/private-key files) | AS-006 | HIGH |
 | Encoded content executed/fetched (base64/ROT13 + execution/fetch context) | AS-007 | CRITICAL / HIGH |
 | MCP config: remote endpoints, HTTP, local/dynamic exec, secrets, broad FS, suspicious args, trust info | AS-MCP-001…010 | HIGH / MEDIUM / LOW / INFO |
-| Attack chains: secret exfiltration, download-and-execute, remote MCP execution | AS-CHAIN-001…003 | CRITICAL / HIGH |
+| Attack chains: secret exfiltration, download-and-execute, remote MCP execution, source-to-sink exfiltration | AS-CHAIN-001…004 | CRITICAL / HIGH |
 
 Matched secrets are **redacted** in reports — full secrets never appear.
 

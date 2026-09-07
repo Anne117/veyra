@@ -252,9 +252,9 @@ def test_benign_clean_detected():
 
 EXPECTED_TOTAL = 95
 EXPECTED_FALSE_POSITIVES = 0
-EXPECTED_DETECTED = 86
+EXPECTED_DETECTED = 88
 EXPECTED_PARTIALLY_DETECTED = 7
-EXPECTED_MISSED = 2
+EXPECTED_MISSED = 0
 
 # Per-case expected classifications. Keyed by (category, name).
 # These are the current verified classifications; update deliberately when a
@@ -288,6 +288,9 @@ EXPECTED_CASE_RESULTS = {
     ("secret-exfiltration", "read-credentials"): DETECTED,
     ("secret-exfiltration", "reveal-secrets"): DETECTED,
     ("secret-exfiltration", "benign"): DETECTED,
+    # v2 categories — previously MISSED, now DETECTED via source-to-sink tracking
+    ("v2-secret-exfiltration", "read-transform-network"): DETECTED,
+    ("v2-multi-stage", "discovery-secret-network"): DETECTED,
 }
 
 
