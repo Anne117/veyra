@@ -1,6 +1,6 @@
 """Tests for AS-007 obfuscation detection."""
 
-from agentshield.rules.obfuscation import scan_obfuscation
+from veyra.rules.obfuscation import scan_obfuscation
 
 
 def _scan(text):

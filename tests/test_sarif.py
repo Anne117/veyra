@@ -3,11 +3,11 @@
 import json
 from pathlib import Path
 
-from agentshield.cli import main
-from agentshield.models import Finding, ScanResult, Severity
-from agentshield.reporters.sarif import render_sarif
-from agentshield.scanner import scan_path
-from agentshield.suppress import apply_suppression, load_config
+from veyra.cli import main
+from veyra.models import Finding, ScanResult, Severity
+from veyra.reporters.sarif import render_sarif
+from veyra.scanner import scan_path
+from veyra.suppress import apply_suppression, load_config
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPO = FIXTURES / "repo"
@@ -31,7 +31,7 @@ def test_sarif_empty_findings():
     doc = _parse_sarif(render_sarif(_result([])))
     run = doc["runs"][0]
     assert run["results"] == []
-    assert run["tool"]["driver"]["name"] == "AgentShield"
+    assert run["tool"]["driver"]["name"] == "Veyra"
 
 
 def test_sarif_clean_scan():

@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from agentshield.rules.mcp import scan_mcp_config
+from veyra.rules.mcp import scan_mcp_config
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mcp"
 

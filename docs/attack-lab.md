@@ -1,28 +1,28 @@
-# AgentShield Attack Lab
+# Veyra Attack Lab
 
-The AgentShield Attack Lab is a **local, static adversarial test corpus** that
-measures AgentShield's real security coverage against realistic attack
+The Veyra Attack Lab is a **local, static adversarial test corpus** that
+measures Veyra's real security coverage against realistic attack
 patterns targeting AI agents.
 
 > **IMPORTANT:** This is a static analysis corpus. Nothing in it is ever
-> executed. AgentShield never runs fixture code, never contacts external
+> executed. Veyra never runs fixture code, never contacts external
 > endpoints, never downloads anything, and never starts MCP servers.
 
 ## Methodology
 
 Each fixture is a small synthetic example of an attack (or a benign lookalike)
-against an AI agent. AgentShield's static scanner runs against every fixture,
+against an AI agent. Veyra's static scanner runs against every fixture,
 and the result is classified into one of four buckets:
 
 | Classification | Meaning |
 |----------------|---------|
-| `DETECTED` | AgentShield produced a HIGH/CRITICAL finding (of **any** rule, including correlation/chain findings like `AS-CHAIN-*`). |
-| `PARTIALLY_DETECTED` | AgentShield flagged the fixture but only at MEDIUM/LOW severity, or only matched some expected rules. |
-| `MISSED` | AgentShield produced no relevant finding. |
+| `DETECTED` | Veyra produced a HIGH/CRITICAL finding (of **any** rule, including correlation/chain findings like `AS-CHAIN-*`). |
+| `PARTIALLY_DETECTED` | Veyra flagged the fixture but only at MEDIUM/LOW severity, or only matched some expected rules. |
+| `MISSED` | Veyra produced no relevant finding. |
 | `FALSE_POSITIVE` | A benign lookalike produced a HIGH/CRITICAL finding. |
 
 The detection rate is `detected / total`. This is an honest measurement of
-coverage — the tests do **not** modify AgentShield rules to force passes.
+coverage — the tests do **not** modify Veyra rules to force passes.
 
 ### Evaluation methodology
 
@@ -33,7 +33,7 @@ The Attack Lab classifies each fixture as follows:
 2. **Attack fixture** — a HIGH/CRITICAL finding of **any** rule counts as
    `DETECTED`. This includes **correlation/chain findings** (`AS-CHAIN-001`,
    `AS-CHAIN-002`, `AS-CHAIN-003`) and **step-sequence findings**. If
-   AgentShield correctly identifies the malicious behavior at HIGH/CRITICAL
+   Veyra correctly identifies the malicious behavior at HIGH/CRITICAL
    severity through a chain finding, the attack is `DETECTED` even if the
    individual underlying rules did not independently trigger.
 3. **No HIGH/CRITICAL finding** — the expected rules distinguish
@@ -62,13 +62,13 @@ analysis.
 Run the lab:
 
 ```bash
-agentshield attack-lab
+veyra attack-lab
 ```
 
 Machine-readable output:
 
 ```bash
-agentshield attack-lab --format json
+veyra attack-lab --format json
 ```
 
 ### Current results (95 cases)
@@ -133,8 +133,8 @@ including chain findings — as a valid detection.
 
 ### Step-sequence analysis
 
-AgentShield includes a small, deterministic intra-file step-sequence analyzer
-(`src/agentshield/step_sequence.py`) that runs after the individual rules and
+Veyra includes a small, deterministic intra-file step-sequence analyzer
+(`src/veyra/step_sequence.py`) that runs after the individual rules and
 correlation. It classifies each line of a file into semantic step categories
 and checks for dangerous ordered sequences:
 

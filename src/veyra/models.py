@@ -1,4 +1,4 @@
-"""Data models for AgentShield findings and reports."""
+"""Data models for Veyra findings and reports."""
 
 from __future__ import annotations
 

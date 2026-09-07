@@ -1,14 +1,14 @@
 """Adversarial attack-lab tests.
 
-Runs AgentShield against every attack fixture and asserts the expected
+Runs Veyra against every attack fixture and asserts the expected
 detection classification. These tests make the detection expectations
 explicit and record misses/false-positives honestly — they do NOT modify
-AgentShield rules to force passes.
+Veyra rules to force passes.
 """
 
 from pathlib import Path
 
-from agentshield.attack_lab import (
+from veyra.attack_lab import (
     ATTACK_CASES,
     DETECTED,
     FALSE_POSITIVE,
@@ -16,7 +16,7 @@ from agentshield.attack_lab import (
     PARTIALLY_DETECTED,
     run_attack_lab,
 )
-from agentshield.scanner import scan_path
+from veyra.scanner import scan_path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "attacks"
 
@@ -139,7 +139,7 @@ def test_detection_rate_is_honest():
 def test_attack_lab_json_output():
     """The attack-lab JSON output is machine-readable."""
     import json
-    from agentshield.attack_lab import AttackLabResult
+    from veyra.attack_lab import AttackLabResult
 
     lab = run_attack_lab()
     data = lab.to_dict()
@@ -154,7 +154,7 @@ def test_attack_lab_json_output():
 # --- Evaluator methodology tests -------------------------------------------
 
 def _case(name="x", expected_rules=None, is_benign=False):
-    from agentshield.attack_lab import AttackCase
+    from veyra.attack_lab import AttackCase
 
     return AttackCase(
         name=name, category="test", path="x", expected=PARTIALLY_DETECTED,
@@ -163,7 +163,7 @@ def _case(name="x", expected_rules=None, is_benign=False):
 
 
 def _finding(rule_id, severity):
-    from agentshield.models import Finding, Severity
+    from veyra.models import Finding, Severity
 
     return Finding(
         rule_id=rule_id, severity=Severity(severity), title="t",
@@ -173,7 +173,7 @@ def _finding(rule_id, severity):
 
 def test_direct_high_rule_finding_detected():
     """A direct HIGH/CRITICAL rule finding -> DETECTED."""
-    from agentshield.attack_lab import _classify
+    from veyra.attack_lab import _classify
 
     case = _case(expected_rules=["AS-002"])
     assert _classify(case, [_finding("AS-002", "HIGH")]) == DETECTED
@@ -181,7 +181,7 @@ def test_direct_high_rule_finding_detected():
 
 def test_high_correlation_finding_detected():
     """A HIGH/CRITICAL correlation/chain finding -> DETECTED."""
-    from agentshield.attack_lab import _classify
+    from veyra.attack_lab import _classify
 
     case = _case(expected_rules=["AS-MCP-001", "AS-MCP-004"])
     # AS-CHAIN-003 at HIGH is valid detection evidence even though the
@@ -196,7 +196,7 @@ def test_high_correlation_finding_detected():
 
 def test_high_step_sequence_finding_detected():
     """A HIGH/CRITICAL step-sequence finding -> DETECTED."""
-    from agentshield.attack_lab import _classify
+    from veyra.attack_lab import _classify
 
     case = _case(expected_rules=["AS-004"])
     assert _classify(case, [_finding("AS-CHAIN-001", "CRITICAL")]) == DETECTED
@@ -204,7 +204,7 @@ def test_high_step_sequence_finding_detected():
 
 def test_only_low_info_findings_not_detected():
     """Only LOW/INFO supporting findings -> not automatically DETECTED."""
-    from agentshield.attack_lab import _classify
+    from veyra.attack_lab import _classify
 
     case = _case(expected_rules=["AS-004"])
     assert _classify(case, [_finding("AS-004", "LOW")]) == PARTIALLY_DETECTED
@@ -212,7 +212,7 @@ def test_only_low_info_findings_not_detected():
 
 def test_genuine_partial_remains_partial():
     """A MEDIUM expected-rule finding with no HIGH/CRITICAL -> PARTIAL."""
-    from agentshield.attack_lab import _classify
+    from veyra.attack_lab import _classify
 
     case = _case(expected_rules=["AS-004"])
     assert _classify(case, [_finding("AS-004", "MEDIUM")]) == PARTIALLY_DETECTED
@@ -220,7 +220,7 @@ def test_genuine_partial_remains_partial():
 
 def test_no_relevant_finding_missed():
     """No relevant finding -> MISSED."""
-    from agentshield.attack_lab import _classify
+    from veyra.attack_lab import _classify
 
     case = _case(expected_rules=["AS-004"])
     assert _classify(case, []) == MISSED
@@ -228,7 +228,7 @@ def test_no_relevant_finding_missed():
 
 def test_benign_with_high_finding_false_positive():
     """A benign lookalike with a HIGH finding -> FALSE_POSITIVE."""
-    from agentshield.attack_lab import _classify
+    from veyra.attack_lab import _classify
 
     case = _case(is_benign=True)
     assert _classify(case, [_finding("AS-004", "HIGH")]) == FALSE_POSITIVE
@@ -236,7 +236,7 @@ def test_benign_with_high_finding_false_positive():
 
 def test_benign_clean_detected():
     """A benign lookalike with no HIGH finding -> DETECTED (correctly clean)."""
-    from agentshield.attack_lab import _classify
+    from veyra.attack_lab import _classify
 
     case = _case(is_benign=True)
     assert _classify(case, [_finding("AS-004", "LOW")]) == DETECTED

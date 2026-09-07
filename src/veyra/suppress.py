@@ -1,6 +1,6 @@
-"""Suppression / allowlist system for AgentShield.
+"""Suppression / allowlist system for Veyra.
 
-Loads a project configuration file (`.agentshield.toml`) and applies
+Loads a project configuration file (`.veyra.toml`) and applies
 suppression AFTER findings are generated. Suppressed findings are marked
 with `suppressed=True` and a `suppression_reason`, so they remain
 distinguishable from findings that were never detected.
@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from agentshield.models import Finding
+from veyra.models import Finding
 
 try:
     import tomllib  # Python 3.11+
@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
     tomllib = None  # type: ignore
 
 
-CONFIG_FILENAME = ".agentshield.toml"
+CONFIG_FILENAME = ".veyra.toml"
 
 
 @dataclass
@@ -48,10 +48,10 @@ def _load_toml(path: Path) -> Optional[Dict]:
 
 
 def load_config(path: Optional[str] = None) -> SuppressionConfig:
-    """Load suppression config from a path or auto-discover `.agentshield.toml`.
+    """Load suppression config from a path or auto-discover `.veyra.toml`.
 
-    If `path` is a directory, looks for `.agentshield.toml` inside it.
-    If `path` is a file, looks for `.agentshield.toml` in its parent.
+    If `path` is a directory, looks for `.veyra.toml` inside it.
+    If `path` is a file, looks for `.veyra.toml` in its parent.
     """
     if path is None:
         return SuppressionConfig()

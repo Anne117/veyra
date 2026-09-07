@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from agentshield.rules.secrets import (
+from veyra.rules.secrets import (
     detect_anthropic_key,
     detect_aws_key,
     detect_generic_key,

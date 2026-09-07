@@ -1,4 +1,4 @@
-"""CWE (Common Weakness Enumeration) metadata for AgentShield findings.
+"""CWE (Common Weakness Enumeration) metadata for Veyra findings.
 
 Contains only mappings that are defensible from the existing rule behavior.
 Rules without a justified CWE mapping are left unmapped (empty list) — we do

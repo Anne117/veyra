@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from agentshield.mitre import mitre_for
-from agentshield.scanner import scan_path
+from veyra.mitre import mitre_for
+from veyra.scanner import scan_path
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -74,7 +74,7 @@ def test_json_serialization_preserves_mitre():
     import io
     from contextlib import redirect_stdout
 
-    from agentshield.cli import main
+    from veyra.cli import main
 
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -91,7 +91,7 @@ def test_json_no_empty_mitre():
     import io
     from contextlib import redirect_stdout
 
-    from agentshield.cli import main
+    from veyra.cli import main
 
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -106,7 +106,7 @@ def test_sarif_remains_valid_and_contains_mitre():
     import io
     from contextlib import redirect_stdout
 
-    from agentshield.cli import main
+    from veyra.cli import main
 
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -122,7 +122,7 @@ def test_sarif_remains_valid_and_contains_mitre():
 
 def test_suppression_preserves_mitre():
     """Suppressed findings must retain their MITRE metadata."""
-    from agentshield.suppress import apply_suppression, load_config
+    from veyra.suppress import apply_suppression, load_config
 
     repo = FIXTURES / "repo"
     result = scan_path(str(repo))
@@ -137,7 +137,7 @@ def test_terminal_shows_mitre():
     import io
     from contextlib import redirect_stdout
 
-    from agentshield.cli import main
+    from veyra.cli import main
 
     buf = io.StringIO()
     with redirect_stdout(buf):

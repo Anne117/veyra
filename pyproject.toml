@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentshield"
+name = "veyra"
 version = "0.1.0"
-description = "Security scanner for AI agent skills and MCP-related resources."
+description = "Security intelligence for AI agents."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "AgentShield Contributors" }]
+authors = [{ name = "Veyra Contributors" }]
 keywords = ["security", "scanner", "ai-agents", "skills", "mcp", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -21,13 +21,13 @@ classifiers = [
 ]
 
 [project.scripts]
-agentshield = "agentshield.cli:main"
+veyra = "veyra.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "PyYAML>=6.0"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentshield"]
+packages = ["src/veyra"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

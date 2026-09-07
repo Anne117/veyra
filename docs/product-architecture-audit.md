@@ -1,8 +1,8 @@
-# AgentShield Product & Architecture Audit
+# Veyra Product & Architecture Audit
 
 ## 1. Executive summary
 
-AgentShield is a **local, static-analysis CLI** that scans AI agent skills and
+Veyra is a **local, static-analysis CLI** that scans AI agent skills and
 MCP-related resources for security issues. It is a working MVP, not a SaaS
 product. It runs entirely on the user's machine, never executes scanned code,
 and never makes network requests during a scan.
@@ -20,7 +20,7 @@ and never makes network requests during a scan.
   execution/fetch context.
 - Correlation chains (AS-CHAIN-001/002/003) — cross-signal attack chains.
 - Intra-file step-sequence analysis with multi-action line splitting.
-- Suppression system (`.agentshield.toml`).
+- Suppression system (`.veyra.toml`).
 - Deterministic risk scoring (severity weights, capped at 100).
 - Reporters: terminal, JSON, SARIF 2.1.0 (validated against the schema).
 - MITRE ATT&CK metadata (5 approved public mappings).
@@ -85,7 +85,7 @@ input path
 Verified current numbers: **95 total, 86 detected, 7 partial, 2 missed, 0 FP,
 90.5%.**
 
-**What this metric proves:** AgentShield detects 86 of 95 hand-crafted synthetic
+**What this metric proves:** Veyra detects 86 of 95 hand-crafted synthetic
 fixtures at HIGH/CRITICAL severity with zero false positives on the 10 benign
 lookalikes. It demonstrates the rules generalize across the fixture variations.
 
@@ -108,12 +108,12 @@ corpus, unknown in the wild) ≠ false-negative rate (unknown).
 ## 5. CLI and developer experience audit
 
 Verified in `cli.py`:
-- **Installation:** `pip install -e ".[dev]"`; console script `agentshield`.
-- **Scan command:** `agentshield scan <path>` with `--format terminal|json|sarif`,
+- **Installation:** `pip install -e ".[dev]"`; console script `veyra`.
+- **Scan command:** `veyra scan <path>` with `--format terminal|json|sarif`,
   `--config`, `--fail-on`.
 - **Output:** readable terminal report; JSON; SARIF.
 - **Exit codes:** 0/1/2 based on `--fail-on` threshold.
-- **Suppression:** `.agentshield.toml` auto-discovered or `--config`.
+- **Suppression:** `.veyra.toml` auto-discovered or `--config`.
 - **Error handling:** `FileNotFoundError` → stderr + exit 2.
 
 **Concrete usability gaps:**
@@ -130,7 +130,7 @@ Verified in `cli.py`:
 
 ## 6. CI/CD integration audit
 
-Verified in `.github/workflows/agentshield.yml`:
+Verified in `.github/workflows/veyra.yml`:
 - **Triggers:** push + pull_request.
 - **Threshold:** fails on HIGH/CRITICAL (exit 1/2); configurable via `--fail-on`.
 - **Artifacts:** JSON uploaded; SARIF uploaded to Code Scanning.
@@ -139,7 +139,7 @@ Verified in `.github/workflows/agentshield.yml`:
   `actions/upload-artifact@v4`, `github/codeql-action/upload-sarif@v3` — all pinned.
 
 **Concrete improvements:**
-1. **`pip install agentshield` requires PyPI publication** — not yet published;
+1. **`pip install veyra` requires PyPI publication** — not yet published;
    the action would fail today. Should install from the repo (`pip install .`).
 2. **No `--fail-on` configurability via workflow input** — the threshold is
    hardcoded in the scan step; a `workflow_dispatch` input or `with:` would help.
@@ -193,7 +193,7 @@ Verified in `models.py` and reporters:
 
 ## 9. Security limitations
 
-AgentShield currently does **NOT** detect:
+Veyra currently does **NOT** detect:
 - **Semantic prompt injection** — role impersonation, hidden-in-docs, indirect
   wording (regex-only).
 - **Advanced data-flow** — no taint tracking, no variable/function analysis.
@@ -227,7 +227,7 @@ AgentShield currently does **NOT** detect:
 ## 11. Competitive/product differentiation
 
 Based only on the current implementation:
-- **AI Agent Skills focus** — AgentShield targets `SKILL.md`/`AGENTS.md`/MCP
+- **AI Agent Skills focus** — Veyra targets `SKILL.md`/`AGENTS.md`/MCP
   config, a niche most security scanners ignore.
 - **MCP security analysis** — structural parsing of MCP server configs
   (remote endpoints, dynamic exec, secrets, broad FS) is distinctive.
@@ -240,7 +240,7 @@ Based only on the current implementation:
 
 ## 12. Technical debt / risks
 
-- **Critical:** GitHub Action `pip install agentshield` fails (not on PyPI).
+- **Critical:** GitHub Action `pip install veyra` fails (not on PyPI).
 - **High:** line-based rules miss multi-line/semantic attacks; no CWE mapping.
 - **Medium:** no parallelism; evidence strings not always the matched text;
   correlation `file="<correlated>"` placeholder.

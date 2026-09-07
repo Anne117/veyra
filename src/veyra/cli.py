@@ -1,4 +1,4 @@
-"""AgentShield command-line interface."""
+"""Veyra command-line interface."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import argparse
 import json
 import sys
 
-from agentshield.attack_lab import run_attack_lab
-from agentshield.models import Severity
-from agentshield.reporters import render_json, render_sarif, render_terminal
-from agentshield.scanner import scan_path
-from agentshield.suppress import apply_suppression, load_config
+from veyra.attack_lab import run_attack_lab
+from veyra.models import Severity
+from veyra.reporters import render_json, render_sarif, render_terminal
+from veyra.scanner import scan_path
+from veyra.suppress import apply_suppression, load_config
 
 # Severity ordering for the failure threshold.
 _SEVERITY_ORDER = {
@@ -24,7 +24,7 @@ _SEVERITY_ORDER = {
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="agentshield",
+        prog="veyra",
         description="Security scanner for AI agent skills and MCP-related resources.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument(
         "--config",
         default=None,
-        help="Path to a .agentshield.toml config file (default: auto-discover).",
+        help="Path to a .veyra.toml config file (default: auto-discover).",
     )
     scan.add_argument(
         "--fail-on",
@@ -81,7 +81,7 @@ def _render_attack_lab(lab) -> str:
     """Render the attack-lab results as a readable terminal report."""
     s = lab.summary()
     lines = []
-    lines.append("AgentShield Attack Lab")
+    lines.append("Veyra Attack Lab")
     lines.append("=" * 30)
     lines.append("")
     lines.append(f"Total cases:        {s['total']}")

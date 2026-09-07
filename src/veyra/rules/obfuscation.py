@@ -21,8 +21,8 @@ import codecs
 import re
 from typing import List, Optional
 
-from agentshield.models import Finding, Severity
-from agentshield.rules import register_file_rule
+from veyra.models import Finding, Severity
+from veyra.rules import register_file_rule
 
 # --- Encoding extraction ---------------------------------------------------
 

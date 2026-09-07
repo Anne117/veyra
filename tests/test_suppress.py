@@ -3,10 +3,10 @@
 import json
 from pathlib import Path
 
-from agentshield.cli import main
-from agentshield.models import Finding, Severity
-from agentshield.scanner import scan_path
-from agentshield.suppress import (
+from veyra.cli import main
+from veyra.models import Finding, Severity
+from veyra.scanner import scan_path
+from veyra.suppress import (
     SuppressionConfig,
     apply_suppression,
     load_config,
@@ -85,7 +85,7 @@ def test_suppression_does_not_suppress_different_domain():
 def test_suppressed_findings_excluded_from_score():
     f = _finding(rule_id="AS-MCP-003", severity=Severity.MEDIUM, description="MCP server 'filesystem' ...")
     out = apply_suppression([f], SuppressionConfig(servers=["filesystem"]))
-    from agentshield.models import ScanResult
+    from veyra.models import ScanResult
 
     result = ScanResult(target="x", findings=out)
     assert result.score == 0
@@ -105,7 +105,7 @@ def test_load_config_missing_returns_empty():
 
 
 def test_repo_scan_with_suppression():
-    """Scanning the repo with its .agentshield.toml should suppress the
+    """Scanning the repo with its .veyra.toml should suppress the
     dangerous MCP server but keep the malicious SKILL.md findings."""
     result = scan_path(str(REPO))
     cfg = load_config(str(REPO))

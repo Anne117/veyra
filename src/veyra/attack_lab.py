@@ -1,8 +1,8 @@
-"""AgentShield Attack Lab.
+"""Veyra Attack Lab.
 
-A local, static adversarial test corpus that measures AgentShield's real
+A local, static adversarial test corpus that measures Veyra's real
 security coverage. Each fixture is a small synthetic attack (or benign
-lookalike) against an AI agent. The lab runs AgentShield's static scanner
+lookalike) against an AI agent. The lab runs Veyra's static scanner
 against every fixture and classifies the result.
 
 This module NEVER executes any fixture, never contacts external endpoints,
@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from agentshield.scanner import scan_path
+from veyra.scanner import scan_path
 
 # Classification of a fixture's detection result.
 DETECTED = "DETECTED"
@@ -400,9 +400,9 @@ class AttackLabResult:
 
 
 def run_attack_lab(corpus_dir: Optional[str] = None) -> AttackLabResult:
-    """Run AgentShield against every attack fixture and classify results."""
+    """Run Veyra against every attack fixture and classify results."""
     if corpus_dir is None:
-        # __file__ = <root>/src/agentshield/attack_lab.py
+        # __file__ = <root>/src/veyra/attack_lab.py
         root_dir = Path(__file__).resolve().parent.parent.parent
         corpus_dir = str(root_dir / "tests" / "fixtures" / "attacks")
     root = Path(corpus_dir)

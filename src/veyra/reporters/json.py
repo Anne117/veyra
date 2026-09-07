@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from agentshield.models import ScanResult
+from veyra.models import ScanResult
 
 
 def render_json(result: ScanResult) -> str:

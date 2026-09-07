@@ -1,4 +1,4 @@
-"""Security rules for AgentShield.
+"""Security rules for Veyra.
 
 Two kinds of rules:
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Callable, List
 
-from agentshield.models import Finding
+from veyra.models import Finding
 
 # A line rule inspects a single line and returns a finding or None.
 Rule = Callable[[str, str, int], "Finding | None"]
@@ -48,8 +48,8 @@ def register_file_rule(rule: FileRule) -> FileRule:
 
 def load_rules() -> List[Rule]:
     """Import all rule modules so their @register decorators run."""
-    from agentshield import rules as _rules  # noqa: F401
-    from agentshield.rules import (  # noqa: F401
+    from veyra import rules as _rules  # noqa: F401
+    from veyra.rules import (  # noqa: F401
         network,
         prompt_injection,
         secrets,
@@ -63,7 +63,7 @@ def load_rules() -> List[Rule]:
 
 def load_file_rules() -> List[FileRule]:
     """Import all file-rule modules so their @register_file_rule decorators run."""
-    from agentshield import rules as _rules  # noqa: F401
-    from agentshield.rules import mcp, obfuscation  # noqa: F401
+    from veyra import rules as _rules  # noqa: F401
+    from veyra.rules import mcp, obfuscation  # noqa: F401
 
     return ALL_FILE_RULES

@@ -1,6 +1,6 @@
 """Tests for shell / command execution rules."""
 
-from agentshield.rules.shell import (
+from veyra.rules.shell import (
     detect_curl_pipe_shell,
     detect_eval_exec,
     detect_js_exec,

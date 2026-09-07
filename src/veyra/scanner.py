@@ -10,12 +10,12 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from agentshield.correlation import correlate
-from agentshield.cwe import cwe_for
-from agentshield.mitre import mitre_for
-from agentshield.models import Confidence, Finding, ScanResult
-from agentshield.rules import load_file_rules, load_rules
-from agentshield.step_sequence import analyze_file
+from veyra.correlation import correlate
+from veyra.cwe import cwe_for
+from veyra.mitre import mitre_for
+from veyra.models import Confidence, Finding, ScanResult
+from veyra.rules import load_file_rules, load_rules
+from veyra.step_sequence import analyze_file
 
 # File extensions we inspect. Everything else is skipped.
 SCAN_EXTENSIONS = {

@@ -1,6 +1,6 @@
 """Tests for AS-006 sensitive credential file access."""
 
-from agentshield.rules.sensitive_paths import detect_sensitive_path_access
+from veyra.rules.sensitive_paths import detect_sensitive_path_access
 
 
 def test_env_read_detected():

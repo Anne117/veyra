@@ -1,6 +1,6 @@
-# AgentShield Finding Model
+# Veyra Finding Model
 
-Every AgentShield finding carries structured metadata to help a security
+Every Veyra finding carries structured metadata to help a security
 engineer triage quickly and consistently across terminal, JSON, and SARIF
 output.
 
@@ -16,7 +16,7 @@ output.
 | `line` | int | Source line number (when available). |
 | `evidence` | string | Rule-specific evidence (secrets are redacted). |
 | `remediation` | string | Recommended fix. |
-| `suppressed` | bool | Whether the finding was suppressed by `.agentshield.toml`. |
+| `suppressed` | bool | Whether the finding was suppressed by `.veyra.toml`. |
 | `suppression_reason` | string | Why it was suppressed. |
 | `mitre` | list | Approved MITRE ATT&CK mappings (only where justified). |
 | `cwe` | list | CWE IDs (only where defensible; never fabricated). |

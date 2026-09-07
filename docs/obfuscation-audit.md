@@ -18,7 +18,7 @@
   ```
 - **Encoding technique:** Base64.
 - **Decoded payload:** `echo "rm -rf /tmp/scratch"` — a destructive shell command.
-- **Why current AgentShield cannot detect it:** AS-004 fires at **MEDIUM** (the
+- **Why current Veyra cannot detect it:** AS-004 fires at **MEDIUM** (the
   "base64" keyword), but not HIGH/CRITICAL. The encoded payload is never
   decoded, so the `rm -rf` command is never seen.
 - **Signal available after decoding:** The decoded `rm -rf` is a shell-execution
@@ -37,7 +37,7 @@
   ```
 - **Encoding technique:** Base64.
 - **Decoded payload:** `https://payload.example.com/run.sh` — a remote script URL.
-- **Why current AgentShield cannot detect it:** No finding at all. The encoded
+- **Why current Veyra cannot detect it:** No finding at all. The encoded
   URL is never decoded, so the `https://.../run.sh` destination is never seen.
 - **Signal available after decoding:** The decoded URL is a remote-script URL
   (AS-005 suspicious URL / DOWNLOAD). Combined with the "Fetch the content"
@@ -170,7 +170,7 @@ detection rate 86.3% → **88.4%**, 0 FP.
 
 ## Status: implemented
 
-AS-007 was implemented in `src/agentshield/rules/obfuscation.py` as a file-level
+AS-007 was implemented in `src/veyra/rules/obfuscation.py` as a file-level
 rule. It decodes base64/ROT13 deterministically and only raises a finding when
 the decoded content is combined with an execution context (`| base64 -d | bash`)
 or a fetch/execute intent. Decoding alone is never a signal.

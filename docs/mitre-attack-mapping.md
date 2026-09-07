@@ -2,9 +2,9 @@
 
 ## Methodology
 
-This document maps AgentShield's existing detections to MITRE ATT&CK Enterprise
+This document maps Veyra's existing detections to MITRE ATT&CK Enterprise
 techniques. Mappings are **behavior-based** and only applied where the existing
-AgentShield behavior provides reasonable evidence for the technique.
+Veyra behavior provides reasonable evidence for the technique.
 
 Rules are **not** force-mapped just because a technique sounds similar. A
 mapping is only proposed when the rule's detection semantics genuinely
@@ -20,13 +20,13 @@ Mappings marked **internal** are useful for analysis but should not be shown to
 users as a definitive ATT&CK attribution. Mappings marked **public** are safe to
 expose in scanner output.
 
-> Note: AgentShield is a **static** scanner. It detects code/config patterns,
+> Note: Veyra is a **static** scanner. It detects code/config patterns,
 > not confirmed runtime adversary behavior. All mappings are therefore
 > indicative, not proof of an active attack.
 
 ## High-confidence mappings
 
-| AgentShield Rule | MITRE ID | Technique | Confidence | Justification |
+| Veyra Rule | MITRE ID | Technique | Confidence | Justification |
 |------------------|----------|-----------|------------|---------------|
 | AS-001 (hardcoded secrets) | T1552.001 | Unsecured Credentials: Credentials In Files | HIGH | Directly detects credentials (API keys, tokens, passwords, private keys) stored in files/config. Core behavior of T1552.001. **Public.** |
 | AS-002 (subprocess shell=True, os.system, eval) | T1059 | Command and Scripting Interpreter | HIGH | Detects execution of shell/commands via subprocess/os.system/eval. Core behavior of T1059. **Public.** |
@@ -37,7 +37,7 @@ expose in scanner output.
 
 ## Medium-confidence mappings
 
-| AgentShield Rule | MITRE ID | Technique | Confidence | Justification |
+| Veyra Rule | MITRE ID | Technique | Confidence | Justification |
 |------------------|----------|-----------|------------|---------------|
 | AS-003 (HTTP client usage) | T1071.001 | Application Layer Protocol: Web Protocols | MEDIUM | Detects HTTP client usage (requests/urllib/httpx/fetch/axios). Consistent with web-protocol communication, but HTTP alone is not malicious. **Internal.** |
 | AS-003 (download-and-execute) | T1105 | Ingress Tool Transfer | MEDIUM | Detects download-and-execute pattern. Matches T1105, but overlaps with AS-CHAIN-002; keep as supporting signal. **Public.** |
@@ -51,7 +51,7 @@ expose in scanner output.
 
 ## Rules without a justified MITRE mapping
 
-| AgentShield Rule | Reason |
+| Veyra Rule | Reason |
 |------------------|--------|
 | AS-005 (raw IP URL) | A raw-IP URL is a suspicious pattern but not a specific ATT&CK technique. Not C2 by itself. |
 | AS-005 (URL shortener) | URL shorteners are an evasion/obfuscation-adjacent pattern but not a defined Enterprise technique. |
@@ -86,7 +86,7 @@ For each relevant Attack Lab category, the MITRE techniques represented:
 The minimal set of mappings that should actually appear in scanner output
 (high-confidence, non-misleading):
 
-| AgentShield Rule | MITRE ID | Technique |
+| Veyra Rule | MITRE ID | Technique |
 |------------------|----------|-----------|
 | AS-001 | T1552.001 | Unsecured Credentials: Credentials In Files |
 | AS-002 | T1059 | Command and Scripting Interpreter |
@@ -100,12 +100,12 @@ internal or be omitted to avoid misleading users.
 ## Implementation
 
 The approved public mappings are implemented as static, deterministic metadata
-in `src/agentshield/mitre.py`. No MITRE API, database, or dynamic fetching is
+in `src/veyra/mitre.py`. No MITRE API, database, or dynamic fetching is
 used.
 
 ### Public mappings (implemented)
 
-| AgentShield Rule | MITRE ID | Technique |
+| Veyra Rule | MITRE ID | Technique |
 |------------------|----------|-----------|
 | AS-001 | T1552.001 | Credentials In Files |
 | AS-002 | T1059 | Command and Scripting Interpreter |
@@ -187,9 +187,9 @@ analysis only.
   attribution is not. **Keep internal / MEDIUM.**
 - **T1071.001 (Web Protocols)** — HTTP client usage is not automatically
   malicious. Mapping would over-attribute normal network use. **Internal only.**
-- **T1189 (Drive-by Compromise)** — not applicable; AgentShield does not detect
+- **T1189 (Drive-by Compromise)** — not applicable; Veyra does not detect
   browser-based compromise. **Excluded.**
-- **T1564.004 (NTFS File Attributes)** — not applicable; AgentShield does not
+- **T1564.004 (NTFS File Attributes)** — not applicable; Veyra does not
   detect file-hiding techniques. **Excluded.**
 - **T1083 (File and Directory Discovery)** — AS-MCP-007 grants broad FS access
   but does not confirm discovery activity. **Internal only.**

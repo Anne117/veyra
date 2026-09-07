@@ -14,8 +14,8 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from agentshield.models import Finding, Severity
-from agentshield.rules import register_file_rule
+from veyra.models import Finding, Severity
+from veyra.rules import register_file_rule
 
 try:
     import yaml  # type: ignore

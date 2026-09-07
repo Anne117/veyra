@@ -1,12 +1,12 @@
-# AgentShield Threat Model
+# Veyra Threat Model
 
-This document describes AgentShield's security model based on the actual
+This document describes Veyra's security model based on the actual
 implementation. It is a static-analysis scanner for AI agent Skills and MCP
 resources; it does **not** provide runtime protection.
 
 ## 1. Assets
 
-AgentShield is concerned with protecting the assets an AI agent can touch:
+Veyra is concerned with protecting the assets an AI agent can touch:
 
 - **API keys** and **credentials** (OpenAI, Anthropic, GitHub, AWS, generic).
 - **Local files** — including sensitive credential files (`.env`, `~/.aws`,
@@ -51,10 +51,10 @@ Secrets
   **agent runtime**.
 - The agent runtime can read **files** (including **secrets**) and reach the
   **network**.
-- AgentShield inspects the untrusted input **before** it is loaded, to surface
+- Veyra inspects the untrusted input **before** it is loaded, to surface
   instructions that would abuse the agent's file/network/execution capabilities.
 
-## 4. Attack paths AgentShield currently detects
+## 4. Attack paths Veyra currently detects
 
 | Attack path | Rule(s) |
 |-------------|---------|
@@ -69,9 +69,9 @@ Secrets
 | Suspicious URLs | AS-005 |
 | Network access | AS-003 |
 
-## 5. What AgentShield does NOT guarantee
+## 5. What Veyra does NOT guarantee
 
-- **No complete malware detection.** AgentShield is a heuristic static scanner;
+- **No complete malware detection.** Veyra is a heuristic static scanner;
   it will miss attacks.
 - **No runtime behavioral analysis.** It never executes Skills or MCP servers
   and cannot observe runtime behavior.
@@ -84,7 +84,7 @@ Secrets
 
 ## 6. Security philosophy
 
-AgentShield prefers **deterministic, explainable findings** over opaque
+Veyra prefers **deterministic, explainable findings** over opaque
 "AI says this is malicious" judgments. Every finding is produced by a
 deterministic rule and carries:
 

@@ -1,6 +1,6 @@
 """Tests for prompt injection rules."""
 
-from agentshield.rules.prompt_injection import (
+from veyra.rules.prompt_injection import (
     detect_disable_security,
     detect_encoded_obfuscated,
     detect_ignore_instructions,

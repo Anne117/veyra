@@ -1,21 +1,33 @@
-# 🛡️ AgentShield
+# 🛡️ Veyra
 
-**Security scanner for AI agent Skills and MCP resources.**
+> Security intelligence for AI agents.
 
-AgentShield is an early-stage (MVP) static-analysis tool that inspects AI agent
-skills — `SKILL.md` files, markdown, YAML/JSON/TOML config, Python/JS/TS code,
-and shell scripts — for security issues such as hardcoded secrets, dangerous
-command execution, network access, prompt injection, suspicious URLs, sensitive
-credential access, and obfuscated payloads.
+**Veyra** makes hidden attack paths across AI agents, tools, Skills, and data
+visible.
 
-> **Status: early MVP.** AgentShield is a heuristic static scanner, not a
-> complete malware detector and not a security standard. It does **not** detect
-> all malicious skills and can produce false positives. Treat its output as a
+It analyzes how seemingly safe components can become dangerous when combined —
+helping security teams understand not just **what is risky**, but **how an
+attack can happen**.
+
+## Why Veyra?
+
+The name **Veyra** reflects three ideas at the core of the product:
+
+- **Visibility** — reveal hidden attack paths.
+- **Verification** — continuously assess agent behavior and trust boundaries.
+- **Vector** — understand how actions and data can move through an agentic system.
+
+Veyra is not limited to a single security layer. The name is intentionally
+broader so the platform can evolve with the AI agent ecosystem.
+
+> **Status: early MVP.** Veyra is a heuristic static scanner, not a complete
+> malware detector and not a security standard. It does **not** detect all
+> malicious skills and can produce false positives. Treat its output as a
 > starting point for human review, not as a definitive verdict.
 
-[![CI](https://github.com/Anne117/agentshield/actions/workflows/agentshield.yml/badge.svg)](https://github.com/Anne117/agentshield/actions/workflows/agentshield.yml)
+[![CI](https://github.com/Anne117/veyra/actions/workflows/veyra.yml/badge.svg)](https://github.com/Anne117/veyra/actions/workflows/veyra.yml)
 
-## 🎯 Why AgentShield
+## 🎯 Why Veyra?
 
 AI agents increasingly load third-party skills and configuration that instruct
 them to take actions. A malicious or compromised skill can:
@@ -31,12 +43,12 @@ them to take actions. A malicious or compromised skill can:
 - Configure a **dangerous MCP server** (remote endpoint, dynamic package
   execution, secrets passed to the server, broad filesystem access).
 
-AgentShield scans these resources statically so you can review them before
+Veyra scans these resources statically so you can review them before
 trusting an agent to load them.
 
 ## ⚙️ How it works
 
-AgentShield is a deterministic, static analysis pipeline. It never executes
+Veyra is a deterministic, static analysis pipeline. It never executes
 scanned Skills or MCP servers and never makes network requests during a scan.
 
 ```mermaid
@@ -52,7 +64,7 @@ flowchart LR
     I --> J[Terminal / JSON / SARIF]
 ```
 
-The pipeline (see `src/agentshield/scanner.py`):
+The pipeline (see `src/veyra/scanner.py`):
 
 1. **Static parsing** — walk the target, skip VCS/build/vendor dirs, skip
    binary and oversized files, decode UTF-8.
@@ -66,7 +78,7 @@ The pipeline (see `src/agentshield/scanner.py`):
    content participates in an execution or fetch/execute context.
 6. **Metadata enrichment** — attach MITRE ATT&CK, CWE, confidence, and matched
    evidence.
-7. **Suppression** — apply `.agentshield.toml` allowlist after findings are
+7. **Suppression** — apply `.veyra.toml` allowlist after findings are
    generated.
 8. **Risk scoring** — deterministic severity-weighted score capped at 100.
 9. **Reporting** — terminal, JSON, or SARIF 2.1.0.
@@ -96,13 +108,13 @@ quickly and consistently across terminal, JSON, and SARIF output.
 |-------|---------|
 | `rule_id` | The rule that fired (e.g. `AS-001`, `AS-MCP-006`, `AS-CHAIN-002`). |
 | `severity` | **How dangerous the behavior is** (`CRITICAL`/`HIGH`/`MEDIUM`/`LOW`/`INFO`). |
-| `confidence` | **How reliably AgentShield matched the behavior** (`HIGH`/`MEDIUM`/`LOW`). |
+| `confidence` | **How reliably Veyra matched the behavior** (`HIGH`/`MEDIUM`/`LOW`). |
 | `cwe` | CWE IDs (only where defensible; never fabricated). |
 | `mitre` | Approved MITRE ATT&CK mappings (only where justified). |
 | `matched_text` | The exact source line that triggered the rule (redacted for secrets). |
 | `evidence` | Rule-specific evidence (secrets are redacted). |
 | `remediation` | Recommended fix. |
-| `suppressed` | Whether the finding was suppressed by `.agentshield.toml`. |
+| `suppressed` | Whether the finding was suppressed by `.veyra.toml`. |
 
 **Severity vs. confidence:** severity answers *how dangerous the behavior is*;
 confidence answers *how reliably the behavior matches the rule*. They are
@@ -112,7 +124,7 @@ See `docs/finding-model.md` for the full field reference and the CWE mapping.
 
 ## 🔌 MCP security analysis
 
-AgentShield scans MCP (Model Context Protocol) server configuration files for
+Veyra scans MCP (Model Context Protocol) server configuration files for
 security issues. It supports `.mcp.json`, `mcp.json`, `mcp_servers.json`, and
 structurally identifiable JSON/YAML MCP configs.
 
@@ -135,7 +147,7 @@ MCP-specific rules (IDs `AS-MCP-001` … `AS-MCP-010`):
 > Remote endpoints are flagged MEDIUM with context; only concrete risk signals
 > (plain HTTP, secrets passed, broad FS access, dangerous flags) raise severity.
 
-MCP scanning is **fully static**: AgentShield never executes MCP commands,
+MCP scanning is **fully static**: Veyra never executes MCP commands,
 never starts MCP servers, never connects to endpoints, never downloads
 packages, and never resolves or contacts remote URLs.
 
@@ -153,9 +165,9 @@ Requires Python 3.9+.
 ## 🚀 Usage
 
 ```bash
-agentshield scan ./path/to/skill
-agentshield scan ./path/to/skill --format json
-agentshield scan ./path/to/skill --format sarif > report.sarif
+veyra scan ./path/to/skill
+veyra scan ./path/to/skill --format json
+veyra scan ./path/to/skill --format sarif > report.sarif
 ```
 
 ### Exit codes (CI-friendly)
@@ -167,14 +179,14 @@ agentshield scan ./path/to/skill --format sarif > report.sarif
 The failure threshold is configurable with `--fail-on`:
 
 ```bash
-agentshield scan ./path --fail-on CRITICAL   # only fail on critical
-agentshield scan ./path --fail-on MEDIUM    # fail on medium or higher
+veyra scan ./path --fail-on CRITICAL   # only fail on critical
+veyra scan ./path --fail-on MEDIUM    # fail on medium or higher
 ```
 
 ### JSON output
 
 ```bash
-agentshield scan ./path --format json
+veyra scan ./path --format json
 ```
 
 ```json
@@ -189,7 +201,7 @@ agentshield scan ./path --format json
 
 ### SARIF output
 
-AgentShield emits **SARIF 2.1.0** for compatibility with GitHub Code Scanning
+Veyra emits **SARIF 2.1.0** for compatibility with GitHub Code Scanning
 and other SARIF-compatible security tooling. SARIF generation is fully static
 (no network requests, no code execution). Suppressed findings are preserved via
 SARIF's `suppressions` array — they are never silently turned into clean
@@ -198,7 +210,7 @@ results. Secrets remain redacted.
 ## 🚫 Suppression / allowlist
 
 You can suppress known-safe findings with a project configuration file,
-`.agentshield.toml`:
+`.veyra.toml`:
 
 ```toml
 [ignore]
@@ -216,8 +228,8 @@ rules = ["AS-MCP-010"]            # ignore specific rule IDs
 
 ## 🧪 Attack Lab
 
-AgentShield ships an internal adversarial corpus (`tests/fixtures/attacks/`)
-and an evaluator (`agentshield attack-lab`) that measures detection on that
+Veyra ships an internal adversarial corpus (`tests/fixtures/attacks/`)
+and an evaluator (`veyra attack-lab`) that measures detection on that
 corpus.
 
 **On the current 95-case internal Attack Lab corpus:**
@@ -242,8 +254,8 @@ previously detected cases detected and avoid new false positives. See
 
 ## 🤖 GitHub Action
 
-AgentShield ships a GitHub Action workflow that runs on every push and pull
-request. See `.github/workflows/agentshield.yml`.
+Veyra ships a GitHub Action workflow that runs on every push and pull
+request. See `.github/workflows/veyra.yml`.
 
 The workflow has two jobs:
 
@@ -252,7 +264,7 @@ and runs the full test suite (`pytest -q`), including the Attack Lab regression
 tests.
 
 **`scan`** — installs the project (`pip install .`), scans **production source
-only** (`src/`), uploads the JSON report as a `agentshield-report` artifact and
+only** (`src/`), uploads the JSON report as a `veyra-report` artifact and
 the SARIF report to **GitHub Code Scanning**, and fails on HIGH/CRITICAL
 findings in `src/`.
 
@@ -262,20 +274,20 @@ would produce self-referential findings — the scanner flagging its own test
 corpus. This is **not** a reason to weaken scanner rules; it is a deliberate
 choice to scan only production code in CI.
 
-The scan uses the repository's `.agentshield.toml` suppression config so the
+The scan uses the repository's `.veyra.toml` suppression config so the
 scanner does not flag its own rule patterns (self-referential findings in the
 rule modules, e.g. evidence strings like `curl | bash` in `mitre.py`). This is
 a config change only — no scanner logic is modified.
 
 The workflow:
 
-1. Installs AgentShield **from the checked-out repository** (`pip install .`).
+1. Installs Veyra **from the checked-out repository** (`pip install .`).
    The package is not published on PyPI, so the workflow installs it locally
    from the repo it is scanning.
 2. Runs the full test suite (test job).
 3. Scans `src/` (scan job).
 4. Prints a readable report in CI logs.
-5. Uploads the JSON report as a `agentshield-report` artifact.
+5. Uploads the JSON report as a `veyra-report` artifact.
 6. Uploads the SARIF report to **GitHub Code Scanning** via
    `github/codeql-action/upload-sarif@v3`.
 7. Fails the scan job on HIGH findings by default (exit code 1 or 2).
@@ -343,7 +355,7 @@ MVP.
 
 ```bash
 .venv/Scripts/python -m pytest -q
-.venv/Scripts/python -m agentshield.cli attack-lab
+.venv/Scripts/python -m veyra.cli attack-lab
 ```
 
 ## 📄 License

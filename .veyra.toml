@@ -1,9 +1,9 @@
-# AgentShield suppression config for the repository's own source.
+# Veyra suppression config for the repository's own source.
 #
 # Scanning `src/` (the scanner's own code) produces self-referential findings:
 # the rule modules contain the very patterns they detect (e.g. "curl | bash"
 # evidence strings in mitre.py, the attack corpus in attack_lab.py, secret
-# regexes in the rules). These are NOT real vulnerabilities in AgentShield's
+# regexes in the rules). These are NOT real vulnerabilities in Veyra's
 # source — they are the scanner detecting its own detection patterns.
 #
 # We suppress these self-referential rules so the CI scan of `src/` reflects

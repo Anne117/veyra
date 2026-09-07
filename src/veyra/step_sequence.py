@@ -31,7 +31,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-from agentshield.models import Finding, Severity
+from veyra.models import Finding, Severity
 
 # --- Step category detectors ----------------------------------------------
 

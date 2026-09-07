@@ -1,8 +1,8 @@
-# AgentShield Data-Flow Architecture Audit
+# Veyra Data-Flow Architecture Audit
 
 ## 1. Executive summary
 
-AgentShield is a deterministic, static, mostly line-based heuristic scanner for
+Veyra is a deterministic, static, mostly line-based heuristic scanner for
 AI agent Skills and MCP resources. It currently achieves 90.5% on its internal
 95-case Attack Lab corpus with 0 false positives on the benign lookalikes.
 
@@ -46,7 +46,7 @@ Input path
 | Correlation | all findings | chain findings | `Finding` (AS-CHAIN-*) | across files | maps rule IDs to signals; no data-flow |
 | Step-sequence | file text | chain findings | list of step category strings | per-file | classifies lines into coarse categories; no data tracking |
 | Metadata | findings | enriched findings | `Finding` | per-finding | MITRE/CWE/confidence/matched_text |
-| Suppression | findings | suppressed findings | `Finding` | per-finding | `.agentshield.toml` allowlist |
+| Suppression | findings | suppressed findings | `Finding` | per-finding | `.veyra.toml` allowlist |
 | Scoring | findings | score/risk | int + level | per-scan | severity-weighted, capped 100 |
 | Reporters | ScanResult | text/JSON/SARIF | — | per-scan | terminal/JSON/SARIF 2.1.0 |
 
@@ -223,7 +223,7 @@ structured `Action` while keeping the same chain-detection logic.
 ## 9. Incremental implementation plan
 
 ### Phase A: normalized action model
-- **Files:** `src/agentshield/step_sequence.py` (add `Action` dataclass),
+- **Files:** `src/veyra/step_sequence.py` (add `Action` dataclass),
   `tests/test_step_sequence.py`.
 - **Tests:** action extraction from known lines; category mapping preserved.
 - **Attack Lab impact:** none (behavior-preserving refactor).
@@ -258,7 +258,7 @@ structured `Action` while keeping the same chain-detection logic.
 - **Rollback:** revert correlation change.
 
 ### Phase E: MCP semantic analysis
-- **Files:** `src/agentshield/rules/mcp.py` (risk combination).
+- **Files:** `src/veyra/rules/mcp.py` (risk combination).
 - **Tests:** broad-fs + dynamic-exec → HIGH.
 - **Attack Lab impact:** MCP PARTIALs → DETECTED (expected).
 - **FP risk:** LOW — requires multiple concrete risk signals.
@@ -313,7 +313,7 @@ fits the existing `step_sequence.py` architecture.
 Implemented (Phase A + B + C):
 
 - **Structured `Action` model** (`verb`, `object`, `destination`, `category`,
-  plus `output` for TRANSFORM) in `src/agentshield/step_sequence.py`.
+  plus `output` for TRANSFORM) in `src/veyra/step_sequence.py`.
 - **Action extraction** — each line/segment is parsed into an `Action` via
   `_extract_action`, with conservative object normalization
   (`_normalize_object`: lowercase, strip punctuation, collapse whitespace,

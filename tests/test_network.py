@@ -1,6 +1,6 @@
 """Tests for network access rules."""
 
-from agentshield.rules.network import (
+from veyra.rules.network import (
     detect_download_execute,
     detect_http_client,
     detect_raw_ip_url,

@@ -95,7 +95,7 @@ framework or dependency, and it does not weaken any existing rule.
 
 ## Status: implemented
 
-The step-sequence analyzer was implemented in `src/agentshield/step_sequence.py`
+The step-sequence analyzer was implemented in `src/veyra/step_sequence.py`
 and integrated into the scanner. It detects:
 
 - `AS-CHAIN-001` — SOURCE → SENSITIVE → NETWORK (secret exfiltration)

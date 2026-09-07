@@ -2,10 +2,10 @@
 
 import json
 
-from agentshield.cwe import cwe_for
-from agentshield.models import Confidence
-from agentshield.reporters import render_json, render_sarif, render_terminal
-from agentshield.scanner import scan_path
+from veyra.cwe import cwe_for
+from veyra.models import Confidence
+from veyra.reporters import render_json, render_sarif, render_terminal
+from veyra.scanner import scan_path
 
 FIXTURES = "tests/fixtures/malicious"
 
@@ -91,7 +91,7 @@ def test_as007_preserves_original_line():
 
 def test_suppression_preserves_metadata():
     """Suppressed findings retain their metadata."""
-    from agentshield.suppress import apply_suppression, load_config
+    from veyra.suppress import apply_suppression, load_config
 
     r = scan_path("tests/fixtures/repo")
     config = load_config("tests/fixtures/repo")

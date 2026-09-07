@@ -1,4 +1,4 @@
-"""MITRE ATT&CK metadata for AgentShield findings.
+"""MITRE ATT&CK metadata for Veyra findings.
 
 Contains the approved PUBLIC mappings only. Medium-confidence mappings are
 deliberately NOT exposed. See docs/mitre-attack-mapping.md.

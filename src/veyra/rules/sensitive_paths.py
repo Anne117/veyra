@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import re
 
-from agentshield.models import Finding, Severity
-from agentshield.rules import register
+from veyra.models import Finding, Severity
+from veyra.rules import register
 
 # --- Sensitive path patterns ----------------------------------------------
 

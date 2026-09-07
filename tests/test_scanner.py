@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from agentshield.cli import main
-from agentshield.scanner import scan_path
+from veyra.cli import main
+from veyra.scanner import scan_path
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -107,7 +107,7 @@ def test_cli_json_stdout(capsys):
 def test_cli_terminal_output(capsys):
     rc = main(["scan", _fixture("clean")])
     captured = capsys.readouterr()
-    assert "AgentShield Security Report" in captured.out
+    assert "Veyra Security Report" in captured.out
     assert "Risk: SAFE" in captured.out
     assert rc == 0
 

@@ -1,4 +1,4 @@
-"""Contextual correlation layer for AgentShield.
+"""Contextual correlation layer for Veyra.
 
 Runs AFTER the individual rules produce findings. Correlates existing
 findings/signals into higher-level attack chains. This is a small,
@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
-from agentshield.models import Finding, Severity
+from veyra.models import Finding, Severity
 
 # --- Signal classification -------------------------------------------------
 # Map rule IDs to the semantic signals they represent.

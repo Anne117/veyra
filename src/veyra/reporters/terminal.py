@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentshield.models import ScanResult, Severity
+from veyra.models import ScanResult, Severity
 
 # Simple box-drawing separator (no external deps).
 SEP = "\u2501" * 30
@@ -10,7 +10,7 @@ SEP = "\u2501" * 30
 
 def render_terminal(result: ScanResult) -> str:
     lines: list[str] = []
-    lines.append("AgentShield Security Report")
+    lines.append("Veyra Security Report")
     lines.append(SEP)
     lines.append("")
     lines.append(f"Target: {result.target}")

@@ -24,12 +24,12 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from agentshield.models import ScanResult, Severity
+from veyra.models import ScanResult, Severity
 
 SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 
-# Map AgentShield severity to SARIF result level.
+# Map Veyra severity to SARIF result level.
 # SARIF levels: "error", "warning", "note", "none".
 _SEVERITY_TO_LEVEL = {
     Severity.CRITICAL: "error",
@@ -116,7 +116,7 @@ def _build_results(result: ScanResult) -> List[Dict[str, Any]]:
             r["suppressions"] = [
                 {
                     "kind": "external",
-                    "justification": f.suppression_reason or "suppressed by .agentshield.toml",
+                    "justification": f.suppression_reason or "suppressed by .veyra.toml",
                 }
             ]
 
@@ -133,8 +133,8 @@ def render_sarif(result: ScanResult) -> str:
             {
                 "tool": {
                     "driver": {
-                        "name": "AgentShield",
-                        "informationUri": "https://github.com/agentshield/agentshield",
+                        "name": "Veyra",
+                        "informationUri": "https://github.com/veyra/veyra",
                         "version": "0.1.0",
                         "rules": _build_rules(result),
                     }
