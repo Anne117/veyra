@@ -1,4 +1,4 @@
-name: Veyra
+name: Veyra CI
 
 on:
   push:

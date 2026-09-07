@@ -25,7 +25,7 @@ broader so the platform can evolve with the AI agent ecosystem.
 > malicious skills and can produce false positives. Treat its output as a
 > starting point for human review, not as a definitive verdict.
 
-[![CI](https://github.com/Anne117/veyra/actions/workflows/veyra.yml/badge.svg)](https://github.com/Anne117/veyra/actions/workflows/veyra.yml)
+[![CI](https://github.com/Anne117/veyra/actions/workflows/veyra.yml/badge.svg?branch=master)](https://github.com/Anne117/veyra/actions/workflows/veyra.yml)
 
 ## 🎯 Why Veyra?
 
