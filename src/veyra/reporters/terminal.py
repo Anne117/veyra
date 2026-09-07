@@ -54,4 +54,13 @@ def render_terminal(result: ScanResult) -> str:
     lines.append(f"Low:      {s['low']}")
     lines.append(f"Suppressed: {s['suppressed']}")
     lines.append("")
+
+    if result.attack_paths:
+        lines.append("Attack Paths")
+        lines.append("-----------")
+        for p in result.attack_paths:
+            lines.append(f"  [{p.severity.value}] {p.title}")
+            lines.append(f"    {' → '.join(p.nodes)}")
+        lines.append("")
+
     return "\n".join(lines)

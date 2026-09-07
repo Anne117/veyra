@@ -12,6 +12,7 @@ from typing import List, Optional
 
 from veyra.correlation import correlate
 from veyra.cwe import cwe_for
+from veyra.graph import PathAnalyzer, build_from_actions, build_from_findings
 from veyra.mitre import mitre_for
 from veyra.models import Confidence, Finding, ScanResult
 from veyra.rules import load_file_rules, load_rules
@@ -129,7 +130,40 @@ def scan_path(target: str) -> ScanResult:
         if not f.matched_text:
             f.matched_text = f.evidence or ""
 
-    return ScanResult(target=target, findings=findings)
+    result = ScanResult(target=target, findings=findings)
+    result.attack_paths = _build_attack_paths(findings, file_texts)
+    return result
+
+
+def _build_attack_paths(findings: List[Finding], file_texts: List[tuple]) -> List:
+    """Construct a SecurityGraph from findings + step-sequence actions and return
+    the discovered attack paths.
+
+    The findings graph (semantic edges) is merged with the intra-file
+    step-sequence action graph (data-flow relationships). Deterministic; never
+    modifies the findings.
+    """
+    from veyra.step_sequence import _extract_action, _split_actions
+
+    graph = build_from_findings(findings, source="<agent>")
+    for text, path in file_texts:
+        actions = []
+        for line in text.splitlines():
+            for segment in _split_actions(line):
+                action = _extract_action(segment)
+                if action is not None:
+                    actions.append(action)
+        if not actions:
+            continue
+        # Merge the action graph's nodes/edges into the findings graph.
+        action_graph = build_from_actions(actions, subject_id=path)
+        for node in action_graph.nodes.values():
+            if graph.get_node(node.id) is None:
+                graph.get_or_create(node.id, node.type, label=node.label)
+        for edge in action_graph.edges:
+            graph.add_edge(edge.source, edge.target, edge.type,
+                           attributes=dict(edge.attributes))
+    return PathAnalyzer(graph).analyze()
 
 
 def _confidence_for(f: Finding) -> Confidence:

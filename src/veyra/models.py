@@ -88,6 +88,7 @@ class Finding:
 class ScanResult:
     target: str
     findings: List[Finding] = field(default_factory=list)
+    attack_paths: List[Any] = field(default_factory=list)
 
     @property
     def score(self) -> int:
@@ -109,10 +110,13 @@ class ScanResult:
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "target": self.target,
             "score": self.score,
             "risk_level": self.risk_level,
             "summary": self.summary(),
             "findings": [f.to_dict() for f in self.findings],
         }
+        if self.attack_paths:
+            d["attack_paths"] = [p.to_dict() for p in self.attack_paths]
+        return d

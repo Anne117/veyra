@@ -195,9 +195,48 @@ veyra scan ./path --format json
   "score": 72,
   "risk_level": "HIGH",
   "summary": { "critical": 1, "high": 1, "medium": 0, "low": 0 },
-  "findings": [ ... ]
+  "findings": [ ... ],
+  "attack_paths": [
+    {
+      "nodes": ["SKILL:skill", "SECRET:token", "DATA:payload", "ENDPOINT:https://example.com"],
+      "edges": [
+        {"source": "SKILL:skill", "target": "SECRET:token", "type": "READS"},
+        {"source": "SECRET:token", "target": "DATA:payload", "type": "FLOWS_TO"},
+        {"source": "DATA:payload", "target": "ENDPOINT:https://example.com", "type": "SENDS_TO"}
+      ],
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "title": "Secret exposed to external endpoint"
+    }
+  ]
 }
 ```
+
+`attack_paths` is an **optional** field, present only when the Security Graph
+reveals a real object-continuity path (e.g. a read Secret that flows to an
+object sent to an external endpoint). It is informational and does **not**
+affect the score or exit code.
+
+### Attack Paths
+
+Every scan builds a lightweight Security Graph and runs a deterministic Attack
+Path Analyzer over it (no LLM, no runtime). A path is emitted only when the
+graph shows actual continuity — a read Secret/data object that FLOWS_TO a
+derived object which is SENDS_TO an external endpoint. Shared-skill correlation
+alone (a skill reads a secret *and* also contacts an endpoint) is not reported
+as a proven path.
+
+Terminal output shows a concise section when paths exist:
+
+```
+Attack Paths
+-----------
+  [HIGH] Secret exposed to external endpoint
+    SKILL:skill → SECRET:token → DATA:payload → ENDPOINT:https://example.com
+```
+
+Attack path severity is informational and does **not** change the scan score,
+risk level, or exit code.
 
 ### SARIF output
 
