@@ -131,6 +131,15 @@ class ScanResult:
         """Path IDs of violated results, preserving policy_results ordering."""
         return [r.path_id for r in self.policy_results if r.violated]
 
+    @property
+    def policy_status(self) -> str:
+        """Aggregate policy status over the finalized policy results.
+
+        "FAIL" iff at least one PolicyResult has violated == True, otherwise
+        "PASS". Derived read-only from policy_results; never stored/cached.
+        """
+        return "FAIL" if self.has_policy_violations else "PASS"
+
     def summary(self) -> Dict[str, int]:
         active = [f for f in self.findings if not f.suppressed]
         return {
@@ -155,4 +164,5 @@ class ScanResult:
         # Always present (including an empty list for clean scans) so the JSON
         # representation is stable and complete regardless of findings.
         d["policy_results"] = [r.to_dict() for r in self.policy_results]
+        d["policy_status"] = self.policy_status
         return d
