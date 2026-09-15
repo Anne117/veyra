@@ -107,6 +107,30 @@ class ScanResult:
     def risk_level(self) -> str:
         return risk_level_for_score(self.score)
 
+    @property
+    def policy_violation_count(self) -> int:
+        """Number of PolicyResults with violated == True (derived, no stored state)."""
+        return sum(1 for r in self.policy_results if r.violated)
+
+    @property
+    def has_policy_violations(self) -> bool:
+        """True iff at least one PolicyResult has violated == True."""
+        return self.policy_violation_count > 0
+
+    @property
+    def violated_policy_ids(self) -> List[str]:
+        """Policy IDs of violated results, preserving policy_results ordering.
+
+        Duplicate policy IDs are not deduplicated — every violated result is
+        represented in order. No sets, no sorting.
+        """
+        return [r.policy_id for r in self.policy_results if r.violated]
+
+    @property
+    def violated_path_ids(self) -> List[str]:
+        """Path IDs of violated results, preserving policy_results ordering."""
+        return [r.path_id for r in self.policy_results if r.violated]
+
     def summary(self) -> Dict[str, int]:
         active = [f for f in self.findings if not f.suppressed]
         return {
