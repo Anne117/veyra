@@ -64,6 +64,104 @@ _EXPLANATIONS = {
     "CORRELATED_SECRET_EXECUTION": "A secret is read by the skill and the same skill executes an action.",
 }
 
+# --- Deterministic risk model ------------------------------------------------
+# Risk assessment is derived ONLY from semantic facts present on the path:
+# attack_type, asset kind (SECRET vs DATA), whether the walk includes a data
+# transformation (FLOWS_TO), the endpoint sink, and any shared-skill correlated
+# secret read. The mutable fields (severity, confidence, title, description)
+# that come from finding/edge metadata are deliberately NOT inputs, so the risk
+# of a semantically identical path is always identical regardless of how the
+# same semantics were discovered or inserted. The three concepts are kept
+# distinct: risk_severity (impact), risk_confidence (how strongly the semantics
+# are established), and risk_score (a single deterministic 0-100 number).
+
+# Transparent deterministic points per risk severity (impact).
+_RISK_SEVERITY_POINTS = {
+    Severity.CRITICAL: 95,
+    Severity.HIGH: 70,
+    Severity.MEDIUM: 45,
+    Severity.LOW: 20,
+    Severity.INFO: 0,
+}
+
+# Transparent deterministic confidence multiplier (how strongly established).
+_RISK_CONFIDENCE_FACTOR = {
+    Confidence.HIGH: 1.0,
+    Confidence.MEDIUM: 0.85,
+    Confidence.LOW: 0.7,
+}
+
+
+def _risk_for(attack_type: "AttackType") -> Tuple[Severity, Confidence, int]:
+    """Deterministic (risk_severity, risk_confidence, risk_score) for a path.
+
+    Proven continuous lineage (SECRET_EXFILTRATION / DATA_EXFILTRATION) is the
+    strongest signal: severity reflects asset impact and confidence is HIGH
+    because the object flow is proven by the contiguous walk. A correlated
+    secret + execution is real but only a correlation, so it is MEDIUM severity
+    and MEDIUM confidence. UNKNOWN carries no supported semantic so it scores 0.
+    """
+    if attack_type == AttackType.SECRET_EXFILTRATION:
+        sev, conf = Severity.CRITICAL, Confidence.HIGH
+    elif attack_type == AttackType.DATA_EXFILTRATION:
+        sev, conf = Severity.HIGH, Confidence.HIGH
+    elif attack_type == AttackType.CORRELATED_SECRET_EXECUTION:
+        sev, conf = Severity.MEDIUM, Confidence.MEDIUM
+    else:  # UNKNOWN — no supported attack semantic established.
+        return Severity.INFO, Confidence.LOW, 0
+    points = _RISK_SEVERITY_POINTS[sev]
+    score = int(round(points * _RISK_CONFIDENCE_FACTOR[conf]))
+    return sev, conf, score
+
+
+def _evidence_for(attack_type: "AttackType",
+                  has_transformation: bool, has_flow: bool) -> List[str]:
+    """Structured, deterministic list of facts explaining why the path is risky.
+
+    Every fact is backed by a semantic signal present on the path. No claim is
+    made that the graph does not support. Correlated secret execution records
+    only the shared-skill correlation signals (secret read + execution) and
+    never a secret-to-action data-flow claim. UNKNOWN carries no supported
+    attack semantic, so it receives no attack evidence.
+    """
+    if attack_type == AttackType.SECRET_EXFILTRATION:
+        ev = ["secret read"]
+    elif attack_type == AttackType.DATA_EXFILTRATION:
+        ev = ["sensitive data read"]
+    elif attack_type == AttackType.CORRELATED_SECRET_EXECUTION:
+        return ["secret read", "execution"]  # correlation signals only
+    else:
+        return []  # UNKNOWN and unsupported semantics get no attack evidence.
+    if has_transformation:
+        ev.append("data transformation")
+    if has_flow:
+        ev.append("sensitive data flow")
+    ev.append("external network send")
+    return ev
+
+
+def assess_risk(path: "AttackPath") -> "AttackPath":
+    """Populate and return the deterministic risk fields + evidence on `path`.
+
+    Derived purely from semantic path facts (see _risk_for / _evidence_for).
+    ``explanation`` is owned by :func:`classify_path`; this only adds the risk
+    model. Independent of mutable metadata (severity, confidence, title, rule
+    ids) and of graph insertion order, so identical canonical paths always
+    yield identical risk and evidence.
+    """
+    is_contiguous = path.is_contiguous and bool(path.nodes)
+    edge_types = [et for _, _, et in path.edges]
+    has_flow = EdgeType.FLOWS_TO.value in edge_types
+    has_transformation = any(
+        et == EdgeType.FLOWS_TO.value and _node_kind(n) in ("SECRET", "DATA")
+        for (_, n, et) in path.edges[1:] if et != EdgeType.READS.value
+    )
+
+    attack_type = path.attack_type if is_contiguous else AttackType.UNKNOWN
+    path.risk_severity, path.risk_confidence, path.risk_score = _risk_for(attack_type)
+    path.evidence = _evidence_for(attack_type, has_transformation, has_flow)
+    return path
+
 
 class AttackType(str, Enum):
     """Deterministic classification of a proven attack path."""
@@ -255,6 +353,10 @@ class AttackPath:
     sink_node: str = ""
     explanation: str = ""
     path_id: str = ""
+    risk_severity: Severity = Severity.INFO
+    risk_confidence: Confidence = Confidence.LOW
+    risk_score: int = 0
+    evidence: List[str] = field(default_factory=list)
 
     @property
     def is_contiguous(self) -> bool:
@@ -291,6 +393,10 @@ class AttackPath:
             "entry_node": self.entry_node,
             "asset_node": self.asset_node,
             "sink_node": self.sink_node,
+            "risk_score": self.risk_score,
+            "risk_severity": self.risk_severity.value,
+            "risk_confidence": self.risk_confidence.value,
+            "evidence": list(self.evidence),
             "explanation": self.explanation,
         }
 
@@ -322,8 +428,9 @@ class PathAnalyzer:
         paths = self._dedupe(paths)
         for p in paths:
             classify_path(p)
-        # De-duplication ordering is unaffected by classification (classification
-        # is derived purely from the already-ordered node/edge sequences).
+            assess_risk(p)
+        # De-duplication ordering is unaffected by classification/risk (both are
+        # derived purely from the already-ordered node/edge sequences).
         return paths
 
     # --- Per-skill analysis -------------------------------------------------

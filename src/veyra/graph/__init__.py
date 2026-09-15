@@ -18,6 +18,7 @@ from veyra.graph.path import (
     AttackPath,
     AttackType,
     PathAnalyzer,
+    assess_risk,
     canonical_path_identity,
     classify_path,
     path_id_of,
@@ -35,6 +36,7 @@ __all__ = [
     "AttackType",
     "PathAnalyzer",
     "classify_path",
+    "assess_risk",
     "canonical_path_identity",
     "path_id_of",
 ]
