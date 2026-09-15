@@ -461,6 +461,8 @@ class AttackPath:
     risk_score: int = 0
     evidence: List[str] = field(default_factory=list)
     breakpoints: List["Breakpoint"] = field(default_factory=list)
+    is_composed: bool = False
+    component_ids: List[str] = field(default_factory=list)
 
     @property
     def is_contiguous(self) -> bool:
@@ -503,6 +505,8 @@ class AttackPath:
             "evidence": list(self.evidence),
             "breakpoints": [b.to_dict() for b in self.breakpoints],
             "explanation": self.explanation,
+            "is_composed": self.is_composed,
+            "component_ids": list(self.component_ids),
         }
 
 
@@ -514,16 +518,25 @@ class PathAnalyzer:
         # Precompute adjacency and an edge lookup for metadata.
         self._adj: Dict[str, List[Edge]] = {nid: [] for nid in graph.nodes}
         self._edge_index: Dict[Tuple[str, str, str], Edge] = {}
+        # producer attribution: data/secret node -> producing SKILL node (via a
+        # real PRODUCES edge). Used to establish that an object belongs to a
+        # different semantic component, i.e. genuine cross-component handoff.
+        self._producers: Dict[str, str] = {}
         for e in graph.edges:
             self._adj.setdefault(e.source, []).append(e)
             self._edge_index[(e.source, e.target, e.type.value)] = e
+            if e.type == EdgeType.PRODUCES:
+                self._producers.setdefault(e.target, e.source)
 
     # --- Public API ---------------------------------------------------------
 
-    def analyze(self) -> List[AttackPath]:
+    def analyze(self, compose: bool = False) -> List[AttackPath]:
         """Return all discovered attack paths, deduplicated and deterministically ordered.
 
-        Each returned path is classified into explicit security semantics.
+        ``compose=True`` runs cross-component composition over the whole merged
+        graph and returns ONLY paths that genuinely cross component boundaries
+        (established by real PRODUCES attribution, never by shared names). Each
+        returned path is classified into explicit security semantics.
         """
         paths: List[AttackPath] = []
         for skill_id, skill_node in self.graph.nodes.items():
@@ -531,13 +544,71 @@ class PathAnalyzer:
                 continue
             paths.extend(self._analyze_skill(skill_id))
         paths = self._dedupe(paths)
+        out: List[AttackPath] = []
         for p in paths:
             classify_path(p)
             assess_risk(p)
             p.breakpoints = breakpoints_for(p)
+            if compose:
+                if not self._set_composition(p):
+                    continue  # only genuinely multi-component walks qualify
+            out.append(p)
         # De-duplication ordering is unaffected by classification/risk (both are
         # derived purely from the already-ordered node/edge sequences).
-        return paths
+        return out
+
+    # --- Composition --------------------------------------------------------
+
+    def _node_component(self, node_id: str) -> Optional[str]:
+        """Return the semantic component id attributable to a node, or None.
+
+        A SKILL node carries its component in its node id (``SKILL:<comp>``).
+        A DATA/SECRET/other object node is attributed to the component of the
+        skill that PRODUCES it (via a real PRODUCES edge). Nodes with no
+        producer and no skill component yield None (unattributed). This never
+        invents a component from a shared file/endpoint/name — attribution comes
+        only from the actual graph structure.
+        """
+        if node_id is None:
+            return None
+        kind = _node_kind(node_id)
+        if kind == "SKILL":
+            return node_id.split(":", 1)[1] if ":" in node_id else None
+        producer = self._producers.get(node_id)
+        if producer is not None:
+            return self._node_component(producer)
+        return None
+
+    def _set_composition(self, path: "AttackPath") -> bool:
+        """Populate is_composed / component_ids for a walk; return whether composed.
+
+        Composition is established ONLY at a FLOWS_TO lineage handoff: when a
+        FLOWS_TO edge's target object is PRODUCED by a skill of a different
+        component than the one the walk currently runs in. READS and SENDS_TO
+        edges stay anchored at the running component. This deliberately avoids
+        the shared-name false positive (component B merely READING an object that
+        happens to share a name with one component A produced), which would be
+        inferred composition. component_ids preserves the ordered component
+        traversal; metadata never changes path_id.
+        """
+        ordered: List[str] = []
+        seen: Set[str] = set()
+        # Running component: the root skill's component. Root skill is nodes[0].
+        current = self._node_component(path.nodes[0]) if path.nodes else None
+        if current is not None and current not in seen:
+            seen.add(current)
+            ordered.append(current)
+        for (s, t, et) in path.edges:
+            if et == EdgeType.FLOWS_TO.value:
+                target_comp = self._node_component(t)
+                if target_comp is not None and target_comp != current:
+                    if target_comp not in seen:
+                        seen.add(target_comp)
+                        ordered.append(target_comp)
+                    current = target_comp
+        path.component_ids = ordered
+        path.is_composed = len(ordered) > 1
+        return path.is_composed
 
     # --- Per-skill analysis -------------------------------------------------
 

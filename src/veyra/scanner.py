@@ -194,6 +194,28 @@ def _build_attack_paths(findings: List[Finding], file_texts: List[tuple]) -> Lis
 
         all_paths.extend(PathAnalyzer(graph).analyze())
 
+    # Cross-component composition: analyze one MERGED graph built from all
+    # components. Only genuinely cross-component walks (real PRODUCES
+    # attribution on the merged graph's ordered walk) are returned by
+    # analyze(compose=True); single-component paths are filtered out, so this
+    # never duplicates or short-circuits the local paths above, and never
+    # infers composition from shared names alone.
+    flat_findings: List = []
+    for key in sorted(findings_by_component):
+        flat_findings.extend(findings_by_component.get(key, []))
+    merged = build_from_findings(flat_findings, source="<agent>")
+    for key in sorted(actions_by_component):
+        if not actions_by_component.get(key):
+            continue
+        action_graph = build_from_actions(actions_by_component[key], subject_id=key)
+        for node in action_graph.nodes.values():
+            if merged.get_node(node.id) is None:
+                merged.get_or_create(node.id, node.type, label=node.label)
+        for edge in action_graph.edges:
+            merged.add_edge(edge.source, edge.target, edge.type,
+                            attributes=dict(edge.attributes))
+    all_paths.extend(PathAnalyzer(merged).analyze(compose=True))
+
     return all_paths
 
 

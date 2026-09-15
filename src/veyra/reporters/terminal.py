@@ -63,6 +63,8 @@ def render_terminal(result: ScanResult) -> str:
             short = p.path_id[:10]
             lines.append(f"  [{p.risk_severity.value}] [{p.attack_type.value}] risk={p.risk_score} (id {short}) {p.title}")
             lines.append(f"    {' → '.join(p.nodes)}")
+            if p.is_composed:
+                lines.append(f"    Components: {' → '.join(p.component_ids)}")
             if p.attack_type and p.attack_type.value != "UNKNOWN":
                 lines.append(f"    ({p.attack_type.value}: {p.explanation})")
             if p.breakpoints:
