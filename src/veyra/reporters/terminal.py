@@ -73,4 +73,16 @@ def render_terminal(result: ScanResult) -> str:
                     lines.append(f"      - {b.edge_type}: {b.reason}")
         lines.append("")
 
+    # Policy Violations: only violated PolicyResults, in the existing
+    # PolicyEngine ordering. Non-violating results are never shown here.
+    violations = [r for r in result.policy_results if r.violated]
+    if violations:
+        lines.append("Policy Violations")
+        lines.append("----------------")
+        for r in violations:
+            lines.append(f"- {r.policy_id}")
+            lines.append(f"  Path: {r.path_id}")
+            lines.append(f"  Reason: {r.reason}")
+        lines.append("")
+
     return "\n".join(lines)
