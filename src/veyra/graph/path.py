@@ -609,33 +609,38 @@ class PathAnalyzer:
                 origins.append(edge)
         return origins
 
-    def _handoff_chain_from(self, start: str) -> Tuple[List[str], List[Tuple[str, str, str]]]:
-        """The single maximal HANDOFF chain reachable from ``start``.
+    def _handoff_paths(self, head: str) -> List[Tuple[List[str], List[Tuple[str, str, str]]]]:
+        """Enumerate every MAXIMAL HANDOFF path reachable from ``head``.
 
-        Walks forward through SKILL nodes connected by real HANDOFF edges, never
-        revisiting a node (cycle/duplicate guard). Returns (nodes, edges) where
-        nodes[0] == start. Deterministic ordering via sorted handoff targets.
+        Branch-aware: at each node all outgoing HANDOFF edges are considered, so
+        ``A -> B`` / ``A -> C`` yield two separate paths. A path is emitted only
+        when it cannot be extended: the current node has no outgoing HANDOFF, or
+        every following target would revisit a node already in the walk (cycle
+        guard). This yields maximal leaf paths — ``A -> B -> C`` is emitted as
+        one path, never ``A -> B`` or ``B -> C``. Traversal is deterministic
+        (outgoing edges sorted by target). Never revisits a node within a walk,
+        so it is bounded and finite.
         """
-        nodes: List[str] = [start]
-        edges: List[Tuple[str, str, str]] = []
-        seen: Set[str] = {start}
-        cur = start
-        while True:
+        results: List[Tuple[List[str], List[Tuple[str, str, str]]]] = []
+
+        def dfs(nodes: List[str], edges: List[Tuple[str, str, str]]):
+            cur = nodes[-1]
             handoffs = [e for e in self._adj.get(cur, [])
                         if e.type == EdgeType.HANDOFF]
             handoffs.sort(key=lambda e: (e.target, e.type.value))
-            nxt = None
+            extended = False
             for e in handoffs:
-                if e.target not in seen:
-                    nxt = e.target
-                    break
-            if nxt is None:
-                break
-            seen.add(nxt)
-            edges.append((cur, nxt, EdgeType.HANDOFF.value))
-            nodes.append(nxt)
-            cur = nxt
-        return nodes, edges
+                if e.target in nodes:
+                    continue  # cycle guard — would revisit a node in this walk
+                extended = True
+                dfs(nodes + [e.target], edges + [(cur, e.target, EdgeType.HANDOFF.value)])
+            if not extended:
+                # Leaf: no extendable outgoing edge from this walk.
+                if edges:
+                    results.append((list(nodes), list(edges)))
+
+        dfs([head], [])
+        return results
 
     def _has_incoming_handoff(self, skill_id: str) -> bool:
         """True if ``skill_id`` is the target of some HANDOFF edge in the graph."""
@@ -645,25 +650,22 @@ class PathAnalyzer:
         return False
 
     def _handoff_chains(self, skill_id: str) -> List[Tuple[List[str], List[Tuple[str, str, str]]]]:
-        """Return the maximal HANDOFF chains that START at ``skill_id``.
+        """Return the maximal HANDOFF paths that START at ``skill_id``.
 
-        A chain is emitted only when ``skill_id`` is a true chain head — it has
-        no incoming HANDOFF edge — so ``A -> B -> C`` yields exactly ONE composed
-        chain ``(A, B, C)`` and never redundant sub-chains ``(B, C)`` or ``(C)``.
-        A skill with an incoming HANDOFF is a continuation, not a new chain. This
-        keeps multi-hop composition deduplicated and deterministic.
+        A head is a SKILL node with at least one outgoing HANDOFF edge and NO
+        incoming HANDOFF edge. Every branch-aware maximal path from the head is
+        emitted (see _handoff_paths). This keeps multi-hop composition complete,
+        deduplicated, and deterministic.
 
-        A pure HANDOFF cycle (``A -> B -> C -> A``) has no unambiguous chain head
-        (every node has an incoming HANDOFF), so conservatively no composed path
-        is emitted rather than an arbitrary rotation. Analysis is bounded because
-        ``_handoff_chain_from`` never revisits a node within a walk.
+        A pure HANDOFF cycle (``A -> B -> C -> A``) has no true head, so
+        conservatively no composed path is emitted. A head-attached cycle is
+        handled by the per-walk revisit guard. Analysis is bounded and finite.
         """
         if self._has_incoming_handoff(skill_id):
             return []
-        nodes, edges = self._handoff_chain_from(skill_id)
-        if not edges:
-            return []
-        return [(nodes, edges)]
+        paths = self._handoff_paths(skill_id)
+        # Keep only maximal paths that contain at least one HANDOFF edge.
+        return [(n, e) for (n, e) in paths if e]
 
     def _analyze_skill(self, skill_id: str) -> List[AttackPath]:
         paths: List[AttackPath] = []
