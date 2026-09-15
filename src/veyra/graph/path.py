@@ -52,11 +52,6 @@ _SEND_EDGES = {EdgeType.SENDS_TO}
 # Edge types that represent executing something.
 _EXEC_EDGES = {EdgeType.EXECUTES}
 
-# Edge types that explicitly transfer control between semantic components.
-# HANDOFF is NOT a data-flow edge and is NOT an exfiltration sink; a walk that
-# ends on it proves a component handoff, never secret/data exfiltration.
-_HANDOFF_EDGES = {EdgeType.HANDOFF}
-
 # Type-based rank for a path's worst (most dangerous) component.
 _SEV_RANK = {Severity.CRITICAL.value: 4, Severity.HIGH.value: 3,
              Severity.MEDIUM.value: 2, Severity.LOW.value: 1, Severity.INFO.value: 0}
@@ -614,19 +609,76 @@ class PathAnalyzer:
                 origins.append(edge)
         return origins
 
+    def _handoff_chain_from(self, start: str) -> Tuple[List[str], List[Tuple[str, str, str]]]:
+        """The single maximal HANDOFF chain reachable from ``start``.
+
+        Walks forward through SKILL nodes connected by real HANDOFF edges, never
+        revisiting a node (cycle/duplicate guard). Returns (nodes, edges) where
+        nodes[0] == start. Deterministic ordering via sorted handoff targets.
+        """
+        nodes: List[str] = [start]
+        edges: List[Tuple[str, str, str]] = []
+        seen: Set[str] = {start}
+        cur = start
+        while True:
+            handoffs = [e for e in self._adj.get(cur, [])
+                        if e.type == EdgeType.HANDOFF]
+            handoffs.sort(key=lambda e: (e.target, e.type.value))
+            nxt = None
+            for e in handoffs:
+                if e.target not in seen:
+                    nxt = e.target
+                    break
+            if nxt is None:
+                break
+            seen.add(nxt)
+            edges.append((cur, nxt, EdgeType.HANDOFF.value))
+            nodes.append(nxt)
+            cur = nxt
+        return nodes, edges
+
+    def _has_incoming_handoff(self, skill_id: str) -> bool:
+        """True if ``skill_id`` is the target of some HANDOFF edge in the graph."""
+        for e in self.graph.edges:
+            if e.type == EdgeType.HANDOFF and e.target == skill_id:
+                return True
+        return False
+
+    def _handoff_chains(self, skill_id: str) -> List[Tuple[List[str], List[Tuple[str, str, str]]]]:
+        """Return the maximal HANDOFF chains that START at ``skill_id``.
+
+        A chain is emitted only when ``skill_id`` is a true chain head — it has
+        no incoming HANDOFF edge — so ``A -> B -> C`` yields exactly ONE composed
+        chain ``(A, B, C)`` and never redundant sub-chains ``(B, C)`` or ``(C)``.
+        A skill with an incoming HANDOFF is a continuation, not a new chain. This
+        keeps multi-hop composition deduplicated and deterministic.
+
+        A pure HANDOFF cycle (``A -> B -> C -> A``) has no unambiguous chain head
+        (every node has an incoming HANDOFF), so conservatively no composed path
+        is emitted rather than an arbitrary rotation. Analysis is bounded because
+        ``_handoff_chain_from`` never revisits a node within a walk.
+        """
+        if self._has_incoming_handoff(skill_id):
+            return []
+        nodes, edges = self._handoff_chain_from(skill_id)
+        if not edges:
+            return []
+        return [(nodes, edges)]
+
     def _analyze_skill(self, skill_id: str) -> List[AttackPath]:
         paths: List[AttackPath] = []
         read_origins = self._read_origins(skill_id)
         exec_edges = self._skill_edges(skill_id, _EXEC_EDGES)
-        handoff_edges = self._skill_edges(skill_id, _HANDOFF_EDGES)
 
-        # --- Pattern 0: explicit component handoff -------------------------
-        # SKILL:A --HANDOFF--> SKILL:B is a truthful control/component transfer.
-        # It is a contiguous walk proving a handoff. It does NOT prove secret or
-        # data exfiltration, and is never a data-lineage traversal.
-        for handoff in handoff_edges:
-            paths.append(self._make_path(
-                [skill_id, handoff[1]], [handoff], [], "handoff"))
+        # --- Pattern 0: explicit component handoff chains -------------------
+        # SKILL:A --HANDOFF--> SKILL:B [--HANDOFF--> SKILL:C ...] is a truthful
+        # control/component transfer. Each MAXIMAL contiguous HANDOFF chain is
+        # emitted as one multi-hop composed AttackPath. It does NOT prove secret
+        # or data exfiltration, and is never a data-lineage traversal. A node is
+        # never revisited within a chain (cycle-guarded), so the walk is bounded
+        # and finite.
+        for nodes, edges in self._handoff_chains(skill_id):
+            paths.append(self._make_path(nodes, edges, [], "handoff"))
 
         # --- Pattern 3: Secret + execution (shared-skill correlation) ------
         # The walk is Skill --EXECUTES--> Action (contiguous). The Secret read
