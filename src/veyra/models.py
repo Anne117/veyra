@@ -127,4 +127,8 @@ class ScanResult:
         }
         if self.attack_paths:
             d["attack_paths"] = [p.to_dict() for p in self.attack_paths]
+        # Pure projection of the finalized PolicyEngine evaluation results.
+        # Always present (including an empty list for clean scans) so the JSON
+        # representation is stable and complete regardless of findings.
+        d["policy_results"] = [r.to_dict() for r in self.policy_results]
         return d
