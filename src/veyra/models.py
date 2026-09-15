@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from veyra.graph.path import AttackPath
+    from veyra.policy import PolicyResult
 
 
 class Severity(str, Enum):
@@ -92,6 +93,10 @@ class ScanResult:
     target: str
     findings: List[Finding] = field(default_factory=list)
     attack_paths: List["AttackPath"] = field(default_factory=list)
+    # Deterministic policy evaluation results over the finalized attack paths.
+    # Empty by default so existing callers that construct ScanResult manually
+    # continue to work without specifying policy_results.
+    policy_results: List["PolicyResult"] = field(default_factory=list)
 
     @property
     def score(self) -> int:

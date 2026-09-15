@@ -131,7 +131,14 @@ def scan_path(target: str) -> ScanResult:
             f.matched_text = f.evidence or ""
 
     result = ScanResult(target=target, findings=findings)
-    result.attack_paths = _build_attack_paths(findings, file_texts)
+    attack_paths = _build_attack_paths(findings, file_texts)
+    result.attack_paths = attack_paths
+    # Evaluate the FINALIZED, deduplicated AttackPath objects with the built-in
+    # PolicyEngine. PolicyEngine is the sole owner of policy trigger semantics;
+    # the scanner only orchestrates finalized_paths -> evaluate() ->
+    # ScanResult.policy_results. Local import avoids any import cycle.
+    from veyra.policy import PolicyEngine
+    result.policy_results = PolicyEngine().evaluate(attack_paths)
     return result
 
 
