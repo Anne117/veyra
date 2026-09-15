@@ -38,6 +38,14 @@ class EdgeType(str, Enum):
     PRODUCES = "PRODUCES"
     FLOWS_TO = "FLOWS_TO"
     TRUSTS = "TRUSTS"
+    # HANDOFF: an explicit, agentic CONTROL/COMPONENT transfer between two
+    # semantic components (SKILL -> SKILL). It represents a hand-off of control
+    # from one component to another. It does NOT mean data lineage, generic
+    # dependency, data production/consumption, endpoint usage, MCP trust, or
+    # arbitrary adjacency. The presence of HANDOFF in a contiguous walk is
+    # evidence of cross-component composition; it alone never proves
+    # secret/data exfiltration.
+    HANDOFF = "HANDOFF"
 
 
 @dataclass

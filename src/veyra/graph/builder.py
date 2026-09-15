@@ -360,3 +360,31 @@ def build_from_actions(actions: List, subject_id: str = "<agent>") -> SecurityGr
             graph.add_edge(subject_node.id, act_node.id, EdgeType.EXECUTES)
 
     return graph
+
+
+def add_handoff(graph: SecurityGraph, source_comp: str, target_comp: str,
+                attributes: Optional[Dict[str, Any]] = None) -> Edge:
+    """Add an explicit agentic component handoff to an existing graph.
+
+    Creates (or reuses) the two SKILL components and adds a single
+    ``SKILL:source --HANDOFF--> SKILL:target`` edge. This is an EXPLICIT,
+    graph-construction-level primitive: it is never inferred automatically by
+    the scanner (the Action model has no verb/category for a component
+    transfer), and it is never derived from shared DATA/SECRET/ENDPOINT/MCP
+    identity, PRODUCES, READS, USES, or FLOWS_TO.
+
+    Semantics: a HANDOFF is a control/component transfer between two SKILLs. It
+    does NOT mean data lineage, dependency, production, consumption, endpoint
+    usage, MCP trust, or adjacency. It participates in a contiguous walk as a
+    component-composition signal, but by itself it never proves secret/data
+    exfiltration.
+
+    ``attributes`` is optional deterministic metadata (e.g. an ``object`` id
+    naming what is handed off); it does not affect graph topology.
+    """
+    src = graph.get_or_create(_node_id(NodeType.SKILL, source_comp),
+                              NodeType.SKILL, label=source_comp)
+    tgt = graph.get_or_create(_node_id(NodeType.SKILL, target_comp),
+                              NodeType.SKILL, label=target_comp)
+    return graph.add_edge(src.id, tgt.id, EdgeType.HANDOFF,
+                          attributes=attributes or {})

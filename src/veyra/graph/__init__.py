@@ -6,7 +6,7 @@ lightweight, deterministic, additive layer — it does not modify the scanner,
 rules, correlation, or Attack Lab.
 """
 
-from veyra.graph.builder import build_from_actions, build_from_findings
+from veyra.graph.builder import add_handoff, build_from_actions, build_from_findings
 from veyra.graph.models import (
     Edge,
     EdgeType,
@@ -30,6 +30,7 @@ from veyra.graph.path import (
 __all__ = [
     "build_from_actions",
     "build_from_findings",
+    "add_handoff",
     "Edge",
     "EdgeType",
     "Node",

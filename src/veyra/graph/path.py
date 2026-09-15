@@ -52,6 +52,11 @@ _SEND_EDGES = {EdgeType.SENDS_TO}
 # Edge types that represent executing something.
 _EXEC_EDGES = {EdgeType.EXECUTES}
 
+# Edge types that explicitly transfer control between semantic components.
+# HANDOFF is NOT a data-flow edge and is NOT an exfiltration sink; a walk that
+# ends on it proves a component handoff, never secret/data exfiltration.
+_HANDOFF_EDGES = {EdgeType.HANDOFF}
+
 # Type-based rank for a path's worst (most dangerous) component.
 _SEV_RANK = {Severity.CRITICAL.value: 4, Severity.HIGH.value: 3,
              Severity.MEDIUM.value: 2, Severity.LOW.value: 1, Severity.INFO.value: 0}
@@ -613,6 +618,15 @@ class PathAnalyzer:
         paths: List[AttackPath] = []
         read_origins = self._read_origins(skill_id)
         exec_edges = self._skill_edges(skill_id, _EXEC_EDGES)
+        handoff_edges = self._skill_edges(skill_id, _HANDOFF_EDGES)
+
+        # --- Pattern 0: explicit component handoff -------------------------
+        # SKILL:A --HANDOFF--> SKILL:B is a truthful control/component transfer.
+        # It is a contiguous walk proving a handoff. It does NOT prove secret or
+        # data exfiltration, and is never a data-lineage traversal.
+        for handoff in handoff_edges:
+            paths.append(self._make_path(
+                [skill_id, handoff[1]], [handoff], [], "handoff"))
 
         # --- Pattern 3: Secret + execution (shared-skill correlation) ------
         # The walk is Skill --EXECUTES--> Action (contiguous). The Secret read
@@ -716,7 +730,13 @@ class PathAnalyzer:
 
     def _describe(self, kind: str, nodes: List[str],
                   edges: List[Tuple[str, str, str]]) -> Tuple[str, str]:
-        if kind == "execution":
+        if kind == "handoff":
+            title = "Cross-component control handoff"
+            desc = ("Control is explicitly handed off from one semantic "
+                    "component to another. This proves a component transfer; "
+                    "it does not, by itself, establish secret or data "
+                    "exfiltration.")
+        elif kind == "execution":
             title = "Secret access followed by command execution"
             desc = ("A secret is read, and the skill also executes an action. "
                     "This may indicate credentials are used to power a command. "
