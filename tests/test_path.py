@@ -8,6 +8,8 @@ from veyra.graph import (
     PathAnalyzer,
     SecurityGraph,
     build_from_actions,
+    canonical_path_identity,
+    path_id_of,
 )
 from veyra.models import Confidence, Severity
 from veyra.step_sequence import Action
@@ -282,3 +284,175 @@ def test_attackpath_to_dict():
     d = p.to_dict()
     assert "nodes" in d and "edges" in d and "associated_edges" in d
     assert "severity" in d and "title" in d and "confidence" in d
+
+
+# --- Commit 7: Attack Paths as first-class stable security objects -----------
+# path_id must be a deterministic semantic identity, independent of insertion
+# order, dedup of equivalent findings, unaffected by severity/confidence, and
+# serialized into to_dict().
+
+
+def test_path_id_deterministic_and_semantic():
+    """identical semantic content => identical path_id; different => different."""
+    nodes = ["SKILL:skill", "SECRET:token", "ENDPOINT:https://evil.com"]
+    edges = [("SKILL:skill", "SECRET:token", "READS"),
+             ("SECRET:token", "ENDPOINT:https://evil.com", "SENDS_TO")]
+    a = path_id_of(nodes, edges, [])
+    b = path_id_of(list(nodes), list(edges), [])
+    assert a == b
+    # A genuinely different semantic path (different endpoint) differs.
+    other = path_id_of(nodes[:-1] + ["ENDPOINT:https://other.com"], edges[:-1] +
+                       [("SECRET:token", "ENDPOINT:https://other.com", "SENDS_TO")], [])
+    assert other != a
+
+
+def test_path_id_independent_of_associated_insertion_order():
+    """associated_edges sorted => order-insensitive identity."""
+    nodes = ["SKILL:s", "ACTION:run"]
+    edges = [("SKILL:s", "ACTION:run", "EXECUTES")]
+    assoc_a = [("SKILL:s", "SECRET:a", "READS"), ("SKILL:s", "SECRET:b", "READS")]
+    assoc_b = [("SKILL:s", "SECRET:b", "READS"), ("SKILL:s", "SECRET:a", "READS")]
+    assert path_id_of(nodes, edges, assoc_a) == path_id_of(nodes, edges, assoc_b)
+
+
+def test_path_id_stable_across_different_graph_insertion_order():
+    """Same semantics inserted in different order => identical path_id (A)."""
+    def build(secret_first: bool):
+        g = SecurityGraph()
+        s = Node(id="SKILL:skill", type=NodeType.SKILL)
+        sec = Node(id="SECRET:token", type=NodeType.SECRET)
+        d = Node(id="DATA:payload", type=NodeType.DATA)
+        ep = Node(id="ENDPOINT:https://evil.com", type=NodeType.ENDPOINT)
+        order = [s, sec, d, ep] if secret_first else [ep, d, sec, s]
+        for n in order:
+            g.add_node(n)
+        g.add_edge(s.id, sec.id, EdgeType.READS)
+        g.add_edge(sec.id, d.id, EdgeType.FLOWS_TO)
+        g.add_edge(d.id, ep.id, EdgeType.SENDS_TO)
+        return _paths(g)[0]
+    p1 = build(True)
+    p2 = build(False)
+    assert p1.to_dict()["path_id"] == p2.to_dict()["path_id"]
+    assert p1.path_id == p2.path_id
+
+
+def test_duplicate_equivalent_paths_deduped_to_one():
+    """Equivalent findings producing the same semantic path => one AttackPath (B)."""
+    g = SecurityGraph()
+    s = Node(id="SKILL:skill", type=NodeType.SKILL)
+    sec = Node(id="SECRET:token", type=NodeType.SECRET)
+    ep = Node(id="ENDPOINT:https://evil.com", type=NodeType.ENDPOINT)
+    for n in (s, sec, ep):
+        g.add_node(n)
+    # Duplicate/equivalent findings both add the same READS and SENDS_TO edges.
+    g.add_edge(s.id, sec.id, EdgeType.READS)
+    g.add_edge(s.id, sec.id, EdgeType.READS)          # duplicate reads finding
+    g.add_edge(sec.id, ep.id, EdgeType.SENDS_TO)
+    g.add_edge(sec.id, ep.id, EdgeType.SENDS_TO)      # duplicate send finding
+    paths = _paths(g)
+    assert len(paths) == 1
+    p = paths[0]
+    assert p.to_dict()["path_id"] == path_id_of(p.nodes, p.edges, p.associated_edges)
+
+
+def test_distinct_semantic_paths_get_distinct_ids():
+    """Two genuinely different semantic paths => different path_ids (C)."""
+    g = SecurityGraph()
+    s = Node(id="SKILL:skill", type=NodeType.SKILL)
+    sec = Node(id="SECRET:token", type=NodeType.SECRET)
+    epA = Node(id="ENDPOINT:https://a.com", type=NodeType.ENDPOINT)
+    epB = Node(id="ENDPOINT:https://b.com", type=NodeType.ENDPOINT)
+    for n in (s, sec, epA, epB):
+        g.add_node(n)
+    g.add_edge(s.id, sec.id, EdgeType.READS)
+    g.add_edge(sec.id, epA.id, EdgeType.SENDS_TO)
+    g.add_edge(sec.id, epB.id, EdgeType.SENDS_TO)
+    paths = _paths(g)
+    assert len(paths) == 2
+    ids = {p.to_dict()["path_id"] for p in paths}
+    assert len(ids) == 2
+
+
+def test_path_id_unchanged_by_severity_confidence():
+    """Changing severity/confidence must not change path_id (D)."""
+    base_nodes = ["SKILL:skill", "SECRET:token", "ENDPOINT:https://evil.com"]
+    base_edges = [("SKILL:skill", "SECRET:token", "READS"),
+                  ("SECRET:token", "ENDPOINT:https://evil.com", "SENDS_TO")]
+    from veyra.graph import AttackPath as _AP
+    lo = _AP(nodes=list(base_nodes), edges=list(base_edges),
+             severity=Severity.LOW, confidence=Confidence.LOW)
+    hi = _AP(nodes=list(base_nodes), edges=list(base_edges),
+             severity=Severity.CRITICAL, confidence=Confidence.HIGH)
+    lo.ensure_path_id()
+    hi.ensure_path_id()
+    assert lo.path_id == hi.path_id
+    assert lo.canonical_identity == hi.canonical_identity
+
+
+def test_stable_ordering_across_repeated_scans():
+    """Repeated scans of the same input yield identical path order (E)."""
+    g = SecurityGraph()
+    s = Node(id="SKILL:skill", type=NodeType.SKILL)
+    sec = Node(id="SECRET:token", type=NodeType.SECRET)
+    d = Node(id="DATA:payload", type=NodeType.DATA)
+    ep = Node(id="ENDPOINT:https://evil.com", type=NodeType.ENDPOINT)
+    for n in (s, sec, d, ep):
+        g.add_node(n)
+    g.add_edge(s.id, sec.id, EdgeType.READS)
+    g.add_edge(sec.id, d.id, EdgeType.FLOWS_TO)
+    g.add_edge(d.id, ep.id, EdgeType.SENDS_TO)
+    r1 = [x.to_dict()["path_id"] for x in _paths(g)]
+    r2 = [x.to_dict()["path_id"] for x in _paths(g)]
+    r3 = [x.to_dict()["path_id"] for x in _paths(g)]
+    assert r1 == r2 == r3
+
+
+def test_correlated_execution_identity_includes_secret():
+    """Correlated secret+execution: the associated secret is part of identity (F)."""
+    from veyra.graph import AttackPath as _AP
+    p = _AP(nodes=["SKILL:s", "ACTION:run"],
+            edges=[("SKILL:s", "ACTION:run", "EXECUTES")],
+            associated_edges=[("SKILL:s", "SECRET:token", "READS")])
+    # Without the associated secret read the identity must differ, proving the
+    # correlated evidence is represented in the identity.
+    q = _AP(nodes=["SKILL:s", "ACTION:run"],
+            edges=[("SKILL:s", "ACTION:run", "EXECUTES")])
+    assert p.canonical_identity != q.canonical_identity
+    assert path_id_of(p.nodes, p.edges, p.associated_edges) != \
+        path_id_of(q.nodes, q.edges, q.associated_edges)
+    assert path_id_of(p.nodes, p.edges, [("SKILL:s", "SECRET:token", "READS")]) == \
+        path_id_of(p.nodes, p.edges, [("SKILL:s", "SECRET:token", "READS")])
+
+
+def test_to_dict_includes_path_id():
+    """Serialization includes path_id (G)."""
+    g = SecurityGraph()
+    s = Node(id="SKILL:skill", type=NodeType.SKILL)
+    sec = Node(id="SECRET:token", type=NodeType.SECRET)
+    ep = Node(id="ENDPOINT:https://evil.com", type=NodeType.ENDPOINT)
+    for n in (s, sec, ep):
+        g.add_node(n)
+    g.add_edge(s.id, sec.id, EdgeType.READS)
+    g.add_edge(sec.id, ep.id, EdgeType.SENDS_TO)
+    p = _paths(g)[0]
+    p.ensure_path_id()
+    d = p.to_dict()
+    assert "path_id" in d
+    assert d["path_id"] == path_id_of(p.nodes, p.edges, p.associated_edges)
+    assert len(d["path_id"]) == 64  # sha256 hex
+
+
+def test_metadata_title_does_not_change_identity():
+    """Rule-derived metadata (title/description) must not change identity."""
+    from veyra.graph import AttackPath as _AP
+    nodes = ["SKILL:skill", "SECRET:token", "ENDPOINT:https://evil.com"]
+    edges = [("SKILL:skill", "SECRET:token", "READS"),
+             ("SECRET:token", "ENDPOINT:https://evil.com", "SENDS_TO")]
+    # Same semantic path but different rule-derived titles/descriptions.
+    a = _AP(nodes=list(nodes), edges=list(edges), title="Secret exposed",
+            description="via rule A")
+    b = _AP(nodes=list(nodes), edges=list(edges), title="Exfil by rule B",
+            description="via rule B")
+    assert a.canonical_identity == b.canonical_identity
+    assert path_id_of(a.nodes, a.edges, a.associated_edges) == \
+        path_id_of(b.nodes, b.edges, b.associated_edges)

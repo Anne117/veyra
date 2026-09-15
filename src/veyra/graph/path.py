@@ -27,6 +27,7 @@ No database, no LLM, no runtime analysis.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Set, Tuple
@@ -81,6 +82,61 @@ def _node_kind(node_id: str) -> Optional[str]:
     if ":" in node_id:
         return node_id.split(":", 1)[0]
     return None
+
+
+# Canonical-identity delimiters. Unit/record separators cannot collide with the
+# printable node ids/edge types that make up a semantic path, so the encoding is
+# unambiguous without needing arbitrary Python repr() of the tuples.
+_FIELD_SEP = "\x1f"   # separates tokens inside a path field
+_RECORD_SEP = "\x1e"  # separates the nodes/edges/assoc fields
+
+
+def _sem_escape(s: str) -> str:
+    """Escape a token so it cannot collide with the identity delimiters."""
+    return s.replace("\\", "\\\\").replace(_FIELD_SEP, "\\x1f").replace(_RECORD_SEP, "\\x1e")
+
+
+def canonical_path_identity(
+    nodes: List[str],
+    edges: List[Tuple[str, str, str]],
+    associated_edges: List[Tuple[str, str, str]],
+) -> str:
+    """Deterministic, insertion-order-independent canonical representation.
+
+    The identity is the ordered node walk, the ordered edge walk, and the
+    associated (correlated) edges sorted into a stable order. It is derived
+    purely from SEMANTIC path content and excludes all mutable/evidentiary
+    metadata (severity, confidence, rule ids, insertion order, title). It is
+    identical for two paths that differ only in how the same semantics were
+    discovered or inserted into the graph.
+
+    The attack type is NOT included separately: it is fully derivable from the
+    contiguous node/edge sequence plus the associated reads (see
+    ``classify_path``), so any semantic difference that changes the attack type
+    already changes this identity, and identical identities always classify to
+    the same type.
+    """
+    fields = [
+        "N" + _FIELD_SEP + _FIELD_SEP.join(_sem_escape(n) for n in nodes),
+        "E" + _FIELD_SEP + _FIELD_SEP.join(
+            _FIELD_SEP.join((_sem_escape(s), _sem_escape(t), _sem_escape(et)))
+            for s, t, et in edges
+        ),
+        "A" + _FIELD_SEP + _FIELD_SEP.join(
+            _FIELD_SEP.join((_sem_escape(s), _sem_escape(t), _sem_escape(et)))
+            for s, t, et in sorted(associated_edges, key=lambda e: (e[0], e[1], e[2]))
+        ),
+    ]
+    return _RECORD_SEP.join(fields)
+
+
+def path_id_of(
+    nodes: List[str],
+    edges: List[Tuple[str, str, str]],
+    associated_edges: List[Tuple[str, str, str]],
+) -> str:
+    """A stable, compact semantic path_id derived from the canonical identity."""
+    return hashlib.sha256(canonical_path_identity(nodes, edges, associated_edges).encode("utf-8")).hexdigest()
 
 
 def classify_path(path: "AttackPath") -> "AttackPath":
@@ -179,6 +235,12 @@ class AttackPath:
     ``associated_edges`` hold shared-skill correlation edges (e.g. the Secret
     read for a ``Secret + execution`` path) that are NOT part of the linear
     walk and therefore never pretend to connect consecutive walk nodes.
+
+    ``path_id`` is a stable semantic identity derived from the canonical path
+    content (nodes + edges + sorted associated edges). It is independent of
+    insertion order and of mutable/evidentiary metadata (severity, confidence,
+    rule ids, title). Two paths with the same semantics always share a path_id;
+    genuinely different semantics always differ.
     """
     nodes: List[str]
     edges: List[Tuple[str, str, str]]
@@ -192,6 +254,7 @@ class AttackPath:
     asset_node: str = ""
     sink_node: str = ""
     explanation: str = ""
+    path_id: str = ""
 
     @property
     def is_contiguous(self) -> bool:
@@ -203,8 +266,20 @@ class AttackPath:
                 return False
         return True
 
+    @property
+    def canonical_identity(self) -> str:
+        """Canonical semantic identity (see canonical_path_identity)."""
+        return canonical_path_identity(self.nodes, self.edges, self.associated_edges)
+
+    def ensure_path_id(self) -> str:
+        """Populate and return a stable path_id if it is not already set."""
+        if not self.path_id:
+            self.path_id = path_id_of(self.nodes, self.edges, self.associated_edges)
+        return self.path_id
+
     def to_dict(self) -> Dict:
         return {
+            "path_id": self.path_id,
             "nodes": list(self.nodes),
             "edges": [{"source": s, "target": t, "type": et} for s, t, et in self.edges],
             "associated_edges": [{"source": s, "target": t, "type": et} for s, t, et in self.associated_edges],
@@ -360,6 +435,7 @@ class PathAnalyzer:
             confidence=confidence,
             title=title,
             description=description,
+            path_id=path_id_of(nodes, edges, assoc),
         )
 
     def _path_signals(self, edges: List[Tuple[str, str, str]],
@@ -403,16 +479,26 @@ class PathAnalyzer:
     # --- Deduplication -------------------------------------------------------
 
     def _dedupe(self, paths: List[AttackPath]) -> List[AttackPath]:
-        """Deduplicate by identical node/edge/associated sequences; sort deterministically."""
-        seen: Set[Tuple[Tuple[str, ...], Tuple[Tuple[str, str, str], ...],
-                        Tuple[Tuple[str, str, str], ...]]] = set()
+        """Deduplicate by canonical semantic identity; sort deterministically.
+
+        Two paths collapse to one when they share the same canonical identity
+        (identical ordered nodes, ordered edge walk, and associated edges as a
+        sorted set). This absorbs duplicate/equivalent findings and associated
+        evidence while preserving the first-seen useful metadata (title,
+        severity, confidence) where the existing architecture supports it. The
+        canonical identity excludes mutable/evidentiary metadata, so two
+        semantically identical paths never produce a duplicate.
+        """
+        seen: Set[str] = set()
         out: List[AttackPath] = []
         for p in paths:
-            key = (tuple(p.nodes), tuple(p.edges), tuple(p.associated_edges))
-            if key in seen:
+            ident = p.canonical_identity
+            if ident in seen:
                 continue
-            seen.add(key)
+            seen.add(ident)
             out.append(p)
-        out.sort(key=lambda p: (-_SEV_RANK[p.severity.value], p.nodes,
-                                tuple(p.edges), tuple(p.associated_edges)))
+        # Stable semantic ordering by path_id (a deterministic hash of the
+        # canonical identity). Never relies on raw set/dict iteration so the
+        # same graph analyzed repeatedly yields identical path order.
+        out.sort(key=lambda p: p.path_id)
         return out

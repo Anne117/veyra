@@ -59,7 +59,9 @@ def render_terminal(result: ScanResult) -> str:
         lines.append("Attack Paths")
         lines.append("-----------")
         for p in result.attack_paths:
-            lines.append(f"  [{p.severity.value}] {p.title}")
+            p.ensure_path_id()
+            short = p.path_id[:10]
+            lines.append(f"  [{p.severity.value}] {p.title}  (id {short})")
             lines.append(f"    {' → '.join(p.nodes)}")
             if p.attack_type and p.attack_type.value != "UNKNOWN":
                 lines.append(f"    ({p.attack_type.value}: {p.explanation})")
