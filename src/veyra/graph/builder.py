@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from veyra.graph.models import EdgeType, Node, NodeType, SecurityGraph
 from veyra.models import Confidence, Finding, Severity
+from veyra.step_sequence import ACTION_CATEGORY_TRANSFER
 
 _URL = re.compile(r"https?://[^\s'\"]+", re.IGNORECASE)
 
@@ -358,6 +359,15 @@ def build_from_actions(actions: List, subject_id: str = "<agent>") -> SecurityGr
                 label=verb,
             )
             graph.add_edge(subject_node.id, act_node.id, EdgeType.EXECUTES)
+        elif cat == ACTION_CATEGORY_TRANSFER and action.destination:
+            # Explicit component-transfer evidence: destination is the canonical
+            # target component identity. This is a control relation (HANDOFF),
+            # never data lineage; add_handoff creates exactly one explicit
+            # SKILL:subject --HANDOFF--> SKILL:target edge. The scanner never
+            # emits TRANSFER automatically, so this only fires when a caller
+            # supplies an explicit, already-resolved target component.
+            add_handoff(graph, subject_id, action.destination.strip(),
+                        attributes={"evidence": "explicit component-transfer action"})
 
     return graph
 

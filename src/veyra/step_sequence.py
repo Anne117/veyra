@@ -135,12 +135,28 @@ class Action:
 
     Preserves semantic identity between actions so the correlation layer can
     determine whether the same object flows from a source to a sink.
+
+    ``category`` is one of the step-category strings (SOURCE, SENSITIVE,
+    DOWNLOAD, NETWORK, EXECUTION, TRANSFORM) or the explicit component-transfer
+    category ``TRANSFER``. A ``TRANSFER`` action represents explicit
+    component-transfer EVIDENCE: ``destination`` names the canonical target
+    semantic component that control is handed off to. It is NEVER produced
+    automatically by the source parser — an operation such as a generic function
+    call, HTTP request, import, or endpoint/tool/MCP use is not a component
+    transfer and the scanner classifies it exactly as before. A ``TRANSFER``
+    action is only ever constructed by code that has explicit knowledge of the
+    target component identity.
     """
     verb: str
     object: str
     destination: Optional[str]
     category: str
     output: Optional[str] = None  # for TRANSFORM: the produced object
+
+
+# Explicit component-transfer category. Only used when an action's ``destination``
+# is a canonical target component identity; the source scanner never emits it.
+ACTION_CATEGORY_TRANSFER = "TRANSFER"
 
 
 # Leading modifier/determiner words stripped during object normalization.
