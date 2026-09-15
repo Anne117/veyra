@@ -163,6 +163,109 @@ def assess_risk(path: "AttackPath") -> "AttackPath":
     return path
 
 
+# --- Deterministic breakpoints ------------------------------------------------
+# A breakpoint is an EXISTING semantic graph edge on the attack path whose
+# removal would interrupt the proven attack. We only reference edges that are
+# actually present (either in the contiguous walk ``path.edges`` or, for a
+# correlated execution, the associated shared-skill read). We never fabricate
+# edges, never claim a breakpoint "fixes" a vulnerability, and never invent a
+# secret->action flow edge for a correlation that does not exist.
+
+# Small controlled vocabulary for which semantic portion the breakpoint affects.
+class BreakpointImpact(str, Enum):
+    ACCESS = "ACCESS"                      # getting at the sensitive asset
+    DATA_FLOW = "DATA_FLOW"                # object-to-object data lineage
+    EXTERNAL_TRANSMISSION = "EXTERNAL_TRANSMISSION"  # sending to an endpoint
+    EXECUTION = "EXECUTION"                # running a correlated action
+
+
+# Deterministic reason for each breakpoint edge type. Wording is deliberately
+# modest — it names what is interrupted, never "fixes the vulnerability".
+_BREAKPOINT_REASONS = {
+    "READS": "Restricts access to the sensitive asset.",
+    "FLOWS_TO": "Breaks the proven data lineage.",
+    "SENDS_TO": "Prevents transmission to the external endpoint.",
+    "EXECUTES": "Restricts execution of the correlated action.",
+}
+
+_BREAKPOINT_IMPACTS = {
+    "READS": BreakpointImpact.ACCESS,
+    "FLOWS_TO": BreakpointImpact.DATA_FLOW,
+    "SENDS_TO": BreakpointImpact.EXTERNAL_TRANSMISSION,
+    "EXECUTES": BreakpointImpact.EXECUTION,
+}
+
+
+@dataclass
+class Breakpoint:
+    """An existing semantic graph edge whose removal interrupts the attack path.
+
+    References an ACTUAL edge from the AttackPath (walk ``edges`` or, for a
+    correlated execution, an associated shared-skill read). ``edge_type`` is the
+    graph edge type; ``impact`` names the affected semantic portion from the
+    small controlled vocabulary; ``reason`` is a deterministic, modest statement
+    of what the edge's removal interrupts — never a "fix" or a stronger claim.
+    """
+    source_node: str
+    target_node: str
+    edge_type: str
+    reason: str
+    impact: BreakpointImpact
+
+    def to_dict(self) -> Dict:
+        return {
+            "source_node": self.source_node,
+            "target_node": self.target_node,
+            "edge_type": self.edge_type,
+            "reason": self.reason,
+            "impact": self.impact.value,
+        }
+
+
+def breakpoints_for(path: "AttackPath") -> List[Breakpoint]:
+    """Return the deterministic breakpoints for a classified attack path.
+
+    SECRET_EXFILTRATION / DATA_EXFILTRATION: every edge of the contiguous walk
+    (READS, each FLOWS_TO, SENDS_TO) is a necessary step of the proven lineage,
+    so each is listed in walk order.
+
+    CORRELATED_SECRET_EXECUTION: there is NO secret->action flow edge. We expose
+    only the actual control edges that contribute to the shared-skill
+    correlation: the walk's EXECUTES edge and the associated READS secret edge.
+    Both are labelled as correlation/control points, never as a data-flow
+    breakpoint.
+
+    UNKNOWN: no supported attack semantic, so no breakpoints.
+    """
+    attack_type = path.attack_type if path.is_contiguous else AttackType.UNKNOWN
+    bp: List[Breakpoint] = []
+
+    if attack_type in (AttackType.SECRET_EXFILTRATION, AttackType.DATA_EXFILTRATION):
+        for (s, t, et) in path.edges:
+            reason = _BREAKPOINT_REASONS.get(et)
+            impact = _BREAKPOINT_IMPACTS.get(et)
+            if reason is None or impact is None:
+                continue  # only known semantic edge types become breakpoints
+            bp.append(Breakpoint(s, t, et, reason, impact))
+        return bp
+
+    if attack_type == AttackType.CORRELATED_SECRET_EXECUTION:
+        # Walk edge: SKILL --EXECUTES--> ACTION (a control/correlation point).
+        for (s, t, et) in path.edges:
+            if et == "EXECUTES":
+                bp.append(Breakpoint(s, t, et,
+                                     _BREAKPOINT_REASONS[et], _BREAKPOINT_IMPACTS[et]))
+        # Associated shared-skill read: SKILL --READS--> SECRET. Deterministic
+        # ordering by (source, target) so it never depends on insertion order.
+        for (s, t, et) in sorted(path.associated_edges, key=lambda e: (e[0], e[1], e[2])):
+            if et == "READS":
+                bp.append(Breakpoint(s, t, et,
+                                     _BREAKPOINT_REASONS[et], _BREAKPOINT_IMPACTS[et]))
+        return bp
+
+    return []  # UNKNOWN — no breakpoints from unsupported semantics
+
+
 class AttackType(str, Enum):
     """Deterministic classification of a proven attack path."""
     UNKNOWN = "UNKNOWN"
@@ -357,6 +460,7 @@ class AttackPath:
     risk_confidence: Confidence = Confidence.LOW
     risk_score: int = 0
     evidence: List[str] = field(default_factory=list)
+    breakpoints: List["Breakpoint"] = field(default_factory=list)
 
     @property
     def is_contiguous(self) -> bool:
@@ -397,6 +501,7 @@ class AttackPath:
             "risk_severity": self.risk_severity.value,
             "risk_confidence": self.risk_confidence.value,
             "evidence": list(self.evidence),
+            "breakpoints": [b.to_dict() for b in self.breakpoints],
             "explanation": self.explanation,
         }
 
@@ -429,6 +534,7 @@ class PathAnalyzer:
         for p in paths:
             classify_path(p)
             assess_risk(p)
+            p.breakpoints = breakpoints_for(p)
         # De-duplication ordering is unaffected by classification/risk (both are
         # derived purely from the already-ordered node/edge sequences).
         return paths

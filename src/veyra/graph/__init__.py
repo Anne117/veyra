@@ -17,8 +17,11 @@ from veyra.graph.models import (
 from veyra.graph.path import (
     AttackPath,
     AttackType,
+    Breakpoint,
+    BreakpointImpact,
     PathAnalyzer,
     assess_risk,
+    breakpoints_for,
     canonical_path_identity,
     classify_path,
     path_id_of,
@@ -37,6 +40,9 @@ __all__ = [
     "PathAnalyzer",
     "classify_path",
     "assess_risk",
+    "Breakpoint",
+    "BreakpointImpact",
+    "breakpoints_for",
     "canonical_path_identity",
     "path_id_of",
 ]

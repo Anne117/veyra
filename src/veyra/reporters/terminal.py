@@ -65,6 +65,10 @@ def render_terminal(result: ScanResult) -> str:
             lines.append(f"    {' → '.join(p.nodes)}")
             if p.attack_type and p.attack_type.value != "UNKNOWN":
                 lines.append(f"    ({p.attack_type.value}: {p.explanation})")
+            if p.breakpoints:
+                lines.append("    Breakpoints:")
+                for b in p.breakpoints:
+                    lines.append(f"      - {b.edge_type}: {b.reason}")
         lines.append("")
 
     return "\n".join(lines)
