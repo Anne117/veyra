@@ -126,7 +126,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(render_terminal(result))
 
-        return _exit_code(result, args.fail_on)
+        # Policy security gate: a policy violation (policy_status == "FAIL")
+        # forces a non-zero exit (at least 1). The severity-based exit code is
+        # preserved; policy failure never overrides a CRITICAL (2) but upgrades
+        # a clean/low-severity (0) result to 1. The single source of truth for
+        # the policy part is the finalized ScanResult policy status.
+        severity_code = _exit_code(result, args.fail_on)
+        policy_code = 1 if result.policy_status == "FAIL" else 0
+        return max(severity_code, policy_code)
 
     if args.command == "attack-lab":
         lab = run_attack_lab()
