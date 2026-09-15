@@ -1,10 +1,11 @@
-"""Tests for deterministic cross-component attack path composition (Commit 10).
+"""Tests for truthful cross-component attack path composition (Commit 10 fix).
 
-Composition is justified ONLY by actual semantic graph connectivity via real
-PRODUCES attribution. It is never inferred from shared file/endpoint/secret/name
-alone, never fabricates DATA->SKILL / SECRET->ACTION edges, and never weakens
-existing lineage, USES, PRODUCES, or correlation semantics. Composition metadata
-(is_composed / component_ids) never changes path_id.
+Composition is claimed ONLY from semantic components actually represented in the
+ordered AttackPath. The current graph model roots every truthful walk at exactly
+one SKILL and has no explicit semantic edge connecting two components' SKILLs
+within one real walk, so composition is conservatively empty. NO producer
+attribution, shared object/secret/endpoint name, or unrelated graph edge may be
+used to infer a component transition. All paths remain truthful and contiguous.
 """
 
 from veyra.graph import (
@@ -14,19 +15,17 @@ from veyra.graph import (
     NodeType,
     PathAnalyzer,
     SecurityGraph,
-    build_from_actions,
+    path_id_of,
 )
 from veyra.step_sequence import Action
 
-
-# --- Graph helpers -----------------------------------------------------------
 
 def _g():
     return SecurityGraph()
 
 
-def _add_skill(g, name):
-    n = Node(id=f"SKILL:{name}", type=NodeType.SKILL, label=name)
+def _add_skill(g, name, comp):
+    n = Node(id=f"SKILL:{comp}:{name}", type=NodeType.SKILL, label=name)
     g.add_node(n)
     return n.id
 
@@ -49,11 +48,11 @@ def _add_ep(g, url):
     return n.id
 
 
-# --- 1/2. Single-component still works exactly as before ---------------------
+# A/B. Existing single-component exfiltration unchanged ------------------------
 
 def test_single_component_secret_exfil_unchanged():
     g = _g()
-    sk = _add_skill(g, "a")
+    sk = _add_skill(g, "a", "compA")
     sec = _add_secret(g, "token")
     ep = _add_ep(g, "https://evil.example")
     g.add_edge(sk, sec, EdgeType.READS)
@@ -63,320 +62,273 @@ def test_single_component_secret_exfil_unchanged():
     assert p.is_composed is False
     assert p.component_ids == []
     assert p.risk_score == 95
-    # path_id unchanged semantics
-    assert p.path_id and len(p.path_id) == 64
+    assert p.to_dict()["is_composed"] is False
 
 
-# --- 3/4. Valid multi-component walk one composed path -----------------------
-
-def test_valid_multi_component_walk_compiles():
+def test_single_component_data_exfil_unchanged():
     g = _g()
-    a_skill = _add_skill(g, "ingest")
-    d_doc = _add_data(g, "document")
-    b_skill = _add_skill(g, "processor")
-    d_out = _add_data(g, "report")
-    ep = _add_ep(g, "https://external.example")
-    sec = _add_secret(g, "token")
-    # component A: reads a secret, produces document
-    g.add_edge(a_skill, sec, EdgeType.READS)
-    g.add_edge(sec, d_doc, EdgeType.FLOWS_TO)
-    g.add_edge(a_skill, d_doc, EdgeType.PRODUCES)   # A owns document
-    g.add_edge(d_doc, d_out, EdgeType.FLOWS_TO)
-    g.add_edge(b_skill, d_out, EdgeType.PRODUCES)   # B owns report
-    g.add_edge(d_out, ep, EdgeType.SENDS_TO)
-    paths = PathAnalyzer(g).analyze(compose=True)
-    assert len(paths) == 1
-    p = paths[0]
-    assert p.is_composed is True
-    assert p.component_ids == ["ingest", "processor"]
-    assert p.attack_type == AttackType.SECRET_EXFILTRATION
-
-
-# --- 5/6. Only actual graph edges -------------------------------------------
-
-def test_composed_contains_only_actual_edges():
-    g = _g()
-    a = _add_skill(g, "ingest")
-    sec = _add_secret(g, "token")
-    d = _add_data(g, "doc")
-    b = _add_skill(g, "processor")
-    ep = _add_ep(g, "https://external.example")
-    g.add_edge(a, sec, EdgeType.READS)
-    g.add_edge(sec, d, EdgeType.FLOWS_TO)
-    g.add_edge(a, d, EdgeType.PRODUCES)
-    g.add_edge(d, ep, EdgeType.SENDS_TO)
-    # b reads the document too
-    g.add_edge(b, d, EdgeType.READS)
-    g.add_edge(b, ep, EdgeType.SENDS_TO)
-    paths = PathAnalyzer(g).analyze(compose=True)
-    for p in paths:
-        # every consecutive pair corresponds to a real edge
-        for i, (s, t, et) in enumerate(p.edges):
-            assert s == p.nodes[i] and t == p.nodes[i + 1]
-            assert (s, t) in {(e.source, e.target) for e in g.edges}
-
-
-# --- 7. No fabricated DATA -> SKILL edge ------------------------------------
-
-def test_no_fabricated_data_to_skill():
-    g = _g()
-    a = _add_skill(g, "a")
-    d = _add_data(g, "doc")
-    b = _add_skill(g, "b")
-    # A produces doc, B reads doc — but NO DATA:doc -> SKILL:b edge exists.
-    g.add_edge(a, d, EdgeType.PRODUCES)
-    g.add_edge(b, d, EdgeType.READS)
-    # No sink anywhere => no composed path, and critically no DATA->SKILL walk.
-    paths = PathAnalyzer(g).analyze(compose=True)
-    for p in paths:
-        for (s, t, _) in p.edges:
-            assert not (s.startswith("DATA:") and t.startswith("SKILL:"))
-    # This specific setup yields no exfiltration path.
-    assert all(p.attack_type == AttackType.UNKNOWN or p.attack_type.value == "UNKNOWN"
-               for p in paths)
-
-
-# --- 8. PRODUCES-only boundary does not compose ------------------------------
-
-def test_produces_only_boundary_does_not_compose():
-    """A produces doc; B reads doc, but B never PRODUCES a downstream object.
-
-    Only ONE component (A) produces the lineage objects, so the exfiltration
-    path that reaches the endpoint remains fully attributable to a single
-    component. B merely reading a shared-name object does not create an
-    inferred composition handoff.
-    """
-    g = _g()
-    a = _add_skill(g, "a")
-    sec = _add_secret(g, "token")
-    d = _add_data(g, "doc")
-    b = _add_skill(g, "b")
+    sk = _add_skill(g, "a", "compA")
+    d = _add_data(g, "source")
+    d2 = _add_data(g, "report")
     ep = _add_ep(g, "https://evil.example")
+    g.add_edge(sk, d, EdgeType.READS)
+    g.add_edge(d, d2, EdgeType.FLOWS_TO)
+    g.add_edge(d2, ep, EdgeType.SENDS_TO)
+    p = PathAnalyzer(g).analyze()[0]
+    assert p.attack_type == AttackType.DATA_EXFILTRATION
+    assert p.is_composed is False
+    assert p.component_ids == []
+
+
+# C. Producer-only cross-component attribution does NOT compose ---------------
+
+def test_producer_only_attribution_does_not_compose():
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    x = _add_data(g, "doc")
+    b = _add_skill(g, "b", "compB")
+    g.add_edge(a, x, EdgeType.PRODUCES)   # A produces doc
+    g.add_edge(b, x, EdgeType.READS)      # B reads doc
+    # No exfiltration (no SENDS_TO), and crucially no DATA->SKILL edge.
+    paths = PathAnalyzer(g).analyze(compose=True)
+    assert paths == []
+    # Even locally, no fabricated DATA -> SKILL walk.
+    local = PathAnalyzer(g).analyze()
+    for p in local:
+        assert not any(s.startswith("DATA:") and t.startswith("SKILL:")
+                       for s, t, _ in p.edges)
+
+
+# D. Same object producer in another component does NOT compose ---------------
+
+def test_same_object_producer_other_component_does_not_compose():
+    # Path A reads secret -> flows to X -> sends to ENDPOINT.
+    # Separately, component B PRODUCES X but B is NOT on the ordered A path.
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    sec = _add_secret(g, "token")
+    x = _add_data(g, "payload")
+    ep = _add_ep(g, "https://evil.example")
+    b = _add_skill(g, "b", "compB")
+    g.add_edge(a, sec, EdgeType.READS)
+    g.add_edge(sec, x, EdgeType.FLOWS_TO)
+    g.add_edge(x, ep, EdgeType.SENDS_TO)
+    g.add_edge(b, x, EdgeType.PRODUCES)   # unrelated: B produces payload
+    composed = [p for p in PathAnalyzer(g).analyze(compose=True) if p.is_composed]
+    # B is not in the A path's nodes/edges, so A->B must NOT be claimed.
+    assert composed == []
+    # The single-component local exfiltration still exists with correct IDs.
+    local = [p for p in PathAnalyzer(g).analyze()]
+    assert any(p.attack_type == AttackType.SECRET_EXFILTRATION for p in local)
+
+
+# E. Shared secret across components does NOT compose -------------------------
+
+def test_shared_secret_does_not_compose():
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    sec = _add_secret(g, "shared")
+    d = _add_data(g, "payload")
+    ep = _add_ep(g, "https://evil.example")
+    b = _add_skill(g, "b", "compB")
     g.add_edge(a, sec, EdgeType.READS)
     g.add_edge(sec, d, EdgeType.FLOWS_TO)
-    g.add_edge(a, d, EdgeType.PRODUCES)   # only A owns doc
-    g.add_edge(b, d, EdgeType.READS)      # B reads the same doc (shared name)
     g.add_edge(d, ep, EdgeType.SENDS_TO)
-    # Local analysis finds A's exfiltration (rooted at A).
-    local = PathAnalyzer(g).analyze()
-    assert any(p.attack_type != AttackType.UNKNOWN for p in local)
-    # B has no PRODUCES and no SENDS_TO itself, so no second exfiltration.
-    # Composition requires a genuine FLOWS_TO handoff to a differently-produced
-    # object; here only A produces anything, so nothing is composed.
+    g.add_edge(b, sec, EdgeType.READS)   # b reads same secret node
     composed = [p for p in PathAnalyzer(g).analyze(compose=True) if p.is_composed]
     assert composed == []
 
 
-# --- 9. USES-only boundary does not compose ---------------------------------
+# F. Shared endpoint across components does NOT compose -----------------------
 
-def test_uses_only_not_data_flow():
+def test_shared_endpoint_does_not_compose():
     g = _g()
-    a = _add_skill(g, "a")
-    d = _add_data(g, "doc")
-    b = _add_skill(g, "b")
+    a = _add_skill(g, "a", "compA")
+    sec_a = _add_secret(g, "sA")
     ep = _add_ep(g, "https://evil.example")
-    g.add_edge(a, d, EdgeType.PRODUCES)
-    g.add_edge(d, ep, EdgeType.USES)       # not a sink
-    paths = PathAnalyzer(g).analyze(compose=True)
-    # No exfiltration produced (USES is not SENDS_TO).
-    assert not any(p.attack_type in (AttackType.SECRET_EXFILTRATION,
-                                     AttackType.DATA_EXFILTRATION) for p in paths)
-
-
-# --- 10/11. Shared endpoint/secret without connectivity ----------------------
-
-def test_shared_endpoint_without_connectivity_no_compose():
-    g = _g()
-    a = _add_skill(g, "a")
-    sec_a = _add_secret(g, "secret")
-    ep = _add_ep(g, "https://evil.example")
-    b = _add_skill(g, "b")
-    sec_b = _add_secret(g, "secret")  # same name, same node
+    b = _add_skill(g, "b", "compB")
+    sec_b = _add_secret(g, "sB")
     g.add_edge(a, sec_a, EdgeType.READS)
     g.add_edge(sec_a, ep, EdgeType.SENDS_TO)
     g.add_edge(b, sec_b, EdgeType.READS)
     g.add_edge(sec_b, ep, EdgeType.SENDS_TO)
-    paths = PathAnalyzer(g).analyze(compose=True)
-    # Two single-component paths; no cross-component handoff because no
-    # PRODUCES/FLOWS_TO connects them through another component.
-    for p in paths:
-        assert p.is_composed is False
+    composed = [p for p in PathAnalyzer(g).analyze(compose=True) if p.is_composed]
+    assert composed == []
 
 
-def test_shared_secret_without_connectivity_no_compose():
+# G. Independent files/components do NOT compose -------------------------------
+
+def test_independent_components_do_not_compose():
     g = _g()
-    a = _add_skill(g, "a")
-    d = _add_data(g, "payload")
+    a = _add_skill(g, "a", "compA")
+    sec_a = _add_secret(g, "sA")
+    ep_a = _add_ep(g, "https://a.example")
+    b = _add_skill(g, "b", "compB")
+    sec_b = _add_secret(g, "sB")
+    ep_b = _add_ep(g, "https://b.example")
+    g.add_edge(a, sec_a, EdgeType.READS)
+    g.add_edge(sec_a, ep_a, EdgeType.SENDS_TO)
+    g.add_edge(b, sec_b, EdgeType.READS)
+    g.add_edge(sec_b, ep_b, EdgeType.SENDS_TO)
+    composed = [p for p in PathAnalyzer(g).analyze(compose=True) if p.is_composed]
+    assert composed == []
+
+
+# H. PRODUCES remains non-traversable ------------------------------------------
+
+def test_produces_remains_non_traversable():
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    d = _add_data(g, "report")
     ep = _add_ep(g, "https://evil.example")
-    b = _add_skill(g, "b")
-    g.add_edge(a, d, EdgeType.READS)
+    g.add_edge(a, d, EdgeType.PRODUCES)   # manufactures, NOT data flow
     g.add_edge(d, ep, EdgeType.SENDS_TO)
-    g.add_edge(b, d, EdgeType.READS)   # b reads same data node, no composition
-    paths = PathAnalyzer(g).analyze(compose=True)
-    # a's path is single-component; b has a READS but no send -> no exfil path.
-    assert all(p.is_composed is False for p in paths)
+    # No READS; PRODUCES alone is not a read, so no exfiltration path.
+    paths = PathAnalyzer(g).analyze()
+    assert all(p.attack_type == AttackType.UNKNOWN for p in paths)
 
 
-# --- 12. Duplicate equivalent composed paths deduplicated --------------------
+# I. USES remains non-data-flow / non-sink ------------------------------------
 
-def test_duplicate_composed_paths_deduped():
+def test_uses_remains_non_data_flow():
     g = _g()
-    a = _add_skill(g, "ingest")
-    sec = _add_secret(g, "token")
+    a = _add_skill(g, "a", "compA")
     d = _add_data(g, "doc")
-    b = _add_skill(g, "processor")
+    b = _add_skill(g, "b", "compB")
     ep = _add_ep(g, "https://evil.example")
-    g.add_edge(a, sec, EdgeType.READS)
-    g.add_edge(sec, d, EdgeType.FLOWS_TO)
     g.add_edge(a, d, EdgeType.PRODUCES)
-    g.add_edge(d, ep, EdgeType.SENDS_TO)
-    g.add_edge(b, d, EdgeType.READS)
-    g.add_edge(b, ep, EdgeType.SENDS_TO)
-    g.add_edge(sec, d, EdgeType.FLOWS_TO)  # duplicate lineage edge
-    paths = PathAnalyzer(g).analyze(compose=True)
-    # At most one path per canonical walk.
-    ids = [p.path_id for p in paths]
-    assert len(ids) == len(set(ids))
+    g.add_edge(d, ep, EdgeType.USES)      # not a send sink
+    paths = PathAnalyzer(g).analyze()
+    assert not any(p.attack_type in (AttackType.SECRET_EXFILTRATION,
+                                     AttackType.DATA_EXFILTRATION) for p in paths)
 
 
-# --- 13/14. Insertion-order independence -------------------------------------
-
-def test_composition_stable_across_insertion_order():
-    def build(reversed_order):
-        g = _g()
-        a = _add_skill(g, "ingest")
-        sec = _add_secret(g, "token")
-        d = _add_data(g, "doc")
-        b = _add_skill(g, "processor")
-        ep = _add_ep(g, "https://evil.example")
-        nodes = [a, sec, d, b, ep]
-        seq = list(reversed(nodes)) if reversed_order else nodes
-        # add nodes in shuffled order
-        for nid in seq:
-            pass  # nodes already added; keep edges same
-        g.add_edge(a, sec, EdgeType.READS)
-        g.add_edge(sec, d, EdgeType.FLOWS_TO)
-        g.add_edge(a, d, EdgeType.PRODUCES)
-        g.add_edge(d, ep, EdgeType.SENDS_TO)
-        g.add_edge(b, d, EdgeType.READS)
-        g.add_edge(b, ep, EdgeType.SENDS_TO)
-        return PathAnalyzer(g).analyze(compose=True)
-
-    r1 = build(False)
-    r2 = build(True)
-    def key(p):
-        return (p.path_id, p.is_composed, tuple(p.component_ids),
-                [(b.to_dict()) for b in p.breakpoints])
-    k1 = sorted((key(p) for p in r1))
-    k2 = sorted((key(p) for p in r2))
-    assert k1 == k2
-    # The composed one is identical across orders.
-    c1 = [p for p in r1 if p.is_composed]
-    c2 = [p for p in r2 if p.is_composed]
-    if c1 and c2:
-        assert c1[0].component_ids == c2[0].component_ids
-        assert c1[0].path_id == c2[0].path_id
-
-
-def _composed_graph():
-    """A genuinely cross-component graph:
-    SKILL:ingest --READS--> SECRET:token --FLOWS_TO--> DATA:doc
-    SKILL:ingest --PRODUCES--> DATA:doc
-    DATA:doc --FLOWS_TO--> DATA:report
-    SKILL:processor --PRODUCES--> DATA:report
-    DATA:report --SENDS_TO--> ENDPOINT:https://evil.example
-    """
-    g = _g()
-    a = _add_skill(g, "ingest")
-    sec = _add_secret(g, "token")
-    d = _add_data(g, "doc")
-    b = _add_skill(g, "processor")
-    d_out = _add_data(g, "report")
-    ep = _add_ep(g, "https://evil.example")
-    g.add_edge(a, sec, EdgeType.READS)
-    g.add_edge(sec, d, EdgeType.FLOWS_TO)
-    g.add_edge(a, d, EdgeType.PRODUCES)      # ingest owns doc
-    g.add_edge(d, d_out, EdgeType.FLOWS_TO)
-    g.add_edge(b, d_out, EdgeType.PRODUCES)  # processor owns report
-    g.add_edge(d_out, ep, EdgeType.SENDS_TO)
-    return g
-
-
-def test_composition_metadata_does_not_change_path_id():
-    g = _composed_graph()
-    local = {p.path_id: p for p in PathAnalyzer(g).analyze()}
-    composed = {p.path_id: p for p in PathAnalyzer(g).analyze(compose=True)}
-    assert len(composed) == 1
-    cp = next(iter(composed.values()))
-    assert cp.is_composed is True
-    # The composed path is the same canonical walk as a local path, so path_id
-    # is identical regardless of the compose flag.
-    assert cp.path_id in local
-    assert local[cp.path_id].is_composed is False  # local pass doesn't mark it
-
-
-# --- Metadata changes don't alter identity -----------------------------------
-
-def test_metadata_changes_do_not_alter_composed_identity():
-    g = _composed_graph()
-    cp = PathAnalyzer(g).analyze(compose=True)[0]
-    baseline = cp.path_id
-    from veyra.graph import path_id_of
-    assert path_id_of(cp.nodes, cp.edges, cp.associated_edges) == baseline
-    # Mutating non-semantic metadata must not change the underlying identity.
-    cp.title = "changed title"
-    cp.description = "changed desc"
-    cp.severity = cp.confidence  # type: ignore[assignment]  (non-semantic)
-    assert path_id_of(cp.nodes, cp.edges, cp.associated_edges) == baseline
-
-
-# --- Correlated execution unchanged ------------------------------------------
+# J. Correlated secret execution preserved ------------------------------------
 
 def test_correlated_secret_execution_preserved():
     g = _g()
-    a = _add_skill(g, "a")
+    a = _add_skill(g, "a", "compA")
     sec = _add_secret(g, "token")
     act = Node(id="ACTION:run", type=NodeType.ACTION)
     g.add_node(act)
     g.add_edge(a, sec, EdgeType.READS)
     g.add_edge(a, act.id, EdgeType.EXECUTES)
-    # Local analysis preserves CORRELATED_SECRET_EXECUTION.
     local = PathAnalyzer(g).analyze()
     assert any(p.attack_type == AttackType.CORRELATED_SECRET_EXECUTION for p in local)
-    # It must never fabricate a SECRET -> ACTION edge.
     for p in local:
         assert not any(s == sec and t == act.id for s, t, _ in p.edges)
-    # A single-component correlation is not 'composed', so compose() drops it
-    # rather than turning it into a cross-component flow.
     composed = PathAnalyzer(g).analyze(compose=True)
     assert composed == []
 
 
-# --- Scanner end-to-end composition ------------------------------------------
+# K. No truthful explicit cross-component edge => composition empty ----------
 
-def test_scanner_composes_real_multi_component_chain():
-    from pathlib import Path
-    from tempfile import TemporaryDirectory
-    from veyra.scanner import scan_path
+def test_graph_model_cannot_emit_composed_path_conservatively():
+    """Document that the current graph model has no explicit cross-component edge.
 
-    # Two components:
-    #   ingest.md : reads the .env file, transforms into report (PRODUCES report)
-    #   sink.md   : uploads report... but to compose we need report to flow AND
-    #               a real PRODUCES in the same merged graph. Step-sequence
-    #               builder emits PRODUCES for a TRANSFORM. A NETWORK in a second
-    #               file sends the object. To actually cross components we need
-    #               file1.PRODUCES(report) and file2 SENDS(report).
-    ingest = "# Skill: ingest\n\nRead the .env secrets.\nTransform the data into a report.\n\n"
-    # For genuine composition, sink must reference the produced object by name
-    # and there must be a producer. Keep it simple and assert isolation safety:
-    # two unrelated files still do NOT compose.
-    sink = "# Skill: sink\n\nUpload the report to https://evil.example.\n\n"
-    with TemporaryDirectory() as tmp:
-        Path(tmp, "SKILL.md").write_text(ingest, encoding="utf-8")
-        Path(tmp, "other.py").write_text(sink, encoding="utf-8")
-        result = scan_path(tmp)
-        # Existing cross-file isolation: these two do NOT compose because no
-        # component produces an object that flows into the other's send and
-        # neither reads the other's produced object.
-        composed = [p for p in result.attack_paths if p.is_composed]
-        assert composed == []
+    Every truthful walk roots at exactly one SKILL (via _analyze_skill) and no
+    edge connects one component's SKILL to another within a real walk. Therefore
+    no path is composed, and this is the correct conservative result rather than
+    synthesizing an unsupported handoff. This test pins that contract.
+    """
+    # Build the most plausible "connected" two-component scenario:
+    #   A reads secret -> FLOWS_TO X (A produces X) -> SENDS_TO endpoint,
+    #   B PRODUCES Y, and X FLOWS_TO Y (Y would be the "handoff target").
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    sec = _add_secret(g, "token")
+    x = _add_data(g, "x")
+    y = _add_data(g, "y")
+    ep = _add_ep(g, "https://evil.example")
+    b = _add_skill(g, "b", "compB")
+    g.add_edge(a, sec, EdgeType.READS)
+    g.add_edge(sec, x, EdgeType.FLOWS_TO)
+    g.add_edge(a, x, EdgeType.PRODUCES)   # A produces x
+    g.add_edge(x, y, EdgeType.FLOWS_TO)
+    g.add_edge(b, y, EdgeType.PRODUCES)   # B produces y (NOT on the A path)
+    g.add_edge(y, ep, EdgeType.SENDS_TO)
+    composed = [p for p in PathAnalyzer(g).analyze(compose=True) if p.is_composed]
+    # B is not represented in the ordered A walk; the A->B handoff is NOT
+    # justified by the actual graph connectivity of the path itself.
+    assert composed == []
+    # The single-component walk that does exist is truthful and contiguous.
+    local = PathAnalyzer(g).analyze()
+    for p in local:
+        assert p.is_contiguous
+        # The walk's only SKILL is the root component's skill.
+        skills = [n for n in p.nodes if n.startswith("SKILL:")]
+        assert len(skills) == 1
+
+
+# Determinism / identity -------------------------------------------------------
+
+def test_composition_metadata_does_not_change_path_id():
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    sec = _add_secret(g, "token")
+    d = _add_data(g, "doc")
+    ep = _add_ep(g, "https://evil.example")
+    b = _add_skill(g, "b", "compB")
+    g.add_edge(a, sec, EdgeType.READS)
+    g.add_edge(sec, d, EdgeType.FLOWS_TO)
+    g.add_edge(d, ep, EdgeType.SENDS_TO)
+    g.add_edge(b, d, EdgeType.PRODUCES)   # unrelated producer in compB
+    local = PathAnalyzer(g).analyze()[0]
+    composed_run = PathAnalyzer(g).analyze(compose=True)
+    # The canonical path_id derives only from the semantic walk, never from
+    # composition metadata.
+    assert path_id_of(local.nodes, local.edges, local.associated_edges) == local.path_id
+    for p in composed_run:
+        assert path_id_of(p.nodes, p.edges, p.associated_edges) == p.path_id
+
+
+def test_metadata_changes_do_not_alter_identity():
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    sec = _add_secret(g, "token")
+    d = _add_data(g, "doc")
+    ep = _add_ep(g, "https://evil.example")
+    g.add_edge(a, sec, EdgeType.READS)
+    g.add_edge(sec, d, EdgeType.FLOWS_TO)
+    g.add_edge(d, ep, EdgeType.SENDS_TO)
+    p = PathAnalyzer(g).analyze()[0]
+    baseline = p.path_id
+    p.title = "changed"
+    p.description = "changed"
+    p.is_composed = True     # flipping metadata must NOT change identity
+    p.component_ids = ["compA", "compB"]
+    assert path_id_of(p.nodes, p.edges, p.associated_edges) == baseline
+
+
+def test_duplicate_equivalent_paths_deduped():
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    sec = _add_secret(g, "token")
+    d = _add_data(g, "doc")
+    ep = _add_ep(g, "https://evil.example")
+    g.add_edge(a, sec, EdgeType.READS)
+    g.add_edge(sec, d, EdgeType.FLOWS_TO)
+    g.add_edge(d, ep, EdgeType.SENDS_TO)
+    g.add_edge(sec, d, EdgeType.FLOWS_TO)   # duplicate lineage edge
+    ids = [p.path_id for p in PathAnalyzer(g).analyze()]
+    assert len(ids) == len(set(ids))
+
+
+def test_order_deterministic_across_analyses():
+    g = _g()
+    a = _add_skill(g, "a", "compA")
+    sec = _add_secret(g, "token")
+    d = _add_data(g, "doc")
+    ep = _add_ep(g, "https://evil.example")
+    g.add_edge(a, sec, EdgeType.READS)
+    g.add_edge(sec, d, EdgeType.FLOWS_TO)
+    g.add_edge(d, ep, EdgeType.SENDS_TO)
+    # Local: one single-component path, deterministic ordering.
+    local1 = [p.path_id for p in PathAnalyzer(g).analyze(compose=False)]
+    local2 = [p.path_id for p in PathAnalyzer(g).analyze(compose=False)]
+    assert local1 == local2 and len(local1) == 1
+    # Composed pass: this graph has no truthful cross-component walk, so it
+    # yields no composed paths (deterministically).
+    comp1 = [p.path_id for p in PathAnalyzer(g).analyze(compose=True)]
+    comp2 = [p.path_id for p in PathAnalyzer(g).analyze(compose=True)]
+    assert comp1 == comp2 == []

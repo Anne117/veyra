@@ -518,15 +518,9 @@ class PathAnalyzer:
         # Precompute adjacency and an edge lookup for metadata.
         self._adj: Dict[str, List[Edge]] = {nid: [] for nid in graph.nodes}
         self._edge_index: Dict[Tuple[str, str, str], Edge] = {}
-        # producer attribution: data/secret node -> producing SKILL node (via a
-        # real PRODUCES edge). Used to establish that an object belongs to a
-        # different semantic component, i.e. genuine cross-component handoff.
-        self._producers: Dict[str, str] = {}
         for e in graph.edges:
             self._adj.setdefault(e.source, []).append(e)
             self._edge_index[(e.source, e.target, e.type.value)] = e
-            if e.type == EdgeType.PRODUCES:
-                self._producers.setdefault(e.target, e.source)
 
     # --- Public API ---------------------------------------------------------
 
@@ -559,53 +553,34 @@ class PathAnalyzer:
 
     # --- Composition --------------------------------------------------------
 
-    def _node_component(self, node_id: str) -> Optional[str]:
-        """Return the semantic component id attributable to a node, or None.
-
-        A SKILL node carries its component in its node id (``SKILL:<comp>``).
-        A DATA/SECRET/other object node is attributed to the component of the
-        skill that PRODUCES it (via a real PRODUCES edge). Nodes with no
-        producer and no skill component yield None (unattributed). This never
-        invents a component from a shared file/endpoint/name — attribution comes
-        only from the actual graph structure.
-        """
-        if node_id is None:
-            return None
-        kind = _node_kind(node_id)
-        if kind == "SKILL":
-            return node_id.split(":", 1)[1] if ":" in node_id else None
-        producer = self._producers.get(node_id)
-        if producer is not None:
-            return self._node_component(producer)
-        return None
-
     def _set_composition(self, path: "AttackPath") -> bool:
         """Populate is_composed / component_ids for a walk; return whether composed.
 
-        Composition is established ONLY at a FLOWS_TO lineage handoff: when a
-        FLOWS_TO edge's target object is PRODUCED by a skill of a different
-        component than the one the walk currently runs in. READS and SENDS_TO
-        edges stay anchored at the running component. This deliberately avoids
-        the shared-name false positive (component B merely READING an object that
-        happens to share a name with one component A produced), which would be
-        inferred composition. component_ids preserves the ordered component
-        traversal; metadata never changes path_id.
+        Composition is claimed ONLY from semantic components actually present
+        in the ordered AttackPath. A component is identified by its SKILL node
+        in ``path.nodes`` (``SKILL:<comp>``). No producer attribution, no shared
+        object/secret/endpoint name, and no graph edge outside the walk is used.
+
+        The current graph model roots every truthful walk at exactly one SKILL
+        (``_analyze_skill``), and there is no explicit semantic edge connecting
+        one component's SKILL to another. Therefore a walk never contains more
+        than one component, ``is_composed`` stays False, and ``component_ids``
+        lists that single root component. This is the conservative, correct
+        answer: better no composed path than a synthetic one. If a future graph
+        edge truthfully connects two SKILL components within one real walk,
+        this logic would then report it accurately.
         """
         ordered: List[str] = []
         seen: Set[str] = set()
-        # Running component: the root skill's component. Root skill is nodes[0].
-        current = self._node_component(path.nodes[0]) if path.nodes else None
-        if current is not None and current not in seen:
-            seen.add(current)
-            ordered.append(current)
-        for (s, t, et) in path.edges:
-            if et == EdgeType.FLOWS_TO.value:
-                target_comp = self._node_component(t)
-                if target_comp is not None and target_comp != current:
-                    if target_comp not in seen:
-                        seen.add(target_comp)
-                        ordered.append(target_comp)
-                    current = target_comp
+        for node in path.nodes:
+            kind = _node_kind(node)
+            if kind != "SKILL":
+                continue
+            comp = node.split(":", 1)[1] if ":" in node else None
+            if comp is None or comp in seen:
+                continue
+            seen.add(comp)
+            ordered.append(comp)
         path.component_ids = ordered
         path.is_composed = len(ordered) > 1
         return path.is_composed
