@@ -269,6 +269,55 @@ def test_end_to_end_secret_exfil():
     assert result.path_id == p.path_id
 
 
+# --- Regression: generator/iterator of paths is evaluated fully -------------
+
+def test_evaluate_accepts_generator_consumes_once():
+    # A fresh generator must be evaluated by ALL enabled policies, not consumed
+    # by the first one (ordering is by policy_id, so the first is the
+    # CORRELATED policy in an empty path list, but here paths are non-empty).
+    paths = [_secret_exfil_path(), _data_exfil_path(), _pure_handoff_path()]
+    gen1 = (p for p in paths)
+    results1 = PolicyEngine().evaluate(gen1)
+    results2 = PolicyEngine().evaluate(paths)
+    keys1 = [(r.policy_id, r.path_id, r.violated) for r in results1]
+    keys2 = [(r.policy_id, r.path_id, r.violated) for r in results2]
+    assert keys1 == keys2
+    assert len(results1) == len(paths) * 3  # all 3 built-in policies x all paths
+
+
+def test_evaluate_accepts_iterator_once():
+    it = iter([_secret_exfil_path(), _data_exfil_path()])
+    results = PolicyEngine().evaluate(it)
+    # Both paths evaluated against every built-in policy (3 policies).
+    assert len(results) == 2 * 3
+    assert len({r.path_id for r in results}) == 2
+
+
+# --- Regression: unknown custom Policy raises ValueError ----------------------
+
+def test_unknown_policy_raises_clear_valueerror():
+    custom = Policy(policy_id="CUSTOM-POLICY-001", name="custom",
+                    description="a custom policy with no trigger semantics")
+    try:
+        PolicyEngine(policies=[custom])
+        assert False, "expected ValueError for unknown policy_id"
+    except ValueError as exc:
+        msg = str(exc)
+        assert "CUSTOM-POLICY-001" in msg
+        assert "no registered trigger semantics" in msg
+        assert "built-in" in msg
+
+
+def test_unknown_policy_raises_even_when_mixed_with_builtin():
+    mixed = [SECRET_EXFILTRATION_POLICY,
+             Policy(policy_id="DOES-NOT-EXIST", name="x", description="x")]
+    try:
+        PolicyEngine(policies=mixed)
+        assert False, "expected ValueError for unknown policy_id in mixed set"
+    except ValueError as exc:
+        assert "DOES-NOT-EXIST" in str(exc)
+
+
 def test_end_to_end_handoff_no_violation():
     p = _pure_handoff_path()
     assert p.attack_type == AttackType.UNKNOWN

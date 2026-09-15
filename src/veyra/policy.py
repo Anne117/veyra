@@ -19,7 +19,7 @@ the supplied AttackPath objects and never mutate the graph.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List
 
 from veyra.graph.path import AttackType
@@ -124,10 +124,18 @@ class PolicyEngine:
 
     def __init__(self, policies: List[Policy] = None):
         # Deterministic ordering of the policy set by policy_id.
-        self._policies = sorted(
-            (policies if policies is not None else _BUILTIN_POLICIES),
-            key=lambda p: p.policy_id,
-        )
+        supplied = policies if policies is not None else _BUILTIN_POLICIES
+        ordered = sorted(supplied, key=lambda p: p.policy_id)
+        # Fail fast: only built-in policies have registered trigger semantics in
+        # this scope. An unknown custom policy has no deterministic meaning and
+        # must be rejected immediately rather than raising deep inside evaluate().
+        for p in ordered:
+            if p.policy_id not in _POLICY_TRIGGER:
+                raise ValueError(
+                    f"policy '{p.policy_id}' has no registered trigger semantics; "
+                    "only built-in policies are supported."
+                )
+        self._policies = ordered
 
     def policies(self) -> List[Policy]:
         """The enabled policies in deterministic (policy_id) order."""
@@ -138,14 +146,16 @@ class PolicyEngine:
 
         Results are deterministic and stable: sorted by policy_id then path_id.
         ``paths`` may be any iterable of objects exposing ``attack_type`` and
-        ``path_id``; the engine reads only those semantic fields. Neither the
-        paths nor any graph is mutated.
+        ``path_id``; the engine reads only those semantic fields. The iterable is
+        materialized once so a generator/iterator is not consumed by the first
+        policy. Neither the paths nor any graph is mutated.
         """
+        materialized = list(paths)  # allow generators/iterators safely
         results: List[PolicyResult] = []
         for policy in self.policies():
             trigger = _POLICY_TRIGGER[policy.policy_id]
             trigger_type, reason = trigger
-            for path in paths:
+            for path in materialized:
                 att = path.attack_type
                 if att == trigger_type:
                     results.append(PolicyResult(
