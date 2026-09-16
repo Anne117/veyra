@@ -305,10 +305,16 @@ transfer** (`attack_type = UNKNOWN`, `risk_score = 0`); it does not by itself
 prove secret or data exfiltration.
 
 ```
-[CRITICAL] [SECRET_EXFILTRATION] risk=95 (id 4f82a91c3d) ...
-  SKILL:A → SECRET:token → DATA:payload → ENDPOINT:https://evil.example
-  Components: a → processor → sink
+[INFO] [UNKNOWN] risk=0 (id 0bbe7892f0) Cross-component control handoff
+  SKILL:A → SKILL:B
+  Components: A → B
 ```
+
+A composed path is always the control-transfer walk itself (`attack_type =
+UNKNOWN`, `risk_score = 0`); composition itself never becomes an exfiltration
+semantic. If a component in the chain also carries a separate proven
+exfiltration path, that path is emitted as its own single-component walk, not
+merged into the composed one.
 
 ### Policies & security status
 
@@ -374,11 +380,11 @@ corpus.
 | Metric | Value |
 |--------|-------|
 | Total cases | 95 |
-| Detected | 86 |
+| Detected | 88 |
 | Partially detected | 7 |
-| Missed | 2 |
+| Missed | 0 |
 | False positives | 0 |
-| Detection rate | 90.5% |
+| Detection rate | 92.6% |
 
 > This figure is **only** for the current 95-case internal Attack Lab corpus. It
 > is **not** a measure of real-world detection accuracy. Real skills are far
