@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+from veyra.graph.path import AttackPath, AttackType
 from veyra.models import ScanResult, Severity
 
 SARIF_VERSION = "2.1.0"
@@ -42,6 +43,23 @@ _SEVERITY_TO_LEVEL = {
 
 def _level(severity: Severity) -> str:
     return _SEVERITY_TO_LEVEL.get(severity, "note")
+
+
+# Deterministic SARIF rule id for an attack path, derived from the existing
+# AttackType semantics. This reuses the existing attack-type vocabulary as the
+# semantic identity of the path result; it is NOT a policy id and does not
+# introduce a new policy-id namespace.
+_ATTACK_TYPE_RULE_IDS = {
+    AttackType.SECRET_EXFILTRATION: "ATTACK-PATH-" + AttackType.SECRET_EXFILTRATION.value,
+    AttackType.DATA_EXFILTRATION: "ATTACK-PATH-" + AttackType.DATA_EXFILTRATION.value,
+    AttackType.CORRELATED_SECRET_EXECUTION: "ATTACK-PATH-" + AttackType.CORRELATED_SECRET_EXECUTION.value,
+    AttackType.UNKNOWN: "ATTACK-PATH-" + AttackType.UNKNOWN.value,
+}
+
+
+def _attack_type_rule_id(attack_type: AttackType) -> str:
+    """Stable SARIF rule id for an attack type."""
+    return _ATTACK_TYPE_RULE_IDS.get(attack_type, "ATTACK-PATH-UNKNOWN")
 
 
 def _uri(file: str) -> str:
@@ -124,6 +142,63 @@ def _build_results(result: ScanResult) -> List[Dict[str, Any]]:
     return results
 
 
+def _build_attack_rules(paths: List[AttackPath]) -> List[Dict[str, Any]]:
+    """Build SARIF `rules` entries for attack paths, deduplicated by attack type."""
+    rules: Dict[str, Dict[str, Any]] = {}
+    for p in paths:
+        rule_id = _attack_type_rule_id(p.attack_type)
+        if rule_id in rules:
+            continue
+        rules[rule_id] = {
+            "id": rule_id,
+            "name": p.attack_type.value,
+            "shortDescription": {"text": p.explanation or p.attack_type.value},
+            "fullDescription": {"text": p.explanation or p.attack_type.value},
+        }
+    return list(rules.values())
+
+
+def _attack_path_result(path: AttackPath) -> Dict[str, Any]:
+    """Build a single SARIF result for one AttackPath.
+
+    Only already-existing AttackPath fields are exposed, converted to their
+    serialized representations (enum/objects are never placed directly into
+    SARIF properties). ``path_id`` remains the stable deterministic identity.
+    Locations are intentionally omitted: an AttackPath carries no trustworthy
+    source file/line provenance, so nothing would be fabricated.
+    """
+    # Serialize to stable, JSON-safe values.
+    path_dict = path.to_dict()
+    properties = {
+        "path_id": path_dict["path_id"],
+        "attack_type": path_dict["attack_type"],
+        "risk_severity": path_dict["risk_severity"],
+        "risk_confidence": path_dict["risk_confidence"],
+        "risk_score": path_dict["risk_score"],
+        "evidence": list(path_dict["evidence"]),
+    }
+    # Expose existing breakpoint information, if present, in machine-readable form.
+    breakpoints = [b.to_dict() for b in path.breakpoints]
+    if breakpoints:
+        properties["breakpoints"] = breakpoints
+
+    return {
+        "ruleId": _attack_type_rule_id(path.attack_type),
+        "level": _level(path.risk_severity),
+        "message": {"text": path.explanation or path.attack_type.value},
+        "properties": properties,
+    }
+
+
+def _build_attack_path_results(paths: List[AttackPath]) -> List[Dict[str, Any]]:
+    """Build the SARIF `results` array from attack paths.
+
+    Deterministic: paths are consumed in their existing (path_id-ordered) order
+    and emitted as-is, so repeated rendering of the same ScanResult is stable.
+    """
+    return [_attack_path_result(p) for p in paths]
+
+
 def render_sarif(result: ScanResult) -> str:
     """Render a ScanResult as a SARIF 2.1.0 JSON document."""
     doc: Dict[str, Any] = {
@@ -136,11 +211,11 @@ def render_sarif(result: ScanResult) -> str:
                         "name": "Veyra",
                         "informationUri": "https://github.com/veyra/veyra",
                         "version": "0.1.0",
-                        "rules": _build_rules(result),
+                        "rules": _build_rules(result) + _build_attack_rules(result.attack_paths),
                     }
                 },
                 "artifacts": _build_artifacts(result),
-                "results": _build_results(result),
+                "results": _build_results(result) + _build_attack_path_results(result.attack_paths),
             }
         ],
     }

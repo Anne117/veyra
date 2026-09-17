@@ -348,7 +348,10 @@ Veyra emits **SARIF 2.1.0** for compatibility with GitHub Code Scanning
 and other SARIF-compatible security tooling. SARIF generation is fully static
 (no network requests, no code execution). Suppressed findings are preserved via
 SARIF's `suppressions` array — they are never silently turned into clean
-results. Secrets remain redacted.
+secrets remain redacted. When a scan produces attack paths, each is additionally
+emitted as a SARIF result (level mapped from its existing risk severity, rule id
+derived from its attack type) with the path's `path_id`, `attack_type`, risk
+fields, evidence, and breakpoints exposed under the result's `properties`.
 
 ## 🚫 Suppression / allowlist
 
