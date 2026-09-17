@@ -202,6 +202,12 @@ def _attack_path_result(path: AttackPath) -> Dict[str, Any]:
     if path_dict.get("explanation_details"):
         properties["explanation"] = path_dict["explanation_details"]
 
+    # Expose explicit component-context metadata under `properties` (additive).
+    # This is context/scope metadata only — it references an existing security
+    # behavioral component and never fabricates a SARIF location or a new edge.
+    if path_dict.get("context_components"):
+        properties["security_behavior_context"] = path_dict["context_components"]
+
     return {
         "ruleId": _attack_type_rule_id(path.attack_type),
         "level": _level(path.risk_severity),

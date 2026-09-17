@@ -187,9 +187,11 @@ from `path.nodes`, edges from `path.edges`, with labeled edge types and
 semantic node types) plus a separate **Associated evidence** representation,
 per-path **Provenance** (which scanned component/file contributed each node
 and edge), a per-path **Explanation** (summary, steps, impact, policies,
-breakpoints, components), policy results, and the original findings. All
-dynamic values (from scanned files, node IDs, evidence, provenance, etc.) are
-HTML-escaped, so malicious content cannot inject markup. Open it directly from
+breakpoints, components), per-path **Component Context** (which declared
+Agent/Skill/Tool/MCP component owns each security behavior edge), policy
+results, and the original findings. All dynamic values (from scanned files,
+node IDs, evidence, provenance, etc.) are HTML-escaped, so malicious content
+cannot inject markup. Open it directly from
 disk:
 
 ```bash

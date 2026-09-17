@@ -271,6 +271,38 @@ def _format_provenance_components(prov: Any) -> str:
     return "".join(f'<code class="mono">{_esc(c)}</code>' for c in comps)
 
 
+def _path_context_html(path: AttackPath) -> str:
+    """Optional 'Component Context' section for one AttackPath.
+
+    Each context association references an actual existing security edge on this
+    path plus an explicitly declared component (AGENT/SKILL/TOOL/MCPSERVER). It
+    is scope/context metadata only — it never creates a graph edge. All values
+    are HTML-escaped. Renders nothing when there is no context association.
+    """
+    if not getattr(path, "context_components", None):
+        return ""
+    blocks = []
+    for assoc in path.context_components:
+        comp = assoc.get("component_id", "")
+        ctype = assoc.get("component_type", "")
+        beh = assoc.get("behavior", {})
+        bsrc = beh.get("source", "")
+        btype = beh.get("edge_type", "")
+        btarget = beh.get("target", "")
+        src = assoc.get("source")
+        src_html = f'<span class="prov-label">Source:</span> <code class="mono">{_esc(src)}</code>' if src else ''
+        blocks.append(
+            f'<div class="expl-block context-item">'
+            f'<span class="prov-label">Component:</span> <code class="mono">{_esc(comp)}</code> '
+            f'<span class="prov-label">Type:</span> <code class="mono">{_esc(ctype)}</code> '
+            f'<div><span class="prov-label">Behavior:</span> '
+            f'<code class="mono">{_esc(bsrc)} --{_esc(btype)}--&gt; {_esc(btarget)}</code></div>'
+            f'{src_html}'
+            f'</div>'
+        )
+    return f'<h4>Component Context</h4>{"".join(blocks)}'
+
+
 def _path_explanation_html(path: AttackPath) -> str:
     """Concise 'Explanation' section for one AttackPath card.
 
@@ -448,6 +480,7 @@ def _attack_path_card(path: AttackPath) -> str:
       {_breakpoints_html(path)}
       {_path_policies_html(path)}
       {_path_provenance_html(path)}
+      {_path_context_html(path)}
       {_path_explanation_html(path)}
     </div>
   </article>"""

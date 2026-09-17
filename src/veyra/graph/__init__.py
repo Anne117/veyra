@@ -7,6 +7,14 @@ rules, correlation, or Attack Lab.
 """
 
 from veyra.graph.builder import add_handoff, build_from_actions, build_from_findings
+from veyra.graph.context import (
+    ComponentContext,
+    ComponentContextAssociation,
+    ComponentContextError,
+    associate_security_behavior,
+    get_component_context,
+    serialize_component_context,
+)
 from veyra.graph.declarations import (
     ComponentDeclaration,
     ComponentDeclarationError,
@@ -41,6 +49,12 @@ __all__ = [
     "ComponentDeclaration",
     "ComponentDeclarationError",
     "RelationshipDeclaration",
+    "associate_security_behavior",
+    "ComponentContext",
+    "ComponentContextAssociation",
+    "ComponentContextError",
+    "get_component_context",
+    "serialize_component_context",
     "Edge",
     "EdgeType",
     "Node",

@@ -652,6 +652,12 @@ class AttackPath:
     # matching logic. Deliberately excluded from path identity (see
     # canonical_path_identity / path_id_of).
     policy_ids: List[str] = field(default_factory=list)
+    # Component-context associations relevant to this path's edges (explicit,
+    # deterministic metadata). Each entry references an actual existing security
+    # edge on this path and an existing declared component. This is scope/context
+    # metadata only: it never creates a graph edge and is EXCLUDED from path
+    # identity, classification, risk, dedup.
+    context_components: List[Dict[str, Any]] = field(default_factory=list)
     # Provenance: which scanned component/file contributed each node/edge.
     # Metadata only — excluded from path identity, classification, risk, dedup.
     provenance: PathProvenance = field(default_factory=PathProvenance)
@@ -699,6 +705,7 @@ class AttackPath:
             "risk_confidence": self.risk_confidence.value,
             "evidence": list(self.evidence),
             "policy_ids": list(self.policy_ids),
+            "context_components": list(self.context_components),
             "provenance": self.provenance.to_dict(),
             "explanation_details": (self.explanation_details.to_dict()
                                     if self.explanation_details is not None else None),
@@ -747,6 +754,7 @@ class PathAnalyzer:
                 if not self._set_composition(p):
                     continue  # only genuinely multi-component walks qualify
             p.explanation_details = build_explanation(p)
+            self._populate_context(p)
             out.append(p)
         # De-duplication ordering is unaffected by classification/risk (both are
         # derived purely from the already-ordered node/edge sequences).
@@ -1071,6 +1079,42 @@ class PathAnalyzer:
             edges=walk,
             associated_edges=assoc,
         )
+
+    def _populate_context(self, path: "AttackPath") -> None:
+        """Attach explicit component-context metadata relevant to this path.
+
+        For each real edge in this path's walk and associated edges, find any
+        explicit ``ComponentContextAssociation`` recorded on the graph for that
+        exact edge, and attach it (component id/type + behavior edge + source).
+        This is additive context/scope metadata: it references an actual existing
+        security edge plus an actually-declared component, never creates a graph
+        edge, and is excluded from path identity/classification/risk/dedup.
+        """
+        context = getattr(self.graph, "_component_context", None)
+        if not context:
+            return
+        rel: List[Dict[str, Any]] = []
+        # path.edges stores edge types as plain strings (e.g. "READS").
+        walk_edge_keys = {(s, t, et) for s, t, et in path.edges}
+        assoc_edge_keys = {(s, t, et) for s, t, et in path.associated_edges}
+        for a in context:
+            key = (a.edge_key[0], a.edge_key[1], a.edge_key[2].value)
+            if key in walk_edge_keys or key in assoc_edge_keys:
+                rel.append({
+                    "component_id": a.component.component_id,
+                    "component_type": a.component.component_type.value,
+                    "behavior": {
+                        "source": a.edge_key[0],
+                        "edge_type": a.edge_key[2].value,
+                        "target": a.edge_key[1],
+                    },
+                    "source": a.source,
+                })
+        # Deterministic order: by component id, then edge, then source.
+        rel.sort(key=lambda d: (d["component_id"], d["behavior"]["source"],
+                                d["behavior"]["edge_type"], d["behavior"]["target"],
+                                d.get("source") or ""))
+        path.context_components = rel
 
     def _dedupe(self, paths: List[AttackPath]) -> List[AttackPath]:
         """Deduplicate by canonical semantic identity; sort deterministically.
