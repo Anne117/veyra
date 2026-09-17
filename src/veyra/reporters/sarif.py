@@ -197,6 +197,11 @@ def _attack_path_result(path: AttackPath) -> Dict[str, Any]:
             "associated_edges": [e.get("components", []) for e in path_dict["provenance"]["associated_edges"]],
         }
 
+    # Expose the structured explanation under `properties` (additive; the SARIF
+    # message remains the existing `path.explanation` string).
+    if path_dict.get("explanation_details"):
+        properties["explanation"] = path_dict["explanation_details"]
+
     return {
         "ruleId": _attack_type_rule_id(path.attack_type),
         "level": _level(path.risk_severity),

@@ -232,6 +232,125 @@ class PathProvenance:
         }
 
 
+# Deterministic human-readable summaries per proven attack type.
+# Plain-string keys (module-level dict is defined before AttackType exists).
+_EXPLANATION_SUMMARIES = {
+    "SECRET_EXFILTRATION": "A secret is read and reaches an external endpoint.",
+    "DATA_EXFILTRATION": "Sensitive data is read and reaches an external endpoint.",
+    "CORRELATED_SECRET_EXECUTION": (
+        "Secret access is associated with execution in the same skill and requires review."
+    ),
+}
+
+
+def _explanation_summary(attack_type: AttackType) -> str:
+    if attack_type == AttackType.UNKNOWN:
+        return "The path contains correlated graph activity without a classified attack type."
+    return _EXPLANATION_SUMMARIES.get(attack_type.value, attack_type.value)
+
+
+@dataclass(frozen=True)
+class AttackPathExplanation:
+    """Deterministic, human-readable explanation derived ONLY from proven
+    AttackPath fields.
+
+    This is an explanation/presentation layer: it summarizes what the path
+    already proves (nodes, edges, attack_type, entry/asset/sink, risk,
+    policies, breakpoints, provenance). It never discovers attacks, infers
+    relationships, or changes path meaning. All tuples are ordered
+    deterministically and are JSON-safe.
+    """
+    summary: str
+    steps: Tuple[str, ...] = ()
+    associated_evidence: Tuple[str, ...] = ()
+    impact: str = ""
+    policies: Tuple[str, ...] = ()
+    breakpoints: Tuple[str, ...] = ()
+    components: Tuple[str, ...] = ()
+
+    def to_dict(self) -> Dict:
+        return {
+            "summary": self.summary,
+            "steps": list(self.steps),
+            "associated_evidence": list(self.associated_evidence),
+            "impact": self.impact,
+            "policies": list(self.policies),
+            "breakpoints": list(self.breakpoints),
+            "components": list(self.components),
+        }
+
+
+def _format_step(src: str, edge_type: str, tgt: str) -> str:
+    return f"{src} --{edge_type}--> {tgt}"
+
+
+def _explanation_breakpoint(b: "Breakpoint") -> str:
+    return f"{b.source_node} --{b.edge_type}--> {b.target_node} [{b.impact.value}]: {b.reason}"
+
+
+def _explanation_components(provenance: Optional[PathProvenance]) -> Tuple[str, ...]:
+    """Deterministic union of all component contributors, or empty if unknown."""
+    if provenance is None:
+        return ()
+    comps: List[str] = []
+    for nd, prov in provenance.nodes.items():
+        for c in prov.components:
+            if c not in comps:
+                comps.append(c)
+    for prov in provenance.edges:
+        for c in prov.components:
+            if c not in comps:
+                comps.append(c)
+    for prov in provenance.associated_edges:
+        for c in prov.components:
+            if c not in comps:
+                comps.append(c)
+    return tuple(sorted(comps))
+
+
+def build_explanation(path: "AttackPath") -> AttackPathExplanation:
+    """Deterministically explain an AttackPath from its already-proven fields.
+
+    Only reads path.nodes/edges/associated_edges/attack_type/entry/asset/sink/
+    risk/policy_ids/breakpoints/provenance. Never adds edges and never converts
+    associated_edges into contiguous steps.
+    """
+    # Ordered contiguous steps, one per edge.
+    steps: List[str] = []
+    for idx, edge in enumerate(path.edges):
+        src = path.nodes[idx] if idx < len(path.nodes) else ""
+        tgt = path.nodes[idx + 1] if idx + 1 < len(path.nodes) else ""
+        steps.append(_format_step(src, edge[2], tgt))
+
+    # Associated evidence kept separate from the contiguous path.
+    assoc: List[str] = []
+    for (s, t, et) in path.associated_edges:
+        assoc.append(_format_step(s, et, t))
+
+    # Impact statement derived only from existing risk fields.
+    impact = (
+        f"Severity {path.risk_severity.value}, confidence "
+        f"{path.risk_confidence.value}, risk score {path.risk_score}."
+    )
+
+    # Policies: exactly path.policy_ids (never derived from attack_type).
+    policies = tuple(path.policy_ids)
+
+    breakpoints = tuple(_explanation_breakpoint(b) for b in path.breakpoints)
+
+    components = _explanation_components(path.provenance)
+
+    return AttackPathExplanation(
+        summary=_explanation_summary(path.attack_type),
+        steps=tuple(steps),
+        associated_evidence=tuple(assoc),
+        impact=impact,
+        policies=policies,
+        breakpoints=breakpoints,
+        components=components,
+    )
+
+
 # Deterministic reason for each breakpoint edge type. Wording is deliberately
 # modest — it names what is interrupted, never "fixes the vulnerability".
 _BREAKPOINT_REASONS = {
@@ -525,6 +644,9 @@ class AttackPath:
     # Provenance: which scanned component/file contributed each node/edge.
     # Metadata only — excluded from path identity, classification, risk, dedup.
     provenance: PathProvenance = field(default_factory=PathProvenance)
+    # Structured, deterministic explanation layer (additive; the existing
+    # string `explanation` is preserved). Excluded from path identity.
+    explanation_details: Optional["AttackPathExplanation"] = None
 
     @property
     def is_contiguous(self) -> bool:
@@ -567,6 +689,8 @@ class AttackPath:
             "evidence": list(self.evidence),
             "policy_ids": list(self.policy_ids),
             "provenance": self.provenance.to_dict(),
+            "explanation_details": (self.explanation_details.to_dict()
+                                    if self.explanation_details is not None else None),
             "breakpoints": [b.to_dict() for b in self.breakpoints],
             "explanation": self.explanation,
             "is_composed": self.is_composed,
@@ -611,6 +735,7 @@ class PathAnalyzer:
             if compose:
                 if not self._set_composition(p):
                     continue  # only genuinely multi-component walks qualify
+            p.explanation_details = build_explanation(p)
             out.append(p)
         # De-duplication ordering is unaffected by classification/risk (both are
         # derived purely from the already-ordered node/edge sequences).

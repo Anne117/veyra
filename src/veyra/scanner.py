@@ -143,6 +143,12 @@ def scan_path(target: str) -> ScanResult:
     # PolicyEngine remains the sole owner of trigger semantics; this only records
     # the deterministic relationship. Never changes path identity.
     associate_policy_ids(attack_paths, result.policy_results)
+    # Refresh the deterministic explanation now that policy_ids are final, so the
+    # structured explanation reflects the final (associated) path state. This is
+    # metadata only and never changes path identity, risk, or policy semantics.
+    from veyra.graph.path import build_explanation
+    for p in attack_paths:
+        p.explanation_details = build_explanation(p)
     return result
 
 

@@ -271,6 +271,48 @@ def _format_provenance_components(prov: Any) -> str:
     return "".join(f'<code class="mono">{_esc(c)}</code>' for c in comps)
 
 
+def _path_explanation_html(path: AttackPath) -> str:
+    """Concise 'Explanation' section for one AttackPath card.
+
+    Renders the structured explanation (summary, steps, associated evidence,
+    risk impact, policies, breakpoints, components). Only presents already-proven
+    facts; everything is HTML-escaped.
+    """
+    details = path.explanation_details
+    if details is None:
+        return '<h4>Explanation</h4><p class="muted">Not available.</p>'
+
+    parts: List[str] = ['<h4>Explanation</h4>']
+
+    parts.append(f'<p class="explanation">{_esc(details.summary)}</p>')
+
+    steps_list = details.steps
+    if steps_list:
+        items = "".join(f'<li class="mono">{_esc(s)}</li>' for s in steps_list)
+        parts.append(f'<div class="expl-block"><span class="prov-label">Steps</span><ul class="expl-steps">{items}</ul></div>')
+
+    if details.associated_evidence:
+        items = "".join(f'<li class="mono">{_esc(s)}</li>' for s in details.associated_evidence)
+        parts.append(f'<div class="expl-block prov-assoc"><span class="prov-label">Associated evidence</span><ul class="expl-steps">{items}</ul></div>')
+
+    if details.impact:
+        parts.append(f'<div class="expl-block"><span class="prov-label">Impact</span><p>{_esc(details.impact)}</p></div>')
+
+    if details.policies:
+        items = "".join(f'<li class="mono">{_esc(pid)}</li>' for pid in details.policies)
+        parts.append(f'<div class="expl-block"><span class="prov-label">Policies</span><ul class="expl-steps">{items}</ul></div>')
+
+    if details.breakpoints:
+        items = "".join(f'<li class="mono">{_esc(b)}</li>' for b in details.breakpoints)
+        parts.append(f'<div class="expl-block"><span class="prov-label">Breakpoints</span><ul class="expl-steps">{items}</ul></div>')
+
+    if details.components:
+        items = "".join(f'<li class="mono">{_esc(c)}</li>' for c in details.components)
+        parts.append(f'<div class="expl-block"><span class="prov-label">Components</span><ul class="expl-steps">{items}</ul></div>')
+
+    return "".join(parts)
+
+
 def _path_provenance_html(path: AttackPath) -> str:
     """Compact provenance section for one AttackPath card.
 
@@ -397,6 +439,7 @@ def _attack_path_card(path: AttackPath) -> str:
       {_breakpoints_html(path)}
       {_path_policies_html(path)}
       {_path_provenance_html(path)}
+      {_path_explanation_html(path)}
     </div>
   </article>"""
 
@@ -660,6 +703,9 @@ ul.policies li { font-size: 13px; margin: 2px 0; }
 .prov-val { color: var(--muted); }
 .prov-val code { color: var(--accent); background: var(--bg-soft); padding: 0 4px; border-radius: 3px; }
 .prov-assoc { border-top: 1px dashed var(--border); padding-top: 8px; }
+.expl-block { margin: 6px 0 10px; }
+.expl-steps { padding-left: 18px; margin: 4px 0; }
+.expl-steps li { font-size: 13px; margin: 2px 0; word-break: break-word; }
 
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th, .table td {
