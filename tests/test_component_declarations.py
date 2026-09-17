@@ -116,13 +116,15 @@ def test_trusts_stays_trusts():
 
 
 def test_handoff_remains_explicit():
-    g = _g_with(_agent(), _agent2())
-    apply_component_declarations(g, [], [RelationshipDeclaration("AGENT:alice", "AGENT:bob", EdgeType.HANDOFF)])
-    assert any(e.source == "AGENT:alice" and e.type == EdgeType.HANDOFF and e.target == "AGENT:bob" for e in g.edges)
+    # Existing HANDOFF semantics are SKILL -> SKILL only (add_handoff creates
+    # two SKILL components). The declaration layer mirrors exactly that.
+    g = _g_with(_skill(), _skill2())
+    apply_component_declarations(g, [], [RelationshipDeclaration("SKILL:checkout", "SKILL:handoff", EdgeType.HANDOFF)])
+    assert any(e.source == "SKILL:checkout" and e.type == EdgeType.HANDOFF and e.target == "SKILL:handoff" for e in g.edges)
 
 
-def _agent2():
-    return ComponentDeclaration("AGENT:bob", NodeType.AGENT)
+def _skill2():
+    return ComponentDeclaration("SKILL:handoff", NodeType.SKILL)
 
 
 # L. Idempotency ------------------------------------------------------------
@@ -228,8 +230,8 @@ def test_trusts_does_not_create_exfiltration():
 # U. HANDOFF does not create data-flow edges --------------------------------
 def test_handoff_does_not_create_dataflow():
     g = SecurityGraph()
-    apply_component_declarations(g, [_agent(), _agent2()],
-                                 [RelationshipDeclaration("AGENT:alice", "AGENT:bob", EdgeType.HANDOFF)])
+    apply_component_declarations(g, [_skill(), _skill2()],
+                                 [RelationshipDeclaration("SKILL:checkout", "SKILL:handoff", EdgeType.HANDOFF)])
     assert all(e.type == EdgeType.HANDOFF for e in g.edges)
 
 
@@ -344,3 +346,92 @@ def test_end_to_end_exactly_as_declared():
     assert any(e.source == "AGENT:alice" and e.type == EdgeType.USES and e.target == "SKILL:checkout" for e in g.edges)
     assert any(e.source == "SKILL:checkout" and e.type == EdgeType.CALLS and e.target == "MCPSERVER:filesystem" for e in g.edges)
     assert any(e.source == "AGENT:alice" and e.type == EdgeType.TRUSTS and e.target == "TOOL:curl" for e in g.edges)
+
+
+# Tightened matrix negative tests (Commit 17 correction) ---------------------
+def test_tool_uses_tool_rejected():
+    g = _g_with(_tool(), _tool2())
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [], [RelationshipDeclaration("TOOL:curl", "TOOL:grep", EdgeType.USES)])
+
+
+def _tool2():
+    return ComponentDeclaration("TOOL:grep", NodeType.TOOL)
+
+
+def test_agent_contains_tool_rejected():
+    g = _g_with(_agent(), _tool())
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [], [RelationshipDeclaration("AGENT:alice", "TOOL:curl", EdgeType.CONTAINS)])
+
+
+def test_agent_contains_agent_rejected():
+    g = _g_with(_agent(), _skill())
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [], [RelationshipDeclaration("AGENT:alice", "AGENT:bob", EdgeType.CONTAINS)])
+
+
+def test_skill_contains_skill_rejected():
+    g = _g_with(_skill(), _skill2())
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [], [RelationshipDeclaration("SKILL:checkout", "SKILL:handoff", EdgeType.CONTAINS)])
+
+
+def test_skill_uses_agent_rejected():
+    g = _g_with(_skill(), _agent())
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [], [RelationshipDeclaration("SKILL:checkout", "AGENT:alice", EdgeType.USES)])
+
+
+def test_tool_calls_skill_rejected():
+    g = _g_with(_tool(), _skill())
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [], [RelationshipDeclaration("TOOL:curl", "SKILL:checkout", EdgeType.CALLS)])
+
+
+def test_mcp_calls_tool_rejected():
+    g = _g_with(_mcp(), _tool())
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [], [RelationshipDeclaration("MCPSERVER:filesystem", "TOOL:curl", EdgeType.CALLS)])
+
+
+def test_agent_handoff_agent_rejected():
+    # Existing HANDOFF is SKILL -> SKILL only; AGENT -> AGENT is not supported.
+    g = _g_with(_agent(), _bob())
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [], [RelationshipDeclaration("AGENT:alice", "AGENT:bob", EdgeType.HANDOFF)])
+
+
+def _bob():
+    return ComponentDeclaration("AGENT:bob", NodeType.AGENT)
+
+
+def test_secret_uses_tool_rejected():
+    g = SecurityGraph()
+    apply_component_declarations(g, [_tool()], [])
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [ComponentDeclaration("SECRET:s", NodeType.SECRET)],
+                                     [RelationshipDeclaration("SECRET:s", "TOOL:curl", EdgeType.USES)])
+
+
+def test_data_uses_tool_rejected():
+    g = SecurityGraph()
+    apply_component_declarations(g, [_tool()], [])
+    with pytest.raises(ComponentDeclarationError):
+        apply_component_declarations(g, [ComponentDeclaration("DATA:d", NodeType.DATA)],
+                                     [RelationshipDeclaration("DATA:d", "TOOL:curl", EdgeType.USES)])
+
+
+def test_matrix_is_security_semantic_contract():
+    """The compatibility matrix is an explicit security contract, not all
+    technically possible edges. Confirming a few deliberately-excluded
+    combinations are rejected (conservative-by-default invariant)."""
+    from veyra.graph.declarations import _COMPATIBILITY_MATRIX, _COMPONENT_NODE_TYPES
+    # TOOL USES anything is absent.
+    assert not any(et == EdgeType.USES and st == NodeType.TOOL
+                   for (st, et) in _COMPATIBILITY_MATRIX)
+    # AGENT HANDOFF is absent (existing HANDOFF is SKILL->SKILL only).
+    assert (NodeType.AGENT, EdgeType.HANDOFF) not in _COMPATIBILITY_MATRIX
+    # Component types never reach DATA/SECRET/ENDPOINT/ACTION.
+    assert not ({NodeType.DATA, NodeType.SECRET, NodeType.ENDPOINT, NodeType.ACTION}
+                & _COMPONENT_NODE_TYPES)

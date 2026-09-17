@@ -57,19 +57,26 @@ _RELATIONSHIP_EDGE_TYPES = {
 }
 
 # Compatibility matrix: source node type -> allowed target node types per edge.
-# This is a conservative security-semantic contract; unsupported combinations
-# are rejected rather than guessed.
+# This is a SECURITY SEMANTIC CONTRACT: it lists relationships explicitly
+# defined as valid, NOT all technically possible graph edges. An unsupported
+# combination is rejected rather than guessed. The matrix is intentionally
+# conservative and minimal.
+#
+# HANDOFF is limited to SKILL -> SKILL, mirroring the existing
+# `add_handoff()` semantic model (it creates exactly two SKILL components).
+_AGENT = NodeType.AGENT
+_SKILL = NodeType.SKILL
+_TOOL = NodeType.TOOL
+_MCP = NodeType.MCPSERVER
 _COMPATIBILITY_MATRIX: Dict[Tuple[NodeType, EdgeType], Tuple[NodeType, ...]] = {
-    (NodeType.AGENT, EdgeType.CONTAINS): (NodeType.SKILL,),
-    (NodeType.AGENT, EdgeType.USES): (NodeType.SKILL, NodeType.TOOL, NodeType.MCPSERVER),
-    (NodeType.AGENT, EdgeType.CALLS): (NodeType.TOOL, NodeType.MCPSERVER),
-    (NodeType.AGENT, EdgeType.TRUSTS): (NodeType.SKILL, NodeType.TOOL, NodeType.MCPSERVER),
-    (NodeType.SKILL, EdgeType.USES): (NodeType.TOOL, NodeType.MCPSERVER),
-    (NodeType.SKILL, EdgeType.CALLS): (NodeType.TOOL, NodeType.MCPSERVER),
-    (NodeType.SKILL, EdgeType.TRUSTS): (NodeType.TOOL, NodeType.MCPSERVER),
-    (NodeType.TOOL, EdgeType.USES): (NodeType.TOOL,),  # tool chaining is permitted
-    (NodeType.AGENT, EdgeType.HANDOFF): (NodeType.AGENT,),
-    (NodeType.SKILL, EdgeType.HANDOFF): (NodeType.SKILL,),
+    (_AGENT, EdgeType.CONTAINS): (_SKILL,),
+    (_AGENT, EdgeType.USES): (_SKILL, _TOOL, _MCP),
+    (_AGENT, EdgeType.CALLS): (_TOOL, _MCP),
+    (_AGENT, EdgeType.TRUSTS): (_SKILL, _TOOL, _MCP),
+    (_SKILL, EdgeType.USES): (_TOOL, _MCP),
+    (_SKILL, EdgeType.CALLS): (_TOOL, _MCP),
+    (_SKILL, EdgeType.TRUSTS): (_TOOL, _MCP),
+    (_SKILL, EdgeType.HANDOFF): (_SKILL,),
 }
 
 
