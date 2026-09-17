@@ -286,6 +286,15 @@ def _path_explanation_html(path: AttackPath) -> str:
 
     parts.append(f'<p class="explanation">{_esc(details.summary)}</p>')
 
+    # Entry / Asset / Sink — only present when the AttackPath field is populated.
+    for label, val in (("Entry", details.entry), ("Asset", details.asset), ("Sink", details.sink)):
+        if val:
+            parts.append(f'<div class="expl-block"><span class="prov-label">{_esc(label)}</span>'
+                         f'<p class="mono">{_esc(val)}</p></div>')
+        else:
+            parts.append(f'<div class="expl-block"><span class="prov-label">{_esc(label)}</span>'
+                         f'<p class="muted">Not available.</p></div>')
+
     steps_list = details.steps
     if steps_list:
         items = "".join(f'<li class="mono">{_esc(s)}</li>' for s in steps_list)

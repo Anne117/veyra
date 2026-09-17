@@ -134,17 +134,75 @@ def test_no_synthetic_secret_action_step():
     assert "SECRET -> ACTION" not in full
 
 
-# H. Entry/asset/sink truthful -------------------------------------------------
-def test_entry_asset_sink_from_path_fields():
-    from veyra.graph.path import AttackPathExplanation
-    # asset_node/sink_node are populated by classification.
+# H. Entry/asset/sink are truthful and present in the explanation itself ------
+def test_entry_asset_sink_in_explanation_data_exfil():
     p = _data_exfil()
-    assert p.asset_node.startswith("DATA:")
-    assert p.sink_node.startswith("ENDPOINT:")
-    # The structured explanation uses these fields via summary/steps, which are
-    # truthful because they come from the path itself.
     e = _associated_expl(p)
-    assert e.steps  # steps present and reference asset/sink nodes truthfully
+    assert e.entry == p.entry_node
+    assert e.asset == p.asset_node
+    assert e.sink == p.sink_node
+    # Present in to_dict().
+    d = e.to_dict()
+    assert d["entry"] == p.entry_node
+    assert d["asset"] == p.asset_node
+    assert d["sink"] == p.sink_node
+    # Present in JSON output.
+    associate_policy_ids([p], PolicyEngine().evaluate([p]))
+    jd = json.loads(render_json(ScanResult(target="x", attack_paths=[p],
+                                           policy_results=PolicyEngine().evaluate([p]))))
+    ed = jd["attack_paths"][0]["explanation_details"]
+    assert ed["entry"] == p.entry_node
+    assert ed["asset"] == p.asset_node
+    assert ed["sink"] == p.sink_node
+
+
+def test_entry_asset_sink_in_explanation_secret_exfil():
+    p = _secret_exfil()
+    e = _associated_expl(p)
+    assert e.entry == p.entry_node
+    assert e.asset == p.asset_node
+    assert e.sink == p.sink_node
+    assert e.asset == "SECRET:token"
+    assert e.sink == "ENDPOINT:https://evil.example"
+
+
+def test_entry_asset_sink_correlated_stays_truthful():
+    # Correlated secret execution: the sink is the ACTION, and the SECRET is only
+    # an associated asset. No SECRET -> ACTION relationship is invented.
+    p = _correlated_exec()
+    e = _associated_expl(p)
+    assert e.asset == "SECRET:token"  # the associated asset, proven by AttackPath
+    assert e.sink == "ACTION:run"      # the contiguous sink (EXECUTES)
+    # steps describe the contiguous EXECUTES-only path, never a secret->action.
+    assert all("--EXECUTES-->" in s for s in e.steps)
+    assert not any("SECRET:token --" in s for s in e.steps)
+
+
+def test_entry_asset_sink_missing_stays_none():
+    # A path with empty entry/asset/sink keeps None and never infers values.
+    p = AttackPath(
+        nodes=["SKILL:a", "ACTION:noop"],
+        edges=[("SKILL:a", "ACTION:noop", "EXECUTES")],
+        path_id="missing-eas",
+        attack_type=AttackType.UNKNOWN,
+    )
+    # On AttackPath these fields default to "" (empty). The explanation maps the
+    # empty value to None so it is explicitly "not available", never guessed.
+    e = _associated_expl(p)
+    assert e.entry is None
+    assert e.asset is None
+    assert e.sink is None
+    # No inferred SECRET/ENDPOINT values.
+    assert e.asset not in ("SECRET:token", "ENDPOINT:https://evil.example")
+
+
+def test_entry_asset_sink_none_to_dict():
+    # AttackPathExplanation constructed directly with None fields preserves None.
+    from veyra.graph.path import AttackPathExplanation
+    e = AttackPathExplanation(summary="s")
+    assert e.entry is None and e.asset is None and e.sink is None
+    d = e.to_dict()
+    assert d["entry"] is None and d["asset"] is None and d["sink"] is None
 
 
 # I. Policy IDs from path.policy_ids -----------------------------------------
@@ -207,6 +265,21 @@ def test_explanation_does_not_change_path_id():
     # Different provenance/explanation -> same path_id.
     assert p.path_id == pure
     assert p.path_id == path_id_of(p.nodes, p.edges, p.associated_edges)
+
+
+def test_explanation_fields_do_not_enter_identity():
+    # Adding/removing entry/asset/sink explanation values must not change the
+    # semantic identity of the path.
+    p = _secret_exfil()
+    pure = path_id_of(p.nodes, p.edges, p.associated_edges)
+    e1 = build_explanation(p)
+    # Rebuild with different entry/asset/sink explanation metadata.
+    p2 = _secret_exfil()
+    p2.entry_node = "SOMETHING_ELSE"
+    e2 = build_explanation(p2)
+    assert e1.to_dict() != e2.to_dict()      # explanation differs
+    assert p.path_id == pure                  # path_id unchanged
+    assert path_id_of(p2.nodes, p2.edges, p2.associated_edges) == pure
 
 
 # O. JSON contains explanation -----------------------------------------------

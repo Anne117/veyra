@@ -261,6 +261,9 @@ class AttackPathExplanation:
     deterministically and are JSON-safe.
     """
     summary: str
+    entry: Optional[str] = None
+    asset: Optional[str] = None
+    sink: Optional[str] = None
     steps: Tuple[str, ...] = ()
     associated_evidence: Tuple[str, ...] = ()
     impact: str = ""
@@ -271,6 +274,9 @@ class AttackPathExplanation:
     def to_dict(self) -> Dict:
         return {
             "summary": self.summary,
+            "entry": self.entry,
+            "asset": self.asset,
+            "sink": self.sink,
             "steps": list(self.steps),
             "associated_evidence": list(self.associated_evidence),
             "impact": self.impact,
@@ -315,12 +321,12 @@ def build_explanation(path: "AttackPath") -> AttackPathExplanation:
     risk/policy_ids/breakpoints/provenance. Never adds edges and never converts
     associated_edges into contiguous steps.
     """
-    # Ordered contiguous steps, one per edge.
+    # Ordered contiguous steps, one per real path edge.
+    # Each step describes the ACTUAL stored edge tuple (source, target, type),
+    # not something reconstructed from node indexing.
     steps: List[str] = []
-    for idx, edge in enumerate(path.edges):
-        src = path.nodes[idx] if idx < len(path.nodes) else ""
-        tgt = path.nodes[idx + 1] if idx + 1 < len(path.nodes) else ""
-        steps.append(_format_step(src, edge[2], tgt))
+    for (src, tgt, et) in path.edges:
+        steps.append(_format_step(src, et, tgt))
 
     # Associated evidence kept separate from the contiguous path.
     assoc: List[str] = []
@@ -342,6 +348,11 @@ def build_explanation(path: "AttackPath") -> AttackPathExplanation:
 
     return AttackPathExplanation(
         summary=_explanation_summary(path.attack_type),
+        # Entry/asset/sink come directly from the proven AttackPath fields.
+        # An empty/absent value is represented as None (never inferred).
+        entry=(path.entry_node or None),
+        asset=(path.asset_node or None),
+        sink=(path.sink_node or None),
         steps=tuple(steps),
         associated_evidence=tuple(assoc),
         impact=impact,
