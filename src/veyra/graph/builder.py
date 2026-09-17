@@ -369,6 +369,15 @@ def build_from_actions(actions: List, subject_id: str = "<agent>") -> SecurityGr
             add_handoff(graph, subject_id, action.destination.strip(),
                         attributes={"evidence": "explicit component-transfer action"})
 
+    # Stamp honest per-edge provenance: every edge built from an action belongs
+    # to the normalized component (subject_id) that produced the action. This is
+    # metadata only and never alters graph topology or path semantics.
+    if subject_id not in ("<agent>", "<unknown>"):
+        for edge in graph.edges:
+            files = edge.attributes.setdefault("files", [])
+            if subject_id not in files:
+                files.append(subject_id)
+
     return graph
 
 
@@ -396,5 +405,10 @@ def add_handoff(graph: SecurityGraph, source_comp: str, target_comp: str,
                               NodeType.SKILL, label=source_comp)
     tgt = graph.get_or_create(_node_id(NodeType.SKILL, target_comp),
                               NodeType.SKILL, label=target_comp)
-    return graph.add_edge(src.id, tgt.id, EdgeType.HANDOFF,
-                          attributes=attributes or {})
+    attrs = dict(attributes or {})
+    # Honest edge provenance: the handoff originates in the source component.
+    if source_comp not in ("<agent>", "<unknown>"):
+        files = attrs.setdefault("files", [])
+        if source_comp not in files:
+            files.append(source_comp)
+    return graph.add_edge(src.id, tgt.id, EdgeType.HANDOFF, attributes=attrs)

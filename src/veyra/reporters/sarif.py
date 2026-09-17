@@ -187,6 +187,16 @@ def _attack_path_result(path: AttackPath) -> Dict[str, Any]:
     if path_dict.get("policy_ids"):
         properties["policy_ids"] = list(path_dict["policy_ids"])
 
+    # Expose provenance via the existing `properties` mechanism only. A
+    # provenance component is metadata, NOT a SARIF location — we never fabricate
+    # a physicalLocation from it.
+    if path_dict.get("provenance"):
+        properties["provenance"] = {
+            "nodes": {str(n): list(p.get("components", [])) for n, p in path_dict["provenance"]["nodes"].items()},
+            "edges": [e.get("components", []) for e in path_dict["provenance"]["edges"]],
+            "associated_edges": [e.get("components", []) for e in path_dict["provenance"]["associated_edges"]],
+        }
+
     return {
         "ruleId": _attack_type_rule_id(path.attack_type),
         "level": _level(path.risk_severity),

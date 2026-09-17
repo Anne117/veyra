@@ -261,6 +261,68 @@ def _path_policies_html(path: AttackPath) -> str:
     return f'<h4>Policies <span class="pol-head">(violated)</span></h4><ul class="policies">{items}</ul>'
 
 
+def _format_provenance_components(prov: Any) -> str:
+    """Render a component list deterministically; empty => 'not available'."""
+    if prov is None:
+        return '<span class="muted">not available</span>'
+    comps = getattr(prov, "components", None)
+    if not comps:
+        return '<span class="muted">not available</span>'
+    return "".join(f'<code class="mono">{_esc(c)}</code>' for c in comps)
+
+
+def _path_provenance_html(path: AttackPath) -> str:
+    """Compact provenance section for one AttackPath card.
+
+    Displays the contributing component/file for each node and edge, using only
+    real builder attribution that already exists on the path. Missing provenance
+    is shown as neutral "not available" — never inferred.
+    """
+    prov = path.provenance
+    if prov is None:
+        return (
+            '<h4>Provenance</h4>'
+            '<p class="muted">Not available.</p>'
+        )
+
+    parts: List[str] = ['<h4>Provenance</h4>']
+
+    node_rows: List[str] = []
+    for nd, p in prov.nodes.items():
+        node_rows.append(
+            f'<div class="prov-row"><span class="prov-key mono">{_esc(nd)}</span>'
+            f'<span>→</span><span class="prov-val">{_format_provenance_components(p)}</span></div>'
+        )
+    if node_rows:
+        parts.append('<div class="prov-block"><span class="prov-label">Nodes</span>' + "".join(node_rows) + "</div>")
+
+    edge_rows: List[str] = []
+    prov_edges = prov.edges if isinstance(prov.edges, list) else list(prov.edges)
+    for idx, ep in enumerate(prov_edges):
+        et = path.edges[idx][2] if idx < len(path.edges) else ""
+        edge_rows.append(
+            f'<div class="prov-row"><span class="prov-key mono">{_esc(et)}</span>'
+            f'<span>→</span><span class="prov-val">{_format_provenance_components(ep)}</span></div>'
+        )
+    if edge_rows:
+        parts.append('<div class="prov-block"><span class="prov-label">Edges</span>' + "".join(edge_rows) + "</div>")
+
+    assoc_rows: List[str] = []
+    prov_assoc = prov.associated_edges if isinstance(prov.associated_edges, list) else list(prov.associated_edges)
+    for idx, ep in enumerate(prov_assoc):
+        et = path.associated_edges[idx][2] if idx < len(path.associated_edges) else ""
+        assoc_rows.append(
+            f'<div class="prov-row"><span class="prov-key mono">{_esc(et)}</span>'
+            f'<span>→</span><span class="prov-val">{_format_provenance_components(ep)}</span></div>'
+        )
+    if assoc_rows:
+        parts.append('<div class="prov-block prov-assoc"><span class="prov-label">Associated edges</span>' + "".join(assoc_rows) + "</div>")
+
+    if not (node_rows or edge_rows or assoc_rows):
+        parts.append('<p class="muted">No provenance recorded.</p>')
+    return "".join(parts)
+
+
 def _breakpoints_html(path: AttackPath) -> str:
     if not path.breakpoints:
         return '<p class="muted">No breakpoints recorded.</p>'
@@ -334,6 +396,7 @@ def _attack_path_card(path: AttackPath) -> str:
       <h4>Breakpoints</h4>
       {_breakpoints_html(path)}
       {_path_policies_html(path)}
+      {_path_provenance_html(path)}
     </div>
   </article>"""
 
@@ -590,6 +653,13 @@ h4 { font-size: 14px; margin: 18px 0 8px; color: var(--accent); }
 ul.policies { padding-left: 18px; margin: 6px 0; }
 ul.policies li { font-size: 13px; margin: 2px 0; }
 .pol-head { color: var(--sev-critical); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.prov-block { margin: 6px 0 10px; }
+.prov-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; display: block; margin-bottom: 4px; }
+.prov-row { display: flex; gap: 8px; align-items: baseline; font-size: 13px; margin: 3px 0; flex-wrap: wrap; }
+.prov-key { color: var(--text); word-break: break-all; }
+.prov-val { color: var(--muted); }
+.prov-val code { color: var(--accent); background: var(--bg-soft); padding: 0 4px; border-radius: 3px; }
+.prov-assoc { border-top: 1px dashed var(--border); padding-top: 8px; }
 
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th, .table td {

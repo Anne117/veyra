@@ -179,6 +179,59 @@ class BreakpointImpact(str, Enum):
     EXECUTION = "EXECUTION"                # running a correlated action
 
 
+@dataclass(frozen=True)
+class Provenance:
+    """Deterministic provenance for one graph node or edge.
+
+    ``components`` is the ordered (sorted, deduplicated) set of normalized
+    component/file identities that actually contributed the element, recorded
+    from real graph-construction data by the builder. It is metadata only: it
+    never participates in classification, path identity, risk, or dedup.
+
+    An empty ``components`` means provenance is genuinely unknown — it is never
+    guessed from node names, edge types, or semantic prefixes.
+    """
+    components: Tuple[str, ...] = ()
+
+    def __post_init__(self):
+        # Order deterministically and drop duplicates (a "collection" of
+        # contributors, per requirement 13). Frozen tuple, stable across runs.
+        object.__setattr__(self, "components", tuple(dict.fromkeys(sorted(self.components))))
+
+    @property
+    def component(self) -> Optional[str]:
+        """The sole contributor, if there is exactly one; else None."""
+        return self.components[0] if len(self.components) == 1 else None
+
+    @property
+    def known(self) -> bool:
+        return bool(self.components)
+
+    def to_dict(self) -> Dict:
+        return {"components": list(self.components)}
+
+
+@dataclass
+class PathProvenance:
+    """Provenance attached to an AttackPath.
+
+    ``nodes`` maps a semantic node id (from ``path.nodes``) to its contributors.
+    ``edges`` is parallel to ``path.edges`` (in the same order); one entry per
+    edge. ``associated_edges`` is parallel to ``path.associated_edges``. All are
+    populated from actual builder attribution and are never guessed.
+    """
+    nodes: Dict[str, Provenance] = field(default_factory=dict)
+    edges: List[Provenance] = field(default_factory=list)
+    associated_edges: List[Provenance] = field(default_factory=list)
+
+    def to_dict(self) -> Dict:
+        return {
+            "nodes": {k: v.to_dict() for k, v in self.nodes.items()},
+            "edges": [e.to_dict() for e in self.edges],
+            "associated_edges": [e.to_dict() for e in self.associated_edges],
+        }
+
+
 # Deterministic reason for each breakpoint edge type. Wording is deliberately
 # modest — it names what is interrupted, never "fixes the vulnerability".
 _BREAKPOINT_REASONS = {
@@ -469,6 +522,9 @@ class AttackPath:
     # matching logic. Deliberately excluded from path identity (see
     # canonical_path_identity / path_id_of).
     policy_ids: List[str] = field(default_factory=list)
+    # Provenance: which scanned component/file contributed each node/edge.
+    # Metadata only — excluded from path identity, classification, risk, dedup.
+    provenance: PathProvenance = field(default_factory=PathProvenance)
 
     @property
     def is_contiguous(self) -> bool:
@@ -510,6 +566,7 @@ class AttackPath:
             "risk_confidence": self.risk_confidence.value,
             "evidence": list(self.evidence),
             "policy_ids": list(self.policy_ids),
+            "provenance": self.provenance.to_dict(),
             "breakpoints": [b.to_dict() for b in self.breakpoints],
             "explanation": self.explanation,
             "is_composed": self.is_composed,
@@ -550,6 +607,7 @@ class PathAnalyzer:
             classify_path(p)
             assess_risk(p)
             p.breakpoints = breakpoints_for(p)
+            self._populate_provenance(p)
             if compose:
                 if not self._set_composition(p):
                     continue  # only genuinely multi-component walks qualify
@@ -817,6 +875,66 @@ class PathAnalyzer:
         return title, desc + f" Route terminates at {sink}."
 
     # --- Deduplication -------------------------------------------------------
+
+    def _populate_provenance(self, path: "AttackPath") -> None:
+        """Populate path.provenance from REAL graph construction attribution.
+
+        For each edge in the walk, the contributing components are the
+        normalized scanned-file identities recorded by the graph builder on the
+        actual Edge (``attributes[\"files\"]``). Node provenance is the union of
+        the contributors of the edges (walk edges and associated edges) that
+        reference that node. No provenance is ever inferred from node names,
+        edge types, or semantic prefixes — if an edge carries no file
+        attribution, its provenance stays empty (unknown).
+        """
+        from veyra.graph.builder import _component_id
+
+        node_comps: Dict[str, List[str]] = {}
+        walk: List[Provenance] = []
+        assoc: List[Provenance] = []
+
+        def _edge_contributors(edge: Optional[Edge]) -> List[str]:
+            comps: List[str] = []
+            if edge is None:
+                return comps
+            for f in edge.attributes.get("files", []):
+                c = _component_id(f)
+                if c != "<unknown>" and c not in comps:
+                    comps.append(c)
+            return comps
+
+        # Contiguous walk edges (parallel to path.edges).
+        for (s, t, et) in path.edges:
+            e = self._edge_index.get((s, t, et))
+            comps = _edge_contributors(e)
+            walk.append(Provenance(components=tuple(comps)))
+            # The skill/object nodes touching this real edge belong to it too.
+            for nd in (s, t):
+                node_comps.setdefault(nd, [])
+                for c in comps:
+                    if c not in node_comps[nd]:
+                        node_comps[nd].append(c)
+
+        # Associated edges (kept separate; parallel to path.associated_edges).
+        for (s, t, et) in path.associated_edges:
+            e = self._edge_index.get((s, t, et))
+            comps = _edge_contributors(e)
+            assoc.append(Provenance(components=tuple(comps)))
+            for nd in (s, t):
+                node_comps.setdefault(nd, [])
+                for c in comps:
+                    if c not in node_comps[nd]:
+                        node_comps[nd].append(c)
+
+        # Ensure every node in path.nodes is present (even with unknown prov).
+        for nd in path.nodes:
+            node_comps.setdefault(nd, [])
+
+        path.provenance = PathProvenance(
+            nodes={nd: Provenance(components=tuple(cs)) for nd, cs in node_comps.items()},
+            edges=walk,
+            associated_edges=assoc,
+        )
 
     def _dedupe(self, paths: List[AttackPath]) -> List[AttackPath]:
         """Deduplicate by canonical semantic identity; sort deterministically.
