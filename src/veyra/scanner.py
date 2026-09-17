@@ -137,8 +137,12 @@ def scan_path(target: str) -> ScanResult:
     # PolicyEngine. PolicyEngine is the sole owner of policy trigger semantics;
     # the scanner only orchestrates finalized_paths -> evaluate() ->
     # ScanResult.policy_results. Local import avoids any import cycle.
-    from veyra.policy import PolicyEngine
+    from veyra.policy import PolicyEngine, associate_policy_ids
     result.policy_results = PolicyEngine().evaluate(attack_paths)
+    # Project the violated policy IDs onto each AttackPath (structured, explicit).
+    # PolicyEngine remains the sole owner of trigger semantics; this only records
+    # the deterministic relationship. Never changes path identity.
+    associate_policy_ids(attack_paths, result.policy_results)
     return result
 
 

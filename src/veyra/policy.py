@@ -175,3 +175,31 @@ class PolicyEngine:
                     ))
         results.sort(key=lambda r: (r.policy_id, r.path_id))
         return results
+
+
+def associate_policy_ids(paths: List, results: List[PolicyResult]) -> None:
+    """Project violated policy IDs onto each AttackPath (in place).
+
+    For each path, ``path.policy_ids`` is set to the sorted list of policy IDs
+    that this exact path violates (per the given PolicyResults). This is a pure
+    projection of the PolicyEngine's output — the engine remains the sole owner
+    of policy trigger semantics; this helper only records the relationship. It
+    never derives policy IDs from attack_type, severity, or node names, and it
+    never invents a violation that the evaluator did not produce.
+
+    Deterministic: policy IDs are sorted; paths are matched by the stable
+    ``path_id``. Neither the paths' identity nor their risk fields are modified.
+    """
+    # Group violated policy ids by path_id (a dict is fine here because we only
+    # read by key; ordering is made explicit by the sort below).
+    violated_by_path: Dict[str, Dict[str, bool]] = {}
+    for r in results:
+        if r.violated and r.path_id not in violated_by_path:
+            violated_by_path[r.path_id] = {}
+        if r.violated:
+            violated_by_path[r.path_id][r.policy_id] = True
+
+    for p in paths:
+        pid = p.path_id or p.ensure_path_id()
+        violated = violated_by_path.get(pid, {})
+        p.policy_ids = sorted(violated.keys())

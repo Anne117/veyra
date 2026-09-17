@@ -463,6 +463,12 @@ class AttackPath:
     breakpoints: List["Breakpoint"] = field(default_factory=list)
     is_composed: bool = False
     component_ids: List[str] = field(default_factory=list)
+    # Policy IDs (only the ones actually violated by THIS exact path), populated
+    # deterministically by the policy pipeline. Never empty-with-meaning; it is a
+    # structured projection of PolicyEngine results, not a duplicate of policy
+    # matching logic. Deliberately excluded from path identity (see
+    # canonical_path_identity / path_id_of).
+    policy_ids: List[str] = field(default_factory=list)
 
     @property
     def is_contiguous(self) -> bool:
@@ -503,6 +509,7 @@ class AttackPath:
             "risk_severity": self.risk_severity.value,
             "risk_confidence": self.risk_confidence.value,
             "evidence": list(self.evidence),
+            "policy_ids": list(self.policy_ids),
             "breakpoints": [b.to_dict() for b in self.breakpoints],
             "explanation": self.explanation,
             "is_composed": self.is_composed,

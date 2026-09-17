@@ -182,6 +182,11 @@ def _attack_path_result(path: AttackPath) -> Dict[str, Any]:
     if breakpoints:
         properties["breakpoints"] = breakpoints
 
+    # Expose the violated policy IDs for this specific path via the existing
+    # `properties` mechanism (no new SARIF structure).
+    if path_dict.get("policy_ids"):
+        properties["policy_ids"] = list(path_dict["policy_ids"])
+
     return {
         "ruleId": _attack_type_rule_id(path.attack_type),
         "level": _level(path.risk_severity),

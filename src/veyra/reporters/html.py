@@ -246,6 +246,21 @@ def _associated_html(path: AttackPath) -> str:
     )
 
 
+def _path_policies_html(path: AttackPath) -> str:
+    """Compact, honest policy display for one AttackPath.
+
+    Shows only the policy IDs actually violated by this exact path. When none are
+    associated, a neutral note is rendered — never a fabricated violation.
+    """
+    if not path.policy_ids:
+        return (
+            '<h4>Policies</h4>'
+            '<p class="muted">No violated policies associated with this path.</p>'
+        )
+    items = "".join(f'<li class="mono">{_esc(pid)}</li>' for pid in path.policy_ids)
+    return f'<h4>Policies <span class="pol-head">(violated)</span></h4><ul class="policies">{items}</ul>'
+
+
 def _breakpoints_html(path: AttackPath) -> str:
     if not path.breakpoints:
         return '<p class="muted">No breakpoints recorded.</p>'
@@ -318,6 +333,7 @@ def _attack_path_card(path: AttackPath) -> str:
       {evidence}
       <h4>Breakpoints</h4>
       {_breakpoints_html(path)}
+      {_path_policies_html(path)}
     </div>
   </article>"""
 
@@ -571,6 +587,9 @@ h4 { font-size: 14px; margin: 18px 0 8px; color: var(--accent); }
 .graph-assoc { padding: 2px 0; }
 
 .evidence li { font-family: var(--mono); font-size: 13px; }
+ul.policies { padding-left: 18px; margin: 6px 0; }
+ul.policies li { font-size: 13px; margin: 2px 0; }
+.pol-head { color: var(--sev-critical); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
 
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th, .table td {
