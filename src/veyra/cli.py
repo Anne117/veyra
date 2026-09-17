@@ -8,7 +8,7 @@ import sys
 
 from veyra.attack_lab import run_attack_lab
 from veyra.models import Severity
-from veyra.reporters import render_json, render_sarif, render_terminal
+from veyra.reporters import render_html, render_json, render_sarif, render_terminal
 from veyra.scanner import scan_path
 from veyra.suppress import apply_suppression, load_config
 
@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("path", help="File or directory to scan.")
     scan.add_argument(
         "--format",
-        choices=["terminal", "json", "sarif"],
+        choices=["terminal", "json", "sarif", "html"],
         default="terminal",
         help="Output format (default: terminal).",
     )
@@ -123,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
             print(render_json(result))
         elif args.format == "sarif":
             print(render_sarif(result))
+        elif args.format == "html":
+            print(render_html(result))
         else:
             print(render_terminal(result))
 

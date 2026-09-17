@@ -87,7 +87,8 @@ The pipeline (see `src/veyra/scanner.py`, `src/veyra/graph/`, and
    (`PASS`/`FAIL`); CLI exits non-zero on violations while preserving the
    existing severity behavior.
 8. **Reporting** — terminal (with policy violations when present), JSON (with
-   attack paths + policy results/status), or SARIF 2.1.0.
+   attack paths + policy results/status), SARIF 2.1.0, or a standalone HTML
+   security report.
 
 ## 🧩 Detection table
 
@@ -174,6 +175,21 @@ Requires Python 3.9+.
 veyra scan ./path/to/skill
 veyra scan ./path/to/skill --format json
 veyra scan ./path/to/skill --format sarif > report.sarif
+veyra scan ./path/to/skill --format html > report.html
+```
+
+### HTML Security Report
+
+`--format html` emits a self-contained, deterministic HTML Security Report (dark
+security-oriented UI, inline CSS only — no network, CDN, or JavaScript). It
+renders the scan summary, every attack path with its contiguous node/edge chain
+and separate **Associated evidence**, breakpoints, policy results, and the
+original findings. All dynamic values (from scanned files, node IDs, evidence,
+etc.) are HTML-escaped, so malicious content cannot inject markup. Open it
+directly from disk:
+
+```bash
+veyra scan ./path/to/skill --format html > report.html
 ```
 
 ### Exit codes (CI-friendly)
