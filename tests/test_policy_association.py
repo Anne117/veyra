@@ -253,3 +253,47 @@ def test_cli_exit_semantics_unchanged():
     assert rc == 0
     d = json.loads(buf.getvalue())
     assert d["policy_status"] == "PASS"
+
+
+# Finalized-identity requirements (Commit 14 fix) -----------------------------
+def _unfinalized_path():
+    """A path NOT finalized (no path_id) — must be rejected by policy pipeline."""
+    return AttackPath(
+        nodes=["SKILL:skill", "SECRET:token"],
+        edges=[("SKILL:skill", "SECRET:token", "READS")],
+    )
+
+
+def test_policy_engine_rejects_unfinalized_path():
+    p = _unfinalized_path()
+    assert p.path_id == ""
+    import pytest
+
+    with pytest.raises(ValueError):
+        PolicyEngine().evaluate([p])
+
+
+def test_associate_policy_ids_rejects_unfinalized_path():
+    p = _unfinalized_path()
+    import pytest
+
+    with pytest.raises(ValueError):
+        associate_policy_ids([p], [])
+
+
+def test_none_of_the_functions_change_path_id():
+    # PolicyEngine + associate_policy_ids must leave path_id untouched.
+    p = _secret_exfil_path()
+    pid = p.path_id
+    results = PolicyEngine().evaluate([p])
+    associate_policy_ids([p], results)
+    assert p.path_id == pid  # identity not mutated
+    assert p.policy_ids == ["SECRET-EXFILTRATION-001"]  # association intact
+
+
+def test_associate_does_not_generate_identity_when_results_empty():
+    # Even with no results, an unfinalized path is rejected (no silent generation).
+    import pytest
+
+    with pytest.raises(ValueError):
+        associate_policy_ids([_unfinalized_path()], [])

@@ -25,7 +25,7 @@ from veyra.graph import (
     PathAnalyzer,
     SecurityGraph,
 )
-from veyra.graph import classify_path
+from veyra.graph import classify_path, path_id_of
 
 
 def _g():
@@ -79,6 +79,8 @@ def _pure_handoff_path():
 def _unknown_attack_path():
     p = AttackPath(nodes=["SKILL:skill", "SECRET:token"],
                    edges=[("SKILL:skill", "SECRET:token", "READS")])
+    # Finalize identity (as the path-analysis pipeline does) before policy use.
+    p.path_id = path_id_of(p.nodes, p.edges, p.associated_edges)
     classify_path(p)
     return p
 
@@ -143,6 +145,8 @@ def test_sends_to_without_proven_exfil_triggers_nothing():
         edges=[("SKILL:skill", "SECRET:token", "READS"),
                ("SKILL:skill", "ENDPOINT:https://evil.example", "SENDS_TO")],
     )
+    # Finalize identity (as the path-analysis pipeline does) before policy use.
+    p.path_id = path_id_of(p.nodes, p.edges, p.associated_edges)
     classify_path(p)
     assert p.attack_type == AttackType.UNKNOWN
     results = PolicyEngine().evaluate([p])

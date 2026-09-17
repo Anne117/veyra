@@ -19,6 +19,7 @@ from veyra.graph import (
     PathAnalyzer,
     SecurityGraph,
     classify_path,
+    path_id_of,
 )
 from veyra.reporters import render_json, render_terminal
 from veyra.scanner import scan_path
@@ -61,6 +62,8 @@ def _non_violating_results(path):
 def _unknown_path():
     p = AttackPath(nodes=["SKILL:skill", "SECRET:token"],
                    edges=[("SKILL:skill", "SECRET:token", "READS")])
+    # Finalize identity (as the path-analysis pipeline does) before policy use.
+    p.path_id = path_id_of(p.nodes, p.edges, p.associated_edges)
     classify_path(p)
     return p
 

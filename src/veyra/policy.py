@@ -149,8 +149,20 @@ class PolicyEngine:
         ``path_id``; the engine reads only those semantic fields. The iterable is
         materialized once so a generator/iterator is not consumed by the first
         policy. Neither the paths nor any graph is mutated.
+
+        PolicyEngine never creates AttackPath identity: every path must already
+        carry a finalized, non-empty ``path_id``. A path without one is a
+        programming error (identity must be established during path
+        construction/finalization, before policy evaluation), so we fail
+        explicitly rather than silently generating an id.
         """
         materialized = list(paths)  # allow generators/iterators safely
+        for path in materialized:
+            if not path.path_id:
+                raise ValueError(
+                    "PolicyEngine requires finalized attack paths with a path_id; "
+                    f"got a path with empty path_id ({getattr(path, 'nodes', None)})"
+                )
         results: List[PolicyResult] = []
         for policy in self.policies():
             trigger = _POLICY_TRIGGER[policy.policy_id]
@@ -189,6 +201,9 @@ def associate_policy_ids(paths: List, results: List[PolicyResult]) -> None:
 
     Deterministic: policy IDs are sorted; paths are matched by the stable
     ``path_id``. Neither the paths' identity nor their risk fields are modified.
+    The helper never creates or mutates path identity: every path must already
+    carry a finalized, non-empty ``path_id``. A path without one is a
+    programming error and fails explicitly rather than silently generating one.
     """
     # Group violated policy ids by path_id (a dict is fine here because we only
     # read by key; ordering is made explicit by the sort below).
@@ -200,6 +215,11 @@ def associate_policy_ids(paths: List, results: List[PolicyResult]) -> None:
             violated_by_path[r.path_id][r.policy_id] = True
 
     for p in paths:
-        pid = p.path_id or p.ensure_path_id()
+        if not p.path_id:
+            raise ValueError(
+                "associate_policy_ids requires finalized attack paths with a "
+                f"path_id; got a path with empty path_id ({getattr(p, 'nodes', None)})"
+            )
+        pid = p.path_id
         violated = violated_by_path.get(pid, {})
         p.policy_ids = sorted(violated.keys())
