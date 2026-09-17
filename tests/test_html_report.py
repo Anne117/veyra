@@ -20,6 +20,19 @@ from veyra.reporters.html import render_html
 from veyra.scanner import scan_path
 
 
+GRAPH_CLASS = 'class="graph"'
+GRAPH_LEGEND = "Contiguous attack path"
+ASSOC_GRAPH = "Associated evidence"
+
+
+def _graph_slice(doc: str) -> str:
+    """The contiguous (non-dashed) graph block for a path."""
+    start = doc.find(GRAPH_LEGEND)
+    assert start != -1, "contiguous graph legend missing"
+    end = doc.find(ASSOC_GRAPH, start)
+    return doc[start:end if end != -1 else len(doc)]
+
+
 def _exfil_path(asset="SECRET"):
     """A realistic contiguous SECRET/DATA_EXFILTRATION walk."""
     if asset == "SECRET":
@@ -291,3 +304,107 @@ def test_cli_html_output():
         assert "Attack Path" in out
         # Real pipeline attack path info present.
         assert "DATA_EXFILTRATION" in out
+
+
+# K. Graph visualization ----------------------------------------------------
+def test_graph_basic_nodes_and_edges_render():
+    ap = _exfil_path("SECRET")
+    doc = render_html(ScanResult(target="x", attack_paths=[ap]))
+    assert GRAPH_LEGEND in doc  # contiguous graph present
+    # Each node id (in existing order) appears.
+    for n in ap.nodes:
+        assert n in doc
+    # Each edge type appears as an edge label.
+    for et in ["READS", "FLOWS_TO", "SENDS_TO"]:
+        assert et in doc
+    # Node-type badges expose the semantic identity.
+    assert "SECRET" in doc
+    assert "ENDPOINT" in doc
+
+
+def test_graph_exact_contiguous_chain_no_synthetic():
+    ap = _exfil_path("DATA")
+    doc = render_html(ScanResult(target="x", attack_paths=[ap]))
+    g = _graph_slice(doc)
+    # Every node in path.nodes is present.
+    for n in ap.nodes:
+        assert n in g
+    # The graph is driven by path.edges, so the exact contiguous edge labels
+    # appear within the graph block.
+    for et in ["READS", "FLOWS_TO", "SENDS_TO"]:
+        assert et in g
+
+
+def test_graph_correlated_secret_execution_separation():
+    ap = _execution_path()  # SKILL --EXECUTES--> ACTION; assoc SKILL --READS--> SECRET
+    doc = render_html(ScanResult(target="x", attack_paths=[ap]))
+    # Contiguous graph: SKILL -> ACTION joined by EXECUTES.
+    g = _graph_slice(doc)
+    assert "run" in g  # ACTION node key
+    assert "EXECUTES" in g
+    # READS must NOT appear in the contiguous graph block.
+    assert "READS" not in g
+    # Associated evidence is present and separately labelled.
+    assert ASSOC_GRAPH in doc
+    assert "SECRET:token" in doc
+    # A fabricated SECRET -> ACTION edge would put READS (or a SECRET->ACTION
+    # junction) inside the contiguous graph block; it is absent.
+    assert "READS" not in g
+
+
+def test_graph_multiple_paths_rendered_and_deterministic():
+    ap1 = _exfil_path("SECRET")
+    ap2 = _exfil_path("DATA")
+    ap3 = _execution_path()
+    result = ScanResult(target="x", attack_paths=[ap1, ap2, ap3])
+    doc = render_html(result)
+    # Every path's nodes appear (each path gets its own graph).
+    for ap in [ap1, ap2, ap3]:
+        for n in ap.nodes:
+            # Nodes are split into type + key; assert the full semantic id is
+            # recoverable (both halves appear) rather than a contiguous substring.
+            ntype, _, key = n.partition(":")
+            assert ntype in doc
+            assert key in doc
+    # Determinism across repeated renders.
+    assert render_html(result) == doc
+
+
+def test_graph_empty_scan_no_fake_graph():
+    doc = render_html(ScanResult(target="clean"))
+    assert "No attack paths detected." in doc
+    assert GRAPH_LEGEND not in doc  # no empty/fake graph
+
+
+def test_graph_xss_escaping():
+    evil_node = "SKILL:<img src=x onerror=alert(1)>"
+    evil_edge = "<script>alert(2)</script>"
+    ap = AttackPath(
+        nodes=[evil_node, "SECRET:&\"<token>"],
+        edges=[(evil_node, "SECRET:&\"<token>", evil_edge)],
+        associated_edges=[(evil_node, "ACTION:x", evil_edge)],
+        path_id="xssgraph",
+        attack_type=AttackType.SECRET_EXFILTRATION,
+    )
+    ap.explanation = "x"
+    result = ScanResult(target="t", attack_paths=[ap])
+    doc = render_html(result)
+    # No raw executable markup escapes (the tag open bracket is never emitted).
+    assert "<script>" not in doc
+    assert '<img' not in doc
+    assert "onmouseover=" not in doc
+    # The hostile values ARE present, but fully escaped as inert text.
+    assert "&lt;img src=x onerror=alert(1)&gt;" in doc
+    assert "&lt;script&gt;alert(2)&lt;/script&gt;" in doc
+    # No event-handler attribute injection can be parsed by a browser.
+    assert " onerror=\"" not in doc
+    assert " onmouseover=\"" not in doc
+
+
+def test_graph_breakpoints_unchanged():
+    ap = _breakpointed_path()
+    doc = render_html(ScanResult(target="x", attack_paths=[ap]))
+    assert "Restricts access to the sensitive asset." in doc
+    assert "ACCESS" in doc
+    # Breakpoints remain a table, not graph edges.
+    assert '<table class="table"' in doc

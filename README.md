@@ -182,11 +182,12 @@ veyra scan ./path/to/skill --format html > report.html
 
 `--format html` emits a self-contained, deterministic HTML Security Report (dark
 security-oriented UI, inline CSS only — no network, CDN, or JavaScript). It
-renders the scan summary, every attack path with its contiguous node/edge chain
-and separate **Associated evidence**, breakpoints, policy results, and the
-original findings. All dynamic values (from scanned files, node IDs, evidence,
-etc.) are HTML-escaped, so malicious content cannot inject markup. Open it
-directly from disk:
+renders the scan summary, every attack path as a visual graph (nodes derived
+from `path.nodes`, edges from `path.edges`, with labeled edge types and
+semantic node types) plus a separate **Associated evidence** representation,
+breakpoints, policy results, and the original findings. All dynamic values
+(from scanned files, node IDs, evidence, etc.) are HTML-escaped, so malicious
+content cannot inject markup. Open it directly from disk:
 
 ```bash
 veyra scan ./path/to/skill --format html > report.html

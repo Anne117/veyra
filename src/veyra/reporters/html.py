@@ -127,7 +127,104 @@ def _chain_html(path: AttackPath) -> str:
                 f'<div class="chain-edge"><span class="edge-arrow">↓</span>'
                 f'<span class="edge-type">{edge_type}</span></div>'
             )
-    return f'<div class="chain">{"" .join(rows)}</div>'
+    return f'<div class="chain">{"".join(rows)}</div>'
+
+
+# Known semantic node-type labels from the existing Security Graph vocabulary
+# (veyra.graph.models.NodeType). Node ids follow the established '<TYPE>:<key>'
+# convention (e.g. 'SKILL:payment', 'SECRET:.aws/credentials'). The type prefix
+# is the existing semantic identity, not a guess. An id without a recognized
+# prefix is shown as-is with no invented type.
+_NODE_TYPE_LABELS = {
+    "AGENT": "AGENT",
+    "SKILL": "SKILL",
+    "TOOL": "TOOL",
+    "MCPSERVER": "MCP SERVER",
+    "DATA": "DATA",
+    "SECRET": "SECRET",
+    "ENDPOINT": "ENDPOINT",
+    "ACTION": "ACTION",
+}
+
+
+def _node_parts(node: str):
+    """Split a semantic node id into (label, key).
+
+    Uses the project's '<TYPE>:<key>' convention. Falls back to (None, node)
+    when the prefix is not a recognized NodeType, so a node type is never
+    guessed from arbitrary strings.
+    """
+    if ":" in node:
+        prefix, _, rest = node.partition(":")
+        if prefix in _NODE_TYPE_LABELS:
+            return _NODE_TYPE_LABELS[prefix], rest
+    return None, node
+
+
+def _graph_node(node: str) -> str:
+    """Render a single node card in the attack-path graph."""
+    ntype, key = _node_parts(node)
+    if ntype:
+        type_badge = f'<span class="graph-node-type">{_esc(ntype)}</span>'
+    else:
+        type_badge = ""
+    return (
+        f'<div class="graph-node">{type_badge}'
+        f'<span class="graph-node-key mono">{_esc(key if ntype else node)}</span></div>'
+    )
+
+
+def _graph_edge(edge_type: str) -> str:
+    """Render a vertical connector labelled with the real edge type."""
+    return (
+        f'<div class="graph-edge" role="presentation">'
+        f'<span class="graph-edge-label mono">{_esc(edge_type)}</span>'
+        f'<span class="graph-edge-arrow" aria-hidden="true">&#8595;</span></div>'
+    )
+
+
+def _attack_graph_html(path: AttackPath) -> str:
+    """Visualize the contiguous attack path as a vertical node/edge graph.
+
+    The graph is built strictly from path.nodes + path.edges in their existing
+    order: node i is joined to node i+1 by edge i's type. No edge is inferred or
+    synthesized, and associated_edges are never merged into this walk.
+    """
+    parts: List[str] = []
+    edges = path.edges
+    for i, node in enumerate(path.nodes):
+        parts.append(f'<div class="graph-step">{_graph_node(node)}</div>')
+        if i < len(edges):
+            parts.append(_graph_edge(edges[i][2]))
+    return (
+        '<div class="graph" aria-label="Contiguous attack path">'
+        '<div class="graph-legend">Contiguous attack path</div>'
+        + "".join(parts)
+        + "</div>"
+    )
+
+
+def _associated_graph_html(path: AttackPath) -> str:
+    """Visualize associated_edges as a clearly labelled, secondary graph.
+
+    Each associated edge is rendered as its own dashed sub-graph (source ->
+    target with its real edge type). It is never merged into the contiguous
+    walk, so a fabricated edge (e.g. SECRET -> ACTION) can never appear.
+    """
+    if not path.associated_edges:
+        return ""
+    parts: List[str] = []
+    for src, tgt, etype in path.associated_edges:
+        parts.append('<div class="graph-assoc">')
+        parts.append(f'<div class="graph-step">{_graph_node(src)}</div>')
+        parts.append(_graph_edge(etype))
+        parts.append(f'<div class="graph-step">{_graph_node(tgt)}</div>')
+        parts.append("</div>")
+    return (
+        '<div class="graph graph-dashed" aria-label="Associated evidence">'
+        + "".join(parts)
+        + "</div>"
+    )
 
 
 def _associated_html(path: AttackPath) -> str:
@@ -200,6 +297,8 @@ def _attack_path_card(path: AttackPath) -> str:
 
     chain = _chain_html(path)
     associated = _associated_html(path)
+    graph = _attack_graph_html(path)
+    associated_graph = _associated_graph_html(path)
 
     return f"""<article class="card">
     <div class="card-head">
@@ -211,6 +310,9 @@ def _attack_path_card(path: AttackPath) -> str:
     <div class="card-body">
       {nodes_meta and f'<div class="meta">{nodes_meta}</div>' or ""}
       <h4>Path</h4>
+      {graph}
+      {associated_graph}
+      <h4>Chain</h4>
       {chain}
       {associated}
       {evidence}
@@ -408,6 +510,65 @@ h4 { font-size: 14px; margin: 18px 0 8px; color: var(--accent); }
 .assoc-note { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
 .assoc-edge { color: var(--text); margin: 6px 0; font-family: var(--mono); font-size: 13px; }
 .assoc-edge .edge-type { color: var(--sev-medium); margin: 0 8px; }
+
+/* Attack-path graph visualization */
+.graph {
+  margin: 4px 0 12px;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: inline-block;
+  min-width: 220px;
+}
+.graph-legend {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+.graph-step { display: flex; justify-content: flex-start; }
+.graph-node {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px 7px;
+  max-width: 100%;
+}
+.graph-node-type {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.graph-node-key { font-size: 13px; word-break: break-all; line-height: 1.3; }
+.graph-edge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3px 0 2px;
+  width: 40px;
+}
+.graph-edge-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 2px;
+}
+.graph-edge-arrow { color: var(--sev-critical); font-size: 16px; line-height: 1; }
+.graph.graph-dashed {
+  border-style: dashed;
+  margin-top: 14px;
+}
+.graph-dashed .graph-node { border-style: dashed; border-color: var(--muted); }
+.graph-assoc { padding: 2px 0; }
 
 .evidence li { font-family: var(--mono); font-size: 13px; }
 
