@@ -19,8 +19,10 @@ from veyra.graph.context import (
     associate_security_behavior,
     build_component_path_composition_for_paths,
     build_component_path_participation_for_paths,
+    build_component_risk_evidence_for_paths,
     serialize_component_path_composition,
     serialize_component_path_participation,
+    serialize_component_risk_evidence,
     serialize_component_security_scopes,
 )
 from veyra.mitre import mitre_for
@@ -105,11 +107,12 @@ def scan_path(
     supplied, each association's security-behavior edge and component must
     actually exist in the scan's merged security graph (verified through the
     existing ``associate_security_behavior`` API), and the resulting
-    per-component security scopes, per-path component participation, AND
-    per-path component composition are projected onto
-    ``ScanResult.component_security_scopes`` /
+    per-component security scopes, per-path component participation, per-path
+    component composition, AND per-path component risk evidence are projected
+    onto ``ScanResult.component_security_scopes`` /
     ``ScanResult.component_path_participation`` /
-    ``ScanResult.component_path_composition`` (exposed in JSON/SARIF/HTML).
+    ``ScanResult.component_path_composition`` /
+    ``ScanResult.component_risk_evidence`` (exposed in JSON/SARIF/HTML).
 
     Ownership is NEVER inferred: without explicit associations, no component
     security scopes are produced regardless of USES/CONTAINS/CALLS/TRUSTS/
@@ -212,6 +215,14 @@ def scan_path(
         )
         result.component_path_composition = serialize_component_path_composition(
             build_component_path_composition_for_paths(
+                attack_paths,
+                component_context,
+                valid_components=valid_components,
+                existing_edges=existing_edges,
+            )
+        )
+        result.component_risk_evidence = serialize_component_risk_evidence(
+            build_component_risk_evidence_for_paths(
                 attack_paths,
                 component_context,
                 valid_components=valid_components,

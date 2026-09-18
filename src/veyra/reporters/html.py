@@ -900,6 +900,46 @@ def _component_composition_html(result) -> str:
     return "".join(blocks)
 
 
+def _component_risk_evidence_html(result) -> str:
+    """Compact 'Component Risk Evidence' section.
+
+    For each entry shows Path ID, Component, Type, Risk severity, Risk
+    confidence, risk-relevant behaviors, and the evidence labels. Everything is
+    a deterministic downstream projection — no arrows between components, no
+    ownership/responsibility claims. All dynamic values are HTML-escaped.
+    Renders nothing when no risk-evidence data was supplied.
+    """
+    entries = list(getattr(result, "component_risk_evidence", []) or [])
+    if not entries:
+        return ""
+    blocks: List[str] = []
+    for entry in entries:
+        pid = entry.get("path_id", "")
+        comp = entry.get("component_id", "")
+        ctype = entry.get("component_type", "")
+        sev = entry.get("risk_severity", "")
+        conf = entry.get("risk_confidence", "")
+        behaviors = entry.get("risk_relevant_behaviors", [])
+        evid = entry.get("evidence", [])
+        ev_labels = "".join(
+            f'<code class="mono badge sev-{_esc(str(sev).lower()) if sev else "info"}">{_esc(e)}</code>'
+            for e in evid
+        )
+        missing_ev = '<span class="muted">not available</span>'
+        blocks.append(
+            f'<div class="expl-block context-item">'
+            f'<div><span class="prov-label">Path ID:</span> <code class="mono">{_esc(pid)}</code></div>'
+            f'<span class="prov-label">Component:</span> <code class="mono">{_esc(comp)}</code> '
+            f'<span class="prov-label">Type:</span> <code class="mono">{_esc(ctype)}</code>'
+            f'<div><span class="prov-label">Risk severity:</span> <code class="mono">{_esc(sev)}</code> '
+            f'<span class="prov-label">Risk confidence:</span> <code class="mono">{_esc(conf)}</code></div>'
+            f'<h4>Risk-Relevant Behaviors</h4>{"".join(_behavior_rows(behaviors))}'
+            f'<div><span class="prov-label">Evidence:</span> {ev_labels or missing_ev}</div>'
+            f'</div>'
+        )
+    return "".join(blocks)
+
+
 def render_html(result: ScanResult) -> str:
     """Render a ScanResult as a complete, deterministic, standalone HTML report.
 
@@ -928,6 +968,7 @@ def render_html(result: ScanResult) -> str:
     scope_html = _component_scope_html(result)
     participation_html = _component_participation_html(result)
     composition_html = _component_composition_html(result)
+    risk_evidence_html = _component_risk_evidence_html(result)
 
     body = (
         f"<header class=\"hero\"><div class=\"container\">"
@@ -941,6 +982,7 @@ def render_html(result: ScanResult) -> str:
         f"{scope_html and _section('Component Security Scope', scope_html) or ''}"
         f"{participation_html and _section('Component Path Participation', participation_html) or ''}"
         f"{composition_html and _section('Component Path Composition', composition_html) or ''}"
+        f"{risk_evidence_html and _section('Component Risk Evidence', risk_evidence_html) or ''}"
         f"{policies}"
         f"{findings}"
         f"</main>"

@@ -118,6 +118,11 @@ class ScanResult:
     # graph edge, never component-relationship inference, never affects
     # findings/attack-paths/policy. Empty by default.
     component_path_composition: List[Dict[str, Any]] = field(default_factory=list)
+    # Deterministic projection of the finalized AttackPath's risk metadata onto
+    # explicitly participating components (see build_component_risk_evidence /
+    # serialize_component_risk_evidence). Additive metadata only: never
+    # redistributes risk, never infers ownership/responsibility. Empty by default.
+    component_risk_evidence: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def score(self) -> int:
@@ -201,4 +206,9 @@ class ScanResult:
         # empty so clean/unchanged scans keep the same stable shape.
         if self.component_path_composition:
             d["component_path_composition"] = self.component_path_composition
+        # Additive component-risk-evidence projection. Present only when the
+        # caller supplied explicit scope data (never inferred); omitted when
+        # empty so clean/unchanged scans keep the same stable shape.
+        if self.component_risk_evidence:
+            d["component_risk_evidence"] = self.component_risk_evidence
         return d

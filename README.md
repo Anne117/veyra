@@ -404,6 +404,12 @@ merged, never inferred:
   `build_component_path_composition(path, context)` /
   `build_component_path_composition_for_paths(paths, context)` →
   `serialize_component_path_composition(...)`.
+- **Component Risk Evidence** (`graph/context.py`, Commit 22) — a deterministic
+  projection of the finalized AttackPath's risk metadata onto explicitly
+  participating components:
+  `build_component_risk_evidence(path, context)` /
+  `build_component_risk_evidence_for_paths(paths, context)` →
+  `serialize_component_risk_evidence(...)`.
 
 ```
 build_component_security_scopes(graph) ==
@@ -526,6 +532,54 @@ Exposed additively in reports: JSON `component_path_composition` (top-level),
 SARIF `run.properties.component_path_composition`, and a compact **Component
 Path Composition** HTML section. It is metadata only and never part of path_id,
 risk, evidence, breakpoints, or policy.
+
+### Component Risk Evidence
+
+**Component Risk Evidence** answers *"what risk-relevant security behaviors of
+each explicitly participating component are evidenced by this specific
+AttackPath?"* It connects the finalized AttackPath, its ComponentPathComposition,
+and the already-computed AttackPath risk/evidence.
+
+The distinctions:
+
+- **AttackPath Risk** = risk of the complete proven path.
+- **Component Path Composition** = which explicit components participate and
+  which behaviors they prove.
+- **Component Risk Evidence** = which existing AttackPath evidence labels are
+  evidenced by each participating component.
+
+Two cardinal rules:
+
+> **COMPONENT RISK EVIDENCE DOES NOT REDISTRIBUTE ATTACKPATH RISK.**
+
+> **COMPONENT RISK EVIDENCE DOES NOT ESTABLISH OWNERSHIP OR RESPONSIBILITY.**
+
+Every `ComponentRiskEvidence` entry:
+
+- copies `risk_severity` / `risk_confidence` verbatim from the finalized
+  AttackPath (never recalculated per component);
+- emits evidence that is always a **subset of the AttackPath.evidence** (it can
+  never manufacture a label the path itself did not establish);
+- has **no** component risk score, percentage, responsibility, or ownership —
+  only explicit participation counts.
+
+The behavior→evidence mapping uses only the existing AttackPath evidence
+vocabulary and the actual behavior triple / graph node type:
+
+| Behavior | Evidence label |
+|---|---|
+| `READS` → SECRET node | `secret read` |
+| `READS` → DATA node | `sensitive data read` |
+| `FLOWS_TO` | `sensitive data flow` |
+| `SENDS_TO` | `external network send` |
+| `EXECUTES` | `execution` |
+| `WRITES` / `PRODUCES` | *(no label)* |
+
+Exposed additively in reports: JSON `component_risk_evidence` (top-level), SARIF
+`run.properties.component_risk_evidence`, and a compact **Component Risk
+Evidence** HTML section. It is purely downstream metadata — it never draws
+arrows between components, never claims causal attribution, probability, or
+exploitability scoring, and never modifies the AttackPath.
 
 ## 🚫 Suppression / allowlist
 

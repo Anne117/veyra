@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from veyra.graph.models import EdgeType, NodeType, SecurityGraph
+from veyra.models import Confidence, Severity
 
 
 class ComponentContextError(ValueError):
@@ -601,6 +602,201 @@ def serialize_component_path_composition(
             ],
         }
         for c in compositions
+    ]
+
+
+@dataclass(frozen=True)
+class ComponentRiskEvidence:
+    """Read-only projection of an existing AttackPath's finalized risk metadata
+    onto explicitly participating components.
+
+    It does not redistribute risk, infer ownership, or create component
+    responsibility. ``risk_relevant_behaviors`` are exact behavior triples from
+    the component's composition entry, ``evidence`` is a deterministic SUBSET of
+    the existing AttackPath.evidence vocabulary, and ``risk_severity`` /
+    ``risk_confidence`` are copied from the finalized AttackPath (never
+    recalculated per component). There is NO component risk score and NO
+    responsibility/ownership ranking.
+    """
+
+    component: ComponentContext
+    path_id: str
+    risk_relevant_behaviors: Tuple[Tuple[str, str, str], ...] = ()
+    evidence: Tuple[str, ...] = ()
+    risk_severity: Severity = Severity.INFO
+    risk_confidence: Confidence = Confidence.LOW
+
+
+# Fixed canonical order for evidence labels (only those actually evidenced and
+# present in the finalized AttackPath.evidence are emitted).
+_EVIDENCE_ORDER = (
+    "secret read",
+    "sensitive data read",
+    "data transformation",
+    "sensitive data flow",
+    "external network send",
+    "execution",
+)
+
+
+def _node_kind_prefix(node_id: str) -> str:
+    """Return the node-type prefix (e.g. 'SECRET', 'DATA') of a semantic id."""
+    if ":" in node_id:
+        return node_id.split(":", 1)[0]
+    return ""
+
+
+def _evidence_label_for_behavior(
+    behavior: Tuple[str, str, str],
+) -> Optional[str]:
+    """Map a behavior triple to a risk-relevant evidence label, or None.
+
+    Mapping follows the existing AttackPath evidence vocabulary:
+    - READS -> SECRET target  => "secret read"
+    - READS -> DATA target    => "sensitive data read"
+    - READS -> other          => no label
+    - FLOWS_TO                => "sensitive data flow"
+    - SENDS_TO                => "external network send"
+    - EXECUTES                => "execution"
+    - WRITES / PRODUCES       => no label
+    """
+    src, etype, tgt = behavior
+    if etype == "READS":
+        kind = _node_kind_prefix(tgt)
+        if kind == "SECRET":
+            return "secret read"
+        if kind == "DATA":
+            return "sensitive data read"
+        return None
+    if etype == "FLOWS_TO":
+        return "sensitive data flow"
+    if etype == "SENDS_TO":
+        return "external network send"
+    if etype == "EXECUTES":
+        return "execution"
+    return None
+
+
+def build_component_risk_evidence(
+    path,
+    context: Sequence[ComponentContextAssociation],
+    valid_components: Optional[Dict[str, NodeType]] = None,
+    existing_edges: Optional[set] = None,
+) -> List[ComponentRiskEvidence]:
+    """Build deterministic component risk evidence for one AttackPath.
+
+    Component participation is sourced from ComponentPathParticipation /
+    ComponentPathComposition (the semantic source of truth); only components with
+    at least one risk-relevant evidence label are returned. Every returned
+    object's ``evidence`` is a subset of ``path.evidence`` and risk severity /
+    confidence are copied from the finalized AttackPath without recalculation.
+    Never infers ownership, responsibility, or evidence from relationship edges,
+    provenance, naming, or file paths.
+    """
+    if path is None or context is None:
+        return []
+    if not path.path_id:
+        raise ComponentContextError(
+            f"cannot build component risk evidence without a finalized path_id"
+        )
+    # Source of truth: participation (which validates context when supplied).
+    participation = build_component_path_participation(
+        path, context, valid_components, existing_edges
+    )
+    if not participation:
+        return []
+    path_evidence = set(path.evidence)
+    results: List[ComponentRiskEvidence] = []
+    for p in participation:
+        be = {b for b in p.security_behaviors if _evidence_label_for_behavior(b) is not None}
+        if not be:
+            continue
+        relevant = tuple(sorted(be, key=lambda b: (b[0], b[1], b[2])))
+        labels = [
+            label for label in _EVIDENCE_ORDER
+            if label in path_evidence
+            and any(_evidence_label_for_behavior(b) == label for b in relevant)
+        ]
+        results.append(
+            ComponentRiskEvidence(
+                component=p.component,
+                path_id=p.path_id,
+                risk_relevant_behaviors=relevant,
+                evidence=tuple(labels),
+                risk_severity=path.risk_severity,
+                risk_confidence=path.risk_confidence,
+            )
+        )
+    results.sort(key=_risk_evidence_sort_key)
+    return results
+
+
+class _ComponentRiskEvidenceEntry:
+    """Lightweight adapter so risk-evidence results reuse composition ordering."""
+
+    def __init__(self, r: ComponentRiskEvidence):
+        self.component = r.component
+        self.behaviors = r.risk_relevant_behaviors
+
+
+def _risk_evidence_sort_key(r: ComponentRiskEvidence):
+    """Deterministic ordering for ComponentRiskEvidence matching composition.
+
+    Components ordered by (path_id, first_behavior_source,
+    first_behavior_edge_type, first_behavior_target, component_type,
+    component_id).
+    """
+    return _entry_sort_key(_ComponentRiskEvidenceEntry(r), r.path_id)
+
+
+def build_component_risk_evidence_for_paths(
+    paths: Sequence,
+    context: Sequence[ComponentContextAssociation],
+    valid_components: Optional[Dict[str, NodeType]] = None,
+    existing_edges: Optional[set] = None,
+) -> List[ComponentRiskEvidence]:
+    """Build deterministic component risk evidence across many AttackPaths.
+
+    Only components with at least one risk-relevant evidence label on a given
+    path are returned, in deterministic path_id order. Never merges unrelated
+    paths.
+    """
+    if not paths or context is None:
+        return []
+    if valid_components is not None and existing_edges is not None:
+        _validate_context_for(context, valid_components, existing_edges)
+    results: List[ComponentRiskEvidence] = []
+    for path in paths:
+        results.extend(build_component_risk_evidence(path, context))
+    results.sort(key=_risk_evidence_sort_key)
+    return results
+
+
+def serialize_component_risk_evidence(
+    risk_evidence: Sequence[ComponentRiskEvidence],
+) -> List[Dict[str, Any]]:
+    """Deterministic, JSON-safe serialization of component risk evidence.
+
+    Returns a list of dicts shaped ``{"path_id", "component_id",
+    "component_type", "risk_relevant_behaviors": [{"source", "edge_type",
+    "target"}, ...], "evidence": [...], "risk_severity": "...",
+    "risk_confidence": "..."}``. No Enum objects, dataclass reprs, Edge objects,
+    timestamps, memory addresses, or random identifiers.
+    """
+    return [
+        {
+            "path_id": r.path_id,
+            "component_id": r.component.component_id,
+            "component_type": r.component.component_type.value,
+            "risk_relevant_behaviors": [
+                {"source": src, "edge_type": et, "target": tgt}
+                for src, et, tgt in r.risk_relevant_behaviors
+            ],
+            "evidence": list(r.evidence),
+            "risk_severity": r.risk_severity.value,
+            "risk_confidence": r.risk_confidence.value,
+        }
+        for r in risk_evidence
     ]
 
 
