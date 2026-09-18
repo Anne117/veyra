@@ -293,3 +293,56 @@ def test_fabricated_edge_reference_rejected():
     with pytest.raises(ComponentContextError):
         associate_security_behavior(g, ("SKILL:checkout", "SECRET:.env", EdgeType.SENDS_TO),
                                     ComponentContext("SKILL:checkout", NodeType.SKILL))
+
+
+# T. Strict runtime type validation -------------------------------------------
+_WRONG_NODE_TYPES = [
+    "SKILL",          # raw str (value of NodeType.SKILL)
+    None,
+    EdgeType.READS,   # a different enum
+    "garbage",        # arbitrary other (non-enum) type
+    42,
+]
+
+
+def test_component_context_strict_type_validation():
+    for bad in _WRONG_NODE_TYPES:
+        with pytest.raises(ComponentContextError):
+            ComponentContext("SKILL:x", bad)
+
+
+_WRONG_EDGE_TYPES = [
+    None,
+    NodeType.AGENT,   # a different enum
+    42,
+]
+
+
+def test_component_context_association_strict_type_validation():
+    component = ComponentContext("SKILL:x", NodeType.SKILL)
+    for bad in _WRONG_EDGE_TYPES:
+        with pytest.raises(ComponentContextError):
+            ComponentContextAssociation(("A", "B", bad), component)
+
+
+def test_component_context_association_str_edge_type_rejected():
+    component = ComponentContext("SKILL:x", NodeType.SKILL)
+    # "READS" is the raw str value of EdgeType.READS; still not acceptable.
+    with pytest.raises(ComponentContextError):
+        ComponentContextAssociation(("A", "B", "READS"), component)
+
+
+def test_failed_strict_validation_does_not_mutate_anything():
+    g = _exfil_graph()
+    before_edges = len(g.edges)
+    before_context = len(get_component_context(g))
+    for call in (
+        lambda: ComponentContext("SKILL:x", "SKILL"),
+        lambda: ComponentContext("SKILL:x", None),
+        lambda: ComponentContextAssociation(("A", "B", "READS"), ComponentContext("SKILL:x", NodeType.SKILL)),
+        lambda: ComponentContextAssociation(("A", "B", None), ComponentContext("SKILL:x", NodeType.SKILL)),
+    ):
+        with pytest.raises(ComponentContextError):
+            call()
+    assert len(g.edges) == before_edges
+    assert len(get_component_context(g)) == before_context

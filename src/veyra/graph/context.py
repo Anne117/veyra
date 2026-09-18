@@ -70,6 +70,10 @@ class ComponentContext:
 
     def __post_init__(self):
         object.__setattr__(self, "component_id", _validate_id(self.component_id, "component id"))
+        if not isinstance(self.component_type, NodeType):
+            raise ComponentContextError(
+                f"component_type must be a NodeType, got {type(self.component_type).__name__}"
+            )
         if self.component_type not in _CONTEXT_COMPONENT_TYPES:
             raise ComponentContextError(
                 f"unsupported context component type {self.component_type.value}; "
@@ -93,6 +97,10 @@ class ComponentContextAssociation:
     def __post_init__(self):
         s, t, et = self.edge_key
         object.__setattr__(self, "edge_key", (_validate_id(s, "edge source"), _validate_id(t, "edge target"), et))
+        if not isinstance(et, EdgeType):
+            raise ComponentContextError(
+                f"edge type must be an EdgeType, got {type(et).__name__}"
+            )
         if et not in _SECURITY_BEHAVIOR_EDGE_TYPES:
             raise ComponentContextError(
                 f"edge type {et.value} is not a security-behavior edge; "
