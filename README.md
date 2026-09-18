@@ -757,10 +757,12 @@ it neither calculates risk nor assigns ownership/responsibility.
 ### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
-named set of authoritative `ThreatTaxonomyEntry`s), distinct from the generic
+named set of `ThreatTaxonomyEntry`s), distinct from the generic
 `ThreatScenario`. The concrete **OWASP Agentic AI 2026** catalog
-(`OWASP_AGENTIC_2026`, `get_owasp_agentic_2026()`) ships these 10 entries,
-preserving OWASP terminology exactly for IDs and names:
+(`OWASP_AGENTIC_2026`, `get_owasp_agentic_2026()`) ships these 10 entries. The
+**IDs and names** are OWASP source terminology (verified against the official
+OWASP Top 10 for Agentic Applications 2026 document); each **description** is a
+concise Veyra-written summary, not verbatim OWASP text.
 
 | ID | Name |
 |----|------|

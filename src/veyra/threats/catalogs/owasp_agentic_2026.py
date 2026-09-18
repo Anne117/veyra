@@ -6,6 +6,11 @@ from veyra.threats.taxonomy import ThreatTaxonomy, ThreatTaxonomyEntry
 # Official source: OWASP Top 10 for Agentic Applications 2026 (Version 2026,
 # December 2025). This catalog is static and deterministic; it performs no
 # network access at runtime.
+#
+# Source terminology: the entry IDs (ASI01..ASI10) and names below are OWASP
+# source terminology, verified against the official document linked in
+# `_SOURCE.reference`. The `description` strings are concise Veyra-written
+# summaries — not verbatim OWASP text and not authoritative definitions.
 _SOURCE = ThreatSource(
     name="OWASP Top 10 for Agentic Applications",
     version="2026",

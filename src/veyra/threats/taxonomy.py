@@ -2,9 +2,13 @@
 
 A taxonomy is a separate catalog layer from :class:`ThreatScenario`.
 ``ThreatTaxonomy`` describes a fixed, named catalog of authoritative threat
-entries; it is entirely taxonomy-agnostic and holds no OWASP- or
+identifiers; it is entirely taxonomy-agnostic and holds no OWASP- or
 CWE/ATT&CK-specific fields. The concrete OWASP Agentic AI 2026 catalog lives in
 ``veyra.threats.catalogs.owasp_agentic_2026``.
+
+Entry ``id``/``name`` preserve the source taxonomy's exact terminology; entry
+``description`` values are concise Veyra-written summaries, not verbatim or
+authoritative source definitions.
 
 This layer is deterministic and read-only: it never infers a category from an
 AttackPath, never modifies the graph, and never calculates risk.
@@ -21,11 +25,11 @@ from veyra.threats.models import ThreatSource, _require_scope
 
 @dataclass(frozen=True)
 class ThreatTaxonomyEntry:
-    """A single authoritative entry within a ThreatTaxonomy.
+    """A single entry within a ThreatTaxonomy.
 
     ``entry_id`` and ``name`` preserve the source taxonomy's exact terminology
-    (e.g. ``"ASI01"`` / ``"Agent Goal Hijack"``). ``description`` is a concise,
-    authoritative summary.
+    (e.g. ``ASI01`` / ``Agent Goal Hijack``). ``description`` is a concise
+    Veyra-written summary — it is NOT verbatim or authoritative OWASP text.
     """
 
     entry_id: str
@@ -41,7 +45,7 @@ class ThreatTaxonomyEntry:
 
 @dataclass(frozen=True)
 class ThreatTaxonomy:
-    """A fixed, named taxonomy catalog with ordered authoritative entries.
+    """A fixed, named taxonomy catalog with ordered entries.
 
     ``entries`` is an immutable tuple of :class:`ThreatTaxonomyEntry`.
     """

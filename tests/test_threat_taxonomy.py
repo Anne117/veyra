@@ -229,3 +229,30 @@ def test_duplicate_entry_ids_rejected():
                 ThreatTaxonomyEntry("A", "Two", "desc", src),
             ),
         )
+
+
+# --- Provenance/terminology honesty (Commit 24 correction) -------------------
+
+# Descriptions exist and are non-empty for all entries.
+def test_all_descriptions_non_empty():
+    for e in OWASP_AGENTIC_2026.entries:
+        assert e.description and e.description.strip()
+        assert isinstance(e.description, str)
+
+
+# ASI02 / ASI03 use the official OWASP 2026 "and" spelling (no ampersand), as
+# verified against the official source document.
+def test_exact_spelling_of_asi02_asi03():
+    names = {e.entry_id: e.name for e in OWASP_AGENTIC_2026.entries}
+    assert names["ASI02"] == "Tool Misuse and Exploitation"
+    assert names["ASI03"] == "Identity and Privilege Abuse"
+    assert " & " not in names["ASI02"]
+    assert " & " not in names["ASI03"]
+
+
+# The selected canonical OWASP source is recorded in the reference.
+def test_canonical_source_reference():
+    s = OWASP_AGENTIC_2026.entries[0].source
+    assert "genai.owasp.org" in s.reference
+    assert s.reference.endswith("owasp-top-10-for-agentic-applications-for-2026/")
+
