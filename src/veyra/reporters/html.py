@@ -787,6 +787,43 @@ summary { cursor: pointer; color: var(--accent); }
 """
 
 
+def _component_scope_html(result) -> str:
+    """Compact 'Component Security Scope' section (aggregate projection).
+
+    Shows the explicit per-component security-behavior scope derived from
+    ComponentContextAssociation records. This is aggregation metadata only — it
+    never creates a graph edge and never infers ownership. All dynamic values
+    are HTML-escaped. Renders nothing when no scope data was supplied.
+    """
+    scopes = list(getattr(result, "component_security_scopes", []) or [])
+    if not scopes:
+        return ""
+    blocks: List[str] = []
+    for scope in scopes:
+        comp = scope.get("component_id", "")
+        ctype = scope.get("component_type", "")
+        behaviors = scope.get("security_behaviors", [])
+        rows = []
+        for b in behaviors:
+            bsrc = b.get("source", "") if isinstance(b, dict) else ""
+            btype = b.get("edge_type", "") if isinstance(b, dict) else ""
+            btarget = b.get("target", "") if isinstance(b, dict) else ""
+            rows.append(
+                f'<div><span class="edge-type">{_esc(btype)}</span> '
+                f'<code class="mono">{_esc(bsrc)}</code>'
+                f'<span> &rarr; </span>'
+                f'<code class="mono">{_esc(btarget)}</code></div>'
+            )
+        blocks.append(
+            f'<div class="expl-block context-item">'
+            f'<span class="prov-label">Component:</span> <code class="mono">{_esc(comp)}</code> '
+            f'<span class="prov-label">Type:</span> <code class="mono">{_esc(ctype)}</code> '
+            f'<h4>Security Behaviors</h4>{"".join(rows)}'
+            f'</div>'
+        )
+    return "".join(blocks)
+
+
 def render_html(result: ScanResult) -> str:
     """Render a ScanResult as a complete, deterministic, standalone HTML report.
 
@@ -811,6 +848,9 @@ def render_html(result: ScanResult) -> str:
     )
     findings = _section("Findings", _findings_html(result))
 
+    # Additive aggregate projection; renders only when scope data is present.
+    scope_html = _component_scope_html(result)
+
     body = (
         f"<header class=\"hero\"><div class=\"container\">"
         f"<div class=\"brand\">Veyra</div>"
@@ -820,6 +860,7 @@ def render_html(result: ScanResult) -> str:
         f"<main class=\"container\">"
         f"{_summary_html(result)}"
         f"{attack_section}"
+        f"{scope_html and _section('Component Security Scope', scope_html) or ''}"
         f"{policies}"
         f"{findings}"
         f"</main>"

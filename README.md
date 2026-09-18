@@ -375,6 +375,59 @@ emitted as a SARIF result (level mapped from its existing risk severity, rule id
 derived from its attack type) with the path's `path_id`, `attack_type`, risk
 fields, evidence, and breakpoints exposed under the result's `properties`.
 
+### Component declarations, context, and security scope
+
+Veyra keeps three distinct additive layers over the Security Graph — never
+merged, never inferred:
+
+- **Component Declarations** (`graph/declarations.py`) — explicit architecture
+  relationships: `AGENT USES SKILL`, `SKILL HANDOFF SKILL`, `AGENT CALLS TOOL`,
+  etc. These describe how components relate to each other.
+- **Component Context** (`graph/context.py`, Commit 18) — explicit association
+  of a security-behavior edge (READS / WRITES / SENDS_TO / EXECUTES / PRODUCES /
+  FLOWS_TO) with a component: `associate_security_behavior(graph, ("SKILL:A",
+  "SECRET:x", READS), ComponentContext("SKILL:A", SKILL))`.
+- **Component Security Scope** (`graph/context.py`, Commit 19) — a
+  deterministic, read-only aggregation of those explicit context associations
+  into per-component projections:
+  `build_component_security_scopes(graph)` →
+  `serialize_component_security_scopes(graph)`.
+
+```
+build_component_security_scopes(graph) ==
+[
+  ComponentSecurityScope(
+    component=ComponentContext("SKILL:A", SKILL),
+    security_behaviors=(("SKILL:A", "READS", "SECRET:x"),),
+  )
+]
+```
+
+The scope projection:
+
+- is **NOT** a new graph relationship and creates **no** edges;
+- is **NOT** an ownership inference engine;
+- preserves multiple components explicitly associated with the same security
+  edge (each yields its own independent scope — Veyra never decides a "real"
+  owner);
+- deduplicates identical `(component, behavior edge)` pairs;
+- sorts deterministically by `(component_type, component_id)` and behaviors by
+  `(source, edge_type, target)`;
+- references only actual existing security edges and raises
+  `ComponentContextError` on stale/invalid metadata;
+- does not mutate the graph or the AttackPaths.
+
+**Veyra never infers ownership** from `USES`, `CONTAINS`, `CALLS`, `TRUSTS`,
+`HANDOFF`, file paths, node IDs, provenance, labels, findings, or naming. So
+`AGENT USES SKILL` alone does **not** create an `AGENT → security behavior`
+association or an `AGENT → ComponentSecurityScope` — only an explicit
+`ComponentContextAssociation` establishes component security scope.
+
+The projection is exposed additively in reports: JSON
+`component_security_scopes` (top-level), SARIF
+`run.properties.component_security_scopes`, and a compact **Component Security
+Scope** HTML section. `attack_paths[*].context_components` is unchanged.
+
 ## 🚫 Suppression / allowlist
 
 You can suppress known-safe findings with a project configuration file,

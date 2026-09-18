@@ -147,6 +147,95 @@ def serialize_component_context(graph: SecurityGraph) -> List[Dict[str, Any]]:
     return [_serialize_association(a) for a in associations]
 
 
+@dataclass(frozen=True)
+class ComponentSecurityScope:
+    """Deterministic, read-only projection of the security behaviors explicitly
+    associated with one component.
+
+    This is NOT a graph relationship and NOT an ownership inference engine: it
+    is a structured aggregation of the existing explicit
+    :class:`ComponentContextAssociation` metadata. ``security_behaviors`` is an
+    immutable tuple of ``(source, edge_type, target)`` where ``edge_type`` is
+    serialized as its string value. No ``Edge`` objects are duplicated or
+    embedded; the scope only references existing security-behavior edges.
+    """
+
+    component: ComponentContext
+    security_behaviors: Tuple[Tuple[str, str, str], ...] = ()
+
+
+def build_component_security_scopes(
+    graph: SecurityGraph,
+) -> List[ComponentSecurityScope]:
+    """Aggregate explicit ComponentContextAssociation records into deterministic
+    per-component security scopes.
+
+    - Uses ONLY explicit associations stored on the graph (never infers
+      ownership from USES/CONTAINS/CALLS/TRUSTS/HANDOFF, file paths, node ids,
+      provenance, labels, findings, or naming).
+    - Groups associations by component (component_id / component_type).
+    - Preserves multiple components associated with the same security edge.
+    - Deduplicates identical (component, behavior edge) pairs.
+    - References only actual existing graph security edges, defensively raising
+      ``ComponentContextError`` if stale/invalid metadata references a missing
+      edge.
+    - Never mutates the graph or its association records.
+
+    Deterministic: scopes are sorted by (component_type, component_id) and each
+    scope's behaviors by (source, edge_type, target).
+    """
+    associations = get_component_context(graph)
+    if not associations:
+        return []
+    existing_edges = {(e.source, e.target, e.type.value) for e in graph.edges}
+    components: Dict[Tuple[str, str], ComponentContext] = {}
+    behaviors: Dict[Tuple[str, str], List[Tuple[str, str, str]]] = {}
+    for a in associations:
+        src, tgt, et = a.edge_key
+        edge_key3 = (src, tgt, et.value)
+        if edge_key3 not in existing_edges:
+            raise ComponentContextError(
+                f"security behavior edge ({src}, {tgt}, {et.value}) referenced "
+                f"by component context does not exist in the graph"
+            )
+        ckey = (a.component.component_id, a.component.component_type.value)
+        components.setdefault(ckey, a.component)
+        behavior = (src, et.value, tgt)
+        bucket = behaviors.setdefault(ckey, [])
+        # Deduplicate identical (component, behavior edge) pairs.
+        if behavior not in bucket:
+            bucket.append(behavior)
+
+    scopes: List[ComponentSecurityScope] = []
+    for ckey in sorted(behaviors.keys()):
+        ordered = tuple(sorted(behaviors[ckey], key=lambda b: (b[0], b[1], b[2])))
+        scopes.append(ComponentSecurityScope(component=components[ckey], security_behaviors=ordered))
+    scopes.sort(key=lambda s: (s.component.component_type.value, s.component.component_id))
+    return scopes
+
+
+def serialize_component_security_scopes(graph: SecurityGraph) -> List[Dict[str, Any]]:
+    """Deterministic, JSON-safe serialization of a graph's component scopes.
+
+    Returns a list of dicts shaped ``{"component_id", "component_type",
+    "security_behaviors": [{"source", "edge_type", "target"}, ...]}``. No
+    ``Edge`` objects or dataclass reprs leak into the output and no
+    nondeterministic values are present.
+    """
+    scopes = build_component_security_scopes(graph)
+    return [
+        {
+            "component_id": s.component.component_id,
+            "component_type": s.component.component_type.value,
+            "security_behaviors": [
+                {"source": src, "edge_type": et, "target": tgt}
+                for src, et, tgt in s.security_behaviors
+            ],
+        }
+        for s in scopes
+    ]
+
+
 def associate_security_behavior(
     graph: SecurityGraph,
     behavior_edge: Tuple[str, str, EdgeType],

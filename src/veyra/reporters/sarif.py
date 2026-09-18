@@ -216,6 +216,11 @@ def _attack_path_result(path: AttackPath) -> Dict[str, Any]:
     }
 
 
+def _component_security_scopes(result: ScanResult) -> List[Dict[str, Any]]:
+    """Expose the additive component-security-scope projection (JSON-safe)."""
+    return list(getattr(result, "component_security_scopes", []))
+
+
 def _build_attack_path_results(paths: List[AttackPath]) -> List[Dict[str, Any]]:
     """Build the SARIF `results` array from attack paths.
 
@@ -227,22 +232,26 @@ def _build_attack_path_results(paths: List[AttackPath]) -> List[Dict[str, Any]]:
 
 def render_sarif(result: ScanResult) -> str:
     """Render a ScanResult as a SARIF 2.1.0 JSON document."""
+    scopes = _component_security_scopes(result)
+    run: Dict[str, Any] = {
+        "tool": {
+            "driver": {
+                "name": "Veyra",
+                "informationUri": "https://github.com/veyra/veyra",
+                "version": "0.1.0",
+                "rules": _build_rules(result) + _build_attack_rules(result.attack_paths),
+            }
+        },
+        "artifacts": _build_artifacts(result),
+        "results": _build_results(result) + _build_attack_path_results(result.attack_paths),
+    }
+    # Run-level additive component-security-scope projection. Present only when
+    # the caller supplied explicit scope data; never fabricated.
+    if scopes:
+        run["properties"] = {"component_security_scopes": scopes}
     doc: Dict[str, Any] = {
         "$schema": SARIF_SCHEMA,
         "version": SARIF_VERSION,
-        "runs": [
-            {
-                "tool": {
-                    "driver": {
-                        "name": "Veyra",
-                        "informationUri": "https://github.com/veyra/veyra",
-                        "version": "0.1.0",
-                        "rules": _build_rules(result) + _build_attack_rules(result.attack_paths),
-                    }
-                },
-                "artifacts": _build_artifacts(result),
-                "results": _build_results(result) + _build_attack_path_results(result.attack_paths),
-            }
-        ],
+        "runs": [run],
     }
     return json.dumps(doc, indent=2)

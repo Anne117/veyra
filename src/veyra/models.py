@@ -97,6 +97,13 @@ class ScanResult:
     # Empty by default so existing callers that construct ScanResult manually
     # continue to work without specifying policy_results.
     policy_results: List["PolicyResult"] = field(default_factory=list)
+    # Deterministic projection of explicit ComponentContextAssociation records
+    # into per-component security scopes (see
+    # build_component_security_scopes / serialize_component_security_scopes).
+    # Additive metadata only — never a graph edge, never ownership inference,
+    # never affects findings/attack-paths/policy. Empty by default so existing
+    # callers that construct ScanResult manually keep working unchanged.
+    component_security_scopes: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def score(self) -> int:
@@ -165,4 +172,9 @@ class ScanResult:
         # representation is stable and complete regardless of findings.
         d["policy_results"] = [r.to_dict() for r in self.policy_results]
         d["policy_status"] = self.policy_status
+        # Additive component-security-scope projection. Present only when the
+        # caller supplied explicit scope data (never inferred); omitted when
+        # empty so clean/unchanged scans keep the same stable shape.
+        if self.component_security_scopes:
+            d["component_security_scopes"] = self.component_security_scopes
         return d
