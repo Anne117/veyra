@@ -111,6 +111,13 @@ class ScanResult:
     # graph edge, never ownership inference, never affects findings/attack-paths/
     # policy. Empty by default so existing callers keep working unchanged.
     component_path_participation: List[Dict[str, Any]] = field(default_factory=list)
+    # Deterministic path-level grouping of explicitly participating components
+    # and their proven behaviors (see build_component_path_composition /
+    # serialize_component_path_composition). Additive metadata only, consistent
+    # with component_security_scopes / component_path_participation: never a
+    # graph edge, never component-relationship inference, never affects
+    # findings/attack-paths/policy. Empty by default.
+    component_path_composition: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def score(self) -> int:
@@ -189,4 +196,9 @@ class ScanResult:
         # when empty so clean/unchanged scans keep the same stable shape.
         if self.component_path_participation:
             d["component_path_participation"] = self.component_path_participation
+        # Additive component-path-composition projection. Present only when the
+        # caller supplied explicit scope data (never inferred); omitted when
+        # empty so clean/unchanged scans keep the same stable shape.
+        if self.component_path_composition:
+            d["component_path_composition"] = self.component_path_composition
         return d

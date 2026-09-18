@@ -226,6 +226,11 @@ def _component_path_participation(result: ScanResult) -> List[Dict[str, Any]]:
     return list(getattr(result, "component_path_participation", []))
 
 
+def _component_path_composition(result: ScanResult) -> List[Dict[str, Any]]:
+    """Expose the additive component-path-composition projection (JSON-safe)."""
+    return list(getattr(result, "component_path_composition", []))
+
+
 def _build_attack_path_results(paths: List[AttackPath]) -> List[Dict[str, Any]]:
     """Build the SARIF `results` array from attack paths.
 
@@ -258,6 +263,9 @@ def render_sarif(result: ScanResult) -> str:
     participation = _component_path_participation(result)
     if participation:
         run_props["component_path_participation"] = participation
+    composition = _component_path_composition(result)
+    if composition:
+        run_props["component_path_composition"] = composition
     if run_props:
         run["properties"] = run_props
     doc: Dict[str, Any] = {

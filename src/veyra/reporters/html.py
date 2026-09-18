@@ -862,6 +862,44 @@ def _component_participation_html(result) -> str:
     return "".join(blocks)
 
 
+def _component_composition_html(result) -> str:
+    """Compact 'Component Path Composition' section.
+
+    For each composition shows Path ID and, per explicitly participating
+    component, Component, Type, and the proven security behaviors. Composition
+    is a deterministic projection — it never invents a component-to-component
+    edge. All dynamic values are HTML-escaped. Renders nothing when no
+    composition data was supplied.
+    """
+    compositions = list(getattr(result, "component_path_composition", []) or [])
+    if not compositions:
+        return ""
+    blocks: List[str] = []
+    for composition in compositions:
+        pid = composition.get("path_id", "")
+        components = composition.get("components", [])
+        sub = []
+        for entry in components:
+            comp = entry.get("component_id", "")
+            ctype = entry.get("component_type", "")
+            behaviors = entry.get("security_behaviors", [])
+            rows = _behavior_rows(behaviors)
+            sub.append(
+                f'<div class="expl-block context-item">'
+                f'<span class="prov-label">Component:</span> <code class="mono">{_esc(comp)}</code> '
+                f'<span class="prov-label">Type:</span> <code class="mono">{_esc(ctype)}</code> '
+                f'<h4>Proven Security Behaviors</h4>{"".join(rows)}'
+                f'</div>'
+            )
+        blocks.append(
+            f'<div class="expl-block">'
+            f'<div><span class="prov-label">Path ID:</span> <code class="mono">{_esc(pid)}</code></div>'
+            f'{"".join(sub)}'
+            f'</div>'
+        )
+    return "".join(blocks)
+
+
 def render_html(result: ScanResult) -> str:
     """Render a ScanResult as a complete, deterministic, standalone HTML report.
 
@@ -889,6 +927,7 @@ def render_html(result: ScanResult) -> str:
     # Additive aggregate projections; render only when data is present.
     scope_html = _component_scope_html(result)
     participation_html = _component_participation_html(result)
+    composition_html = _component_composition_html(result)
 
     body = (
         f"<header class=\"hero\"><div class=\"container\">"
@@ -901,6 +940,7 @@ def render_html(result: ScanResult) -> str:
         f"{attack_section}"
         f"{scope_html and _section('Component Security Scope', scope_html) or ''}"
         f"{participation_html and _section('Component Path Participation', participation_html) or ''}"
+        f"{composition_html and _section('Component Path Composition', composition_html) or ''}"
         f"{policies}"
         f"{findings}"
         f"</main>"

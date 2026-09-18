@@ -398,6 +398,12 @@ merged, never inferred:
   `build_component_path_participation(path, context)` /
   `build_component_path_participation_for_paths(paths, context)` →
   `serialize_component_path_participation(...)`.
+- **Component Path Composition** (`graph/context.py`, Commit 20) — a
+  deterministic path-level grouping of the explicitly participating
+  components in a finalized AttackPath and their proven behaviors:
+  `build_component_path_composition(path, context)` /
+  `build_component_path_composition_for_paths(paths, context)` →
+  `serialize_component_path_composition(...)`.
 
 ```
 build_component_security_scopes(graph) ==
@@ -492,6 +498,34 @@ SARIF `run.properties.component_path_participation`, and a compact **Component
 Path Participation** HTML section. It is metadata only — it never creates a
 graph edge, never modifies the AttackPath, and is never part of path_id, risk,
 evidence, breakpoints, or policy.
+
+### Component Path Composition
+
+**Component Path Composition** answers *"which explicitly declared security
+components participate in this AttackPath, and in what deterministic order do
+their proven security behaviors occur along that path?"*
+
+It is a deterministic, read-only projection over an already-finalized
+AttackPath plus explicit `ComponentContextAssociation` metadata — NOT ownership
+inference, NOT a new attack type, NOT a new graph edge, and NOT a replacement
+for AttackPath. A component appears in a composition only if an explicit
+association exists for it AND its referenced security-behavior edge (a
+`path.edges` walk edge or a `path.associated_edges` edge) is an actual edge of
+that specific path.
+
+> **COMPONENT PATH COMPOSITION DOES NOT CREATE COMPONENT RELATIONSHIPS.**
+
+The composition is a flat collection of explicitly participating components
+and their proven behaviors; it never invents a component-to-component edge —
+even when two components are associated with the same path edge, both are
+preserved with no owner or responsibility ranking. `associated_edges` are valid
+participation evidence but are never treated as contiguous path sequence
+edges.
+
+Exposed additively in reports: JSON `component_path_composition` (top-level),
+SARIF `run.properties.component_path_composition`, and a compact **Component
+Path Composition** HTML section. It is metadata only and never part of path_id,
+risk, evidence, breakpoints, or policy.
 
 ## 🚫 Suppression / allowlist
 

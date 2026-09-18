@@ -17,7 +17,9 @@ from veyra.graph.context import (
     ComponentContextAssociation,
     ComponentContextError,
     associate_security_behavior,
+    build_component_path_composition_for_paths,
     build_component_path_participation_for_paths,
+    serialize_component_path_composition,
     serialize_component_path_participation,
     serialize_component_security_scopes,
 )
@@ -103,9 +105,11 @@ def scan_path(
     supplied, each association's security-behavior edge and component must
     actually exist in the scan's merged security graph (verified through the
     existing ``associate_security_behavior`` API), and the resulting
-    per-component security scopes AND per-path component participation are
-    projected onto ``ScanResult.component_security_scopes`` /
-    ``ScanResult.component_path_participation`` (exposed in JSON/SARIF/HTML).
+    per-component security scopes, per-path component participation, AND
+    per-path component composition are projected onto
+    ``ScanResult.component_security_scopes`` /
+    ``ScanResult.component_path_participation`` /
+    ``ScanResult.component_path_composition`` (exposed in JSON/SARIF/HTML).
 
     Ownership is NEVER inferred: without explicit associations, no component
     security scopes are produced regardless of USES/CONTAINS/CALLS/TRUSTS/
@@ -191,17 +195,27 @@ def scan_path(
                 source=assoc.source,
             )
         result.component_security_scopes = serialize_component_security_scopes(merged)
+        valid_components = {
+            nid: n.type for nid, n in merged.nodes.items()
+            if n.type in (NodeType.AGENT, NodeType.SKILL, NodeType.TOOL, NodeType.MCPSERVER)
+        }
+        existing_edges = {
+            (e.source, e.target, e.type.value) for e in merged.edges
+        }
         result.component_path_participation = serialize_component_path_participation(
             build_component_path_participation_for_paths(
                 attack_paths,
                 component_context,
-                valid_components={
-                    nid: n.type for nid, n in merged.nodes.items()
-                    if n.type in (NodeType.AGENT, NodeType.SKILL, NodeType.TOOL, NodeType.MCPSERVER)
-                },
-                existing_edges={
-                    (e.source, e.target, e.type.value) for e in merged.edges
-                },
+                valid_components=valid_components,
+                existing_edges=existing_edges,
+            )
+        )
+        result.component_path_composition = serialize_component_path_composition(
+            build_component_path_composition_for_paths(
+                attack_paths,
+                component_context,
+                valid_components=valid_components,
+                existing_edges=existing_edges,
             )
         )
     return result

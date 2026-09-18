@@ -468,6 +468,142 @@ def serialize_component_path_participation(
     ]
 
 
+@dataclass(frozen=True)
+class ComponentPathCompositionEntry:
+    """One explicitly participating component within a path composition.
+
+    ``component`` is the explicitly declared participating component and
+    ``behaviors`` is the deterministic tuple of that component's proven security
+    behaviors actually present on the path. Plain string edge types only — never
+    ``Edge`` objects and no mutable collections inside the frozen dataclass.
+    """
+
+    component: ComponentContext
+    behaviors: Tuple[Tuple[str, str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class ComponentPathComposition:
+    """Deterministic path-level grouping of the explicitly participating
+    components in one finalized AttackPath and their proven security behaviors.
+
+    This is an analytical projection over an already-finalized AttackPath plus
+    explicit ComponentContextAssociation metadata. It is NOT ownership
+    inference, NOT a new attack type, NOT a new graph edge, and NOT a
+    replacement for AttackPath. COMPONENT PATH COMPOSITION DOES NOT CREATE
+    COMPONENT RELATIONSHIPS: it never invents a component-to-component edge.
+    """
+
+    path_id: str
+    components: Tuple[ComponentPathCompositionEntry, ...] = ()
+
+
+def _entry_sort_key(entry: ComponentPathCompositionEntry, path_id: str):
+    """Deterministic ordering key for a composition entry.
+
+    Components ordered by ``(path_id, first_behavior_source,
+    first_behavior_edge_type, first_behavior_target, component_type,
+    component_id)``. An entry's first behavior is its lexicographically smallest.
+    """
+    first_behavior = min(entry.behaviors) if entry.behaviors else ("", "", "")
+    return (
+        path_id,
+        first_behavior[0],
+        first_behavior[1],
+        first_behavior[2],
+        entry.component.component_type.value,
+        entry.component.component_id,
+    )
+
+
+def build_component_path_composition(
+    path,
+    context: Sequence[ComponentContextAssociation],
+    valid_components: Optional[Dict[str, NodeType]] = None,
+    existing_edges: Optional[set] = None,
+) -> Optional[ComponentPathComposition]:
+    """Build a deterministic component path composition for one AttackPath.
+
+    The composition is derived from :func:`build_component_path_participation`
+    (the source of truth for participation): only components with actual
+    participation are retained. It never infers ownership, responsibility,
+    trust, or component-to-component edges.
+    """
+    if path is None or context is None:
+        return None
+    if not path.path_id:
+        raise ComponentContextError(
+            f"cannot build path composition without a finalized path_id"
+        )
+    participation = build_component_path_participation(
+        path, context, valid_components, existing_edges
+    )
+    if not participation:
+        return None
+    entries = [
+        ComponentPathCompositionEntry(
+            component=p.component,
+            behaviors=tuple(sorted(p.security_behaviors, key=lambda b: (b[0], b[1], b[2]))),
+        )
+        for p in participation
+    ]
+    entries.sort(key=lambda e: _entry_sort_key(e, path.path_id))
+    return ComponentPathComposition(path_id=path.path_id, components=tuple(entries))
+
+
+def build_component_path_composition_for_paths(
+    paths: Sequence,
+    context: Sequence[ComponentContextAssociation],
+    valid_components: Optional[Dict[str, NodeType]] = None,
+    existing_edges: Optional[set] = None,
+) -> List[ComponentPathComposition]:
+    """Build deterministic component path compositions across many AttackPaths.
+
+    Only paths with actual participating components are returned, in
+    deterministic path_id order. Never merges unrelated paths.
+    """
+    if not paths or context is None:
+        return []
+    if valid_components is not None and existing_edges is not None:
+        _validate_context_for(context, valid_components, existing_edges)
+    compositions: List[ComponentPathComposition] = []
+    for path in paths:
+        comp = build_component_path_composition(path, context)
+        if comp is not None:
+            compositions.append(comp)
+    compositions.sort(key=lambda c: c.path_id)
+    return compositions
+
+
+def serialize_component_path_composition(
+    compositions: Sequence[ComponentPathComposition],
+) -> List[Dict[str, Any]]:
+    """Deterministic, JSON-safe serialization of component path compositions.
+
+    Returns a list of dicts shaped ``{"path_id", "components": [
+    {"component_id", "component_type", "security_behaviors": [{"source",
+    "edge_type", "target"}, ...]}, ...]}``. No Enum/Edge objects, dataclass
+    reprs, memory addresses, timestamps, or random identifiers.
+    """
+    return [
+        {
+            "path_id": c.path_id,
+            "components": [
+                {
+                    "component_id": e.component.component_id,
+                    "component_type": e.component.component_type.value,
+                    "security_behaviors": [
+                        {"source": src, "edge_type": et, "target": tgt}
+                        for src, et, tgt in e.behaviors
+                    ],
+                }
+                for e in c.components
+            ],
+        }
+        for c in compositions
+    ]
+
+
 def associate_security_behavior(
     graph: SecurityGraph,
     behavior_edge: Tuple[str, str, EdgeType],
