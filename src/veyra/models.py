@@ -104,6 +104,13 @@ class ScanResult:
     # never affects findings/attack-paths/policy. Empty by default so existing
     # callers that construct ScanResult manually keep working unchanged.
     component_security_scopes: List[Dict[str, Any]] = field(default_factory=list)
+    # Deterministic projection of explicit ComponentContextAssociation records
+    # into per-path component participation (see
+    # build_component_path_participation / serialize_component_path_participation).
+    # Additive metadata only, consistent with component_security_scopes: never a
+    # graph edge, never ownership inference, never affects findings/attack-paths/
+    # policy. Empty by default so existing callers keep working unchanged.
+    component_path_participation: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def score(self) -> int:
@@ -177,4 +184,9 @@ class ScanResult:
         # empty so clean/unchanged scans keep the same stable shape.
         if self.component_security_scopes:
             d["component_security_scopes"] = self.component_security_scopes
+        # Additive component-path-participation projection. Present only when
+        # the caller supplied explicit scope data (never inferred); omitted
+        # when empty so clean/unchanged scans keep the same stable shape.
+        if self.component_path_participation:
+            d["component_path_participation"] = self.component_path_participation
         return d

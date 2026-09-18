@@ -12,8 +12,15 @@ from typing import Dict, List, Optional
 
 from veyra.correlation import correlate
 from veyra.cwe import cwe_for
-from veyra.graph import PathAnalyzer, build_from_actions, build_from_findings
-from veyra.graph.context import ComponentContextAssociation, ComponentContextError, associate_security_behavior, serialize_component_security_scopes
+from veyra.graph import PathAnalyzer, build_from_actions, build_from_findings, NodeType
+from veyra.graph.context import (
+    ComponentContextAssociation,
+    ComponentContextError,
+    associate_security_behavior,
+    build_component_path_participation_for_paths,
+    serialize_component_path_participation,
+    serialize_component_security_scopes,
+)
 from veyra.mitre import mitre_for
 from veyra.models import Confidence, Finding, ScanResult
 from veyra.rules import load_file_rules, load_rules
@@ -96,8 +103,9 @@ def scan_path(
     supplied, each association's security-behavior edge and component must
     actually exist in the scan's merged security graph (verified through the
     existing ``associate_security_behavior`` API), and the resulting
-    per-component security scopes are projected onto
-    ``ScanResult.component_security_scopes`` (and exposed in JSON/SARIF/HTML).
+    per-component security scopes AND per-path component participation are
+    projected onto ``ScanResult.component_security_scopes`` /
+    ``ScanResult.component_path_participation`` (exposed in JSON/SARIF/HTML).
 
     Ownership is NEVER inferred: without explicit associations, no component
     security scopes are produced regardless of USES/CONTAINS/CALLS/TRUSTS/
@@ -172,8 +180,8 @@ def scan_path(
     # caller supplied explicit ComponentContextAssociation records: each is
     # re-validated through the existing association API against the merged
     # graph (real edge + real matching component), then grouped into
-    # deterministic scopes. Without explicit associations no ownership is ever
-    # inferred and component_security_scopes stays empty.
+    # deterministic scopes and per-path participation. Without explicit
+    # associations no ownership is ever inferred and both stay empty.
     if component_context:
         for assoc in component_context:
             associate_security_behavior(
@@ -183,6 +191,19 @@ def scan_path(
                 source=assoc.source,
             )
         result.component_security_scopes = serialize_component_security_scopes(merged)
+        result.component_path_participation = serialize_component_path_participation(
+            build_component_path_participation_for_paths(
+                attack_paths,
+                component_context,
+                valid_components={
+                    nid: n.type for nid, n in merged.nodes.items()
+                    if n.type in (NodeType.AGENT, NodeType.SKILL, NodeType.TOOL, NodeType.MCPSERVER)
+                },
+                existing_edges={
+                    (e.source, e.target, e.type.value) for e in merged.edges
+                },
+            )
+        )
     return result
 
 

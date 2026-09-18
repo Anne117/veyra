@@ -221,6 +221,11 @@ def _component_security_scopes(result: ScanResult) -> List[Dict[str, Any]]:
     return list(getattr(result, "component_security_scopes", []))
 
 
+def _component_path_participation(result: ScanResult) -> List[Dict[str, Any]]:
+    """Expose the additive component-path-participation projection (JSON-safe)."""
+    return list(getattr(result, "component_path_participation", []))
+
+
 def _build_attack_path_results(paths: List[AttackPath]) -> List[Dict[str, Any]]:
     """Build the SARIF `results` array from attack paths.
 
@@ -247,8 +252,14 @@ def render_sarif(result: ScanResult) -> str:
     }
     # Run-level additive component-security-scope projection. Present only when
     # the caller supplied explicit scope data; never fabricated.
+    run_props: Dict[str, Any] = {}
     if scopes:
-        run["properties"] = {"component_security_scopes": scopes}
+        run_props["component_security_scopes"] = scopes
+    participation = _component_path_participation(result)
+    if participation:
+        run_props["component_path_participation"] = participation
+    if run_props:
+        run["properties"] = run_props
     doc: Dict[str, Any] = {
         "$schema": SARIF_SCHEMA,
         "version": SARIF_VERSION,

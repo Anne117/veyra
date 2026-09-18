@@ -236,6 +236,238 @@ def serialize_component_security_scopes(graph: SecurityGraph) -> List[Dict[str, 
     ]
 
 
+@dataclass(frozen=True)
+class ComponentPathParticipation:
+    """The explicit security behaviors of one component that are ACTUALLY
+    present on one finalized :class:`~veyra.graph.path.AttackPath`.
+
+    This is the first security-analysis consumer of component scope: a narrower
+    projection than :class:`ComponentSecurityScope`. A component participates in
+    a path iff there is an explicit ``ComponentContextAssociation`` for that
+    component whose referenced security-behavior edge is an actual edge
+    (``path.edges`` or ``path.associated_edges``) of that specific AttackPath.
+
+    GRAPH MEMBERSHIP != ATTACK-PATH PARTICIPATION: an association whose edge
+    exists in the graph but not in a particular path does NOT make the component
+    participate in that path.
+
+    Additive metadata only: it never mutates the AttackPath and is excluded from
+    path_id / canonical_identity / attack_type / severity / confidence /
+    risk_score / evidence / breakpoints / policy ids.
+    """
+
+    component: ComponentContext
+    path_id: str
+    security_behaviors: Tuple[Tuple[str, str, str], ...] = ()
+
+
+def _validate_context_for(
+    context: Sequence[ComponentContextAssociation],
+    valid_components: Dict[str, NodeType],
+    existing_edges: set,
+) -> None:
+    """Validate explicit context metadata deterministically, mirroring the
+    existing association semantics.
+
+    - component must be a declared component (AGENT/SKILL/TOOL/MCPSERVER);
+    - referenced security-behavior edge must actually exist;
+    - component type must be one of the four component types.
+
+    Raises ``ComponentContextError`` on invalid/stale metadata. The caller must
+    supply ``valid_components`` (allowed component node ids -> their types) and
+    ``existing_edges`` (set of (source, target, edge_type_string) that exist in
+    the graph). This never mutates anything.
+    """
+    for a in context:
+        # ComponentContext already validates type in __post_init__; re-check
+        # defense-in-depth so a raw association never sneaks an unsupported type.
+        ctype = a.component.component_type
+        if not isinstance(ctype, NodeType) or ctype not in _CONTEXT_COMPONENT_TYPES:
+            raise ComponentContextError(
+                f"unsupported context component type "
+                f"{getattr(ctype, 'value', ctype)!r}; "
+                f"allowed: {sorted(t.value for t in _CONTEXT_COMPONENT_TYPES)}"
+            )
+        if a.component.component_id not in valid_components:
+            raise ComponentContextError(
+                f"component '{a.component.component_id}' does not exist in the graph"
+            )
+        if valid_components[a.component.component_id] != ctype:
+            raise ComponentContextError(
+                f"component type mismatch: '{a.component.component_id}' is "
+                f"{valid_components[a.component.component_id].value}, not "
+                f"{ctype.value}"
+            )
+        # edge_key[2] is an EdgeType (validated in __post_init__).
+        s, t, et = a.edge_key
+        edge_key3 = (s, t, et.value)
+        if edge_key3 not in existing_edges:
+            raise ComponentContextError(
+                f"security behavior edge ({s}, {t}, {et.value}) referenced "
+                f"by component context does not exist in the graph"
+            )
+
+
+def build_component_path_participation(
+    path,
+    context: Sequence[ComponentContextAssociation],
+    valid_components: Optional[Dict[str, NodeType]] = None,
+    existing_edges: Optional[set] = None,
+) -> List[ComponentPathParticipation]:
+    """Build deterministic component path participation for one AttackPath.
+
+    A component participates iff there is an explicit association for it and the
+    associated security-behavior edge (``path.edges`` or ``path.associated_edges``)
+    is an actual edge of this path. Only explicit context metadata drives
+    participation — never USES/CONTAINS/CALLS/TRUSTS/HANDOFF, file paths, node
+    ids, labels, provenance, findings, naming, graph proximity, or containment.
+
+    ``valid_components`` / ``existing_edges`` (optional) describe the graph the
+    context was validated against; when omitted, associations are only checked
+    against the path itself (a caller-provided graph must already have rejected
+    stale context). If provided, stale metadata raises ``ComponentContextError``.
+
+    Read-only: never mutates the path, the graph, or the associations.
+    """
+    if path is None or context is None:
+        return []
+    # Use the already-finalized path_id; never invent one.
+    if not path.path_id:
+        raise ComponentContextError(
+            f"cannot build path participation without a finalized path_id"
+        )
+    if valid_components is not None and existing_edges is not None:
+        _validate_context_for(context, valid_components, existing_edges)
+
+    # path.edges / associated_edges store edge types as plain strings.
+    path_edge_keys = {(s, t, et) for s, t, et in path.edges}
+    assoc_edge_keys = {(s, t, et) for s, t, et in path.associated_edges}
+
+    components: Dict[Tuple[str, str], ComponentContext] = {}
+    behaviors: Dict[Tuple[str, str], List[Tuple[str, str, str]]] = {}
+    for a in context:
+        src, tgt, et = a.edge_key
+        edge_key3 = (src, tgt, et.value)
+        # Only participates if the referenced edge is actually on THIS path.
+        if edge_key3 not in path_edge_keys and edge_key3 not in assoc_edge_keys:
+            continue
+        ckey = (a.component.component_id, a.component.component_type.value)
+        components.setdefault(ckey, a.component)
+        behavior = (src, et.value, tgt)
+        bucket = behaviors.setdefault(ckey, [])
+        if behavior not in bucket:
+            bucket.append(behavior)
+
+    participations: List[ComponentPathParticipation] = []
+    for ckey in sorted(behaviors.keys()):
+        ordered = tuple(sorted(behaviors[ckey], key=lambda b: (b[0], b[1], b[2])))
+        participations.append(
+            ComponentPathParticipation(
+                component=components[ckey],
+                path_id=path.path_id,
+                security_behaviors=ordered,
+            )
+        )
+    participations.sort(
+        key=lambda p: (p.path_id, p.component.component_type.value, p.component.component_id)
+    )
+    return participations
+
+
+def build_component_path_participation_for_paths(
+    paths: Sequence,
+    context: Sequence[ComponentContextAssociation],
+    valid_components: Optional[Dict[str, NodeType]] = None,
+    existing_edges: Optional[set] = None,
+) -> List[ComponentPathParticipation]:
+    """Build deterministic component path participation across many AttackPaths.
+
+    Processes paths deterministically, preserves every explicitly associated
+    participating component, deduplicates identical
+    ``(path_id, component, security_behavior)``, never merges unrelated paths,
+    and returns deterministic ordering: ``(path_id, component_type,
+    component_id, source, edge_type, target)``.
+    """
+    if not paths or context is None:
+        return []
+    if valid_components is not None and existing_edges is not None:
+        _validate_context_for(context, valid_components, existing_edges)
+    # Flatten (path, behavior) across all paths, deduplicating identical
+    # (path_id, component, behavior); never merges unrelated paths.
+    entries: List[Tuple[ComponentPathParticipation, Tuple[str, str, str]]] = []
+    seen: set = set()
+    for path in paths:
+        if not path.path_id:
+            raise ComponentContextError(
+                f"cannot build path participation without a finalized path_id"
+            )
+        for p in build_component_path_participation(path, context):
+            for behavior in p.security_behaviors:
+                key = (p.path_id, p.component.component_id,
+                        p.component.component_type.value, behavior)
+                if key in seen:
+                    continue
+                seen.add(key)
+                entries.append((p, behavior))
+    # Deterministic global ordering: (path_id, component_type, component_id,
+    # source, edge_type, target).
+    entries.sort(
+        key=lambda pb: (
+            pb[0].path_id,
+            pb[0].component.component_type.value,
+            pb[0].component.component_id,
+            pb[1][0], pb[1][1], pb[1][2],
+        )
+    )
+    grouped: List[ComponentPathParticipation] = []
+    idx = 0
+    while idx < len(entries):
+        p, behavior = entries[idx]
+        comp_key = (p.path_id, p.component.component_id, p.component.component_type.value)
+        group_behaviors = [behavior]
+        j = idx + 1
+        while j < len(entries):
+            p2, b2 = entries[j]
+            if (p2.path_id, p2.component.component_id, p2.component.component_type.value) == comp_key:
+                group_behaviors.append(b2)
+                j += 1
+            else:
+                break
+        grouped.append(
+            ComponentPathParticipation(
+                component=p.component,
+                path_id=p.path_id,
+                security_behaviors=tuple(group_behaviors),
+            )
+        )
+        idx = j
+    return grouped
+
+
+def serialize_component_path_participation(
+    participations: Sequence[ComponentPathParticipation],
+) -> List[Dict[str, Any]]:
+    """Deterministic, JSON-safe serialization of component path participation.
+
+    Returns a list of dicts shaped ``{"path_id", "component_id",
+    "component_type", "security_behaviors": [{"source", "edge_type",
+    "target"}, ...]}``. No Enum/Edge objects, dataclass reprs, memory addresses,
+    or nondeterministic fields leak into the output.
+    """
+    return [
+        {
+            "path_id": p.path_id,
+            "component_id": p.component.component_id,
+            "component_type": p.component.component_type.value,
+            "security_behaviors": [
+                {"source": src, "edge_type": et, "target": tgt}
+                for src, et, tgt in p.security_behaviors
+            ],
+        }
+        for p in participations
+    ]
+
+
 def associate_security_behavior(
     graph: SecurityGraph,
     behavior_edge: Tuple[str, str, EdgeType],

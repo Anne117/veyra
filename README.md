@@ -375,9 +375,9 @@ emitted as a SARIF result (level mapped from its existing risk severity, rule id
 derived from its attack type) with the path's `path_id`, `attack_type`, risk
 fields, evidence, and breakpoints exposed under the result's `properties`.
 
-### Component declarations, context, and security scope
+### Component declarations, context, security scope, and path participation
 
-Veyra keeps three distinct additive layers over the Security Graph — never
+Veyra keeps four distinct additive layers over the Security Graph — never
 merged, never inferred:
 
 - **Component Declarations** (`graph/declarations.py`) — explicit architecture
@@ -392,6 +392,12 @@ merged, never inferred:
   into per-component projections:
   `build_component_security_scopes(graph)` →
   `serialize_component_security_scopes(graph)`.
+- **Component Path Participation** (`graph/context.py`, Commit 20) — the
+  subset of a component's explicitly associated security behaviors that are
+  actually present on a particular finalized AttackPath:
+  `build_component_path_participation(path, context)` /
+  `build_component_path_participation_for_paths(paths, context)` →
+  `serialize_component_path_participation(...)`.
 
 ```
 build_component_security_scopes(graph) ==
@@ -453,6 +459,39 @@ file paths, node IDs, labels, provenance, findings, or naming. Each supplied
 association is re-validated (its edge and component must actually exist in the
 scan's merged graph) and stale/invalid associations raise
 `ComponentContextError` deterministically.
+
+### Component Path Participation
+
+**Component Path Participation** answers *"which explicitly declared components
+participate in a given AttackPath, and which of their security behaviors are
+actually present on that path?"*
+
+The rule is strict:
+
+> **GRAPH MEMBERSHIP ≠ ATTACK-PATH PARTICIPATION.**
+
+A component participates in an AttackPath iff:
+
+1. there is an **explicit** `ComponentContextAssociation` for that component;
+2. the associated security-behavior edge is an **actual edge of that AttackPath**
+   — either a `path.edges` walk edge or a `path.associated_edges` edge — matching
+   the exact `(source, edge_type, target)` triple.
+
+An association whose edge exists in the graph but is **not** on the path simply
+does not make the component participate in that path. `USES`, `CONTAINS`,
+`CALLS`, `TRUSTS`, `HANDOFF`, file paths, node IDs, labels, provenance, and
+naming never establish security ownership or path participation.
+
+The scope projection may contain many behaviors; a particular path contains
+only the ones actually on it. For example a scope with both `READS` and
+`SENDS_TO` produces a participation object holding only the `READS` behavior
+when `SENDS_TO` is not on that path.
+
+Exposed additively in reports: JSON `component_path_participation` (top-level),
+SARIF `run.properties.component_path_participation`, and a compact **Component
+Path Participation** HTML section. It is metadata only — it never creates a
+graph edge, never modifies the AttackPath, and is never part of path_id, risk,
+evidence, breakpoints, or policy.
 
 ## 🚫 Suppression / allowlist
 
