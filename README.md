@@ -754,9 +754,32 @@ A `ThreatScenario` is purely descriptive and never modifies an `AttackPath`,
 creates graph nodes/edges, or introduces new `AttackType`/`EdgeType` values —
 it neither calculates risk nor assigns ownership/responsibility.
 
-> **Note:** OWASP taxonomy, AgentDojo, AgentThreatBench, Agent Egress Corpus,
-> runtime telemetry, and threat scoring are **not** integrated yet. This commit
-> only lays the stable internal model those adapters will use.
+### Taxonomy catalogs
+
+A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
+named set of authoritative `ThreatTaxonomyEntry`s), distinct from the generic
+`ThreatScenario`. The concrete **OWASP Agentic AI 2026** catalog
+(`OWASP_AGENTIC_2026`, `get_owasp_agentic_2026()`) ships these 10 entries,
+preserving OWASP terminology exactly for IDs and names:
+
+| ID | Name |
+|----|------|
+| ASI01 | Agent Goal Hijack |
+| ASI02 | Tool Misuse and Exploitation |
+| ASI03 | Identity and Privilege Abuse |
+| ASI04 | Agentic Supply Chain Vulnerabilities |
+| ASI05 | Unexpected Code Execution (RCE) |
+| ASI06 | Memory & Context Poisoning |
+| ASI07 | Insecure Inter-Agent Communication |
+| ASI08 | Cascading Failures |
+| ASI09 | Human-Agent Trust Exploitation |
+| ASI10 | Rogue Agents |
+
+> The current commit does **NOT** infer an OWASP category from an `AttackPath`.
+> A taxonomy is descriptive catalog metadata only and never modifies the graph
+> or the attack path. Future adapters/catalogs may include AgentDojo,
+> AgentThreatBench, the Agent Egress Security Corpus, and internal security
+> scenarios — none are integrated yet.
 
 ## 🛠️ Development
 
