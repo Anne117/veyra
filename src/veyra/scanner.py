@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 from veyra.correlation import correlate
 from veyra.cwe import cwe_for
 from veyra.graph import PathAnalyzer, build_from_actions, build_from_findings
+from veyra.graph.context import ComponentContextAssociation, ComponentContextError, associate_security_behavior, serialize_component_security_scopes
 from veyra.mitre import mitre_for
 from veyra.models import Confidence, Finding, ScanResult
 from veyra.rules import load_file_rules, load_rules
@@ -84,8 +85,25 @@ def _should_scan(path: Path) -> bool:
     return path.suffix.lower() in SCAN_EXTENSIONS
 
 
-def scan_path(target: str) -> ScanResult:
-    """Scan a file or directory and return a ScanResult."""
+def scan_path(
+    target: str,
+    component_context: Optional[List[ComponentContextAssociation]] = None,
+) -> ScanResult:
+    """Scan a file or directory and return a ScanResult.
+
+    ``component_context`` is an OPTIONAL additive, explicit input: a list of
+    already-validated :class:`ComponentContextAssociation` objects. When
+    supplied, each association's security-behavior edge and component must
+    actually exist in the scan's merged security graph (verified through the
+    existing ``associate_security_behavior`` API), and the resulting
+    per-component security scopes are projected onto
+    ``ScanResult.component_security_scopes`` (and exposed in JSON/SARIF/HTML).
+
+    Ownership is NEVER inferred: without explicit associations, no component
+    security scopes are produced regardless of USES/CONTAINS/CALLS/TRUSTS/
+    HANDOFF or any naming/provenance signal. Supplying no ``component_context``
+    leaves all existing scan behaviour completely unchanged.
+    """
     rules = load_rules()
     file_rules = load_file_rules()
     findings: List[Finding] = []
@@ -131,7 +149,7 @@ def scan_path(target: str) -> ScanResult:
             f.matched_text = f.evidence or ""
 
     result = ScanResult(target=target, findings=findings)
-    attack_paths = _build_attack_paths(findings, file_texts)
+    attack_paths, merged = _build_attack_paths(findings, file_texts)
     result.attack_paths = attack_paths
     # Evaluate the FINALIZED, deduplicated AttackPath objects with the built-in
     # PolicyEngine. PolicyEngine is the sole owner of policy trigger semantics;
@@ -149,10 +167,26 @@ def scan_path(target: str) -> ScanResult:
     from veyra.graph.path import build_explanation
     for p in attack_paths:
         p.explanation_details = build_explanation(p)
+
+    # Additive explicit component-security-scope projection. Only when the
+    # caller supplied explicit ComponentContextAssociation records: each is
+    # re-validated through the existing association API against the merged
+    # graph (real edge + real matching component), then grouped into
+    # deterministic scopes. Without explicit associations no ownership is ever
+    # inferred and component_security_scopes stays empty.
+    if component_context:
+        for assoc in component_context:
+            associate_security_behavior(
+                merged,
+                assoc.edge_key,
+                assoc.component,
+                source=assoc.source,
+            )
+        result.component_security_scopes = serialize_component_security_scopes(merged)
     return result
 
 
-def _build_attack_paths(findings: List[Finding], file_texts: List[tuple]) -> List:
+def _build_attack_paths(findings: List[Finding], file_texts: List[tuple]):
     """Construct attack paths from the Security Graph, analyzed PER COMPONENT.
 
     The scanner scans many files; findings and step-sequence actions belong to
@@ -168,6 +202,11 @@ def _build_attack_paths(findings: List[Finding], file_texts: List[tuple]) -> Lis
     actions/findings.
 
     Deterministic; never modifies the findings.
+
+    Returns ``(attack_paths, merged_graph)`` — the cross-component merged graph
+    is also returned so callers can attach explicit component-context metadata
+    (it is a superset of every per-component node/edge, so any real security
+    edge referenced by an explicit association exists there).
     """
     from veyra.graph.builder import _component_id
     from veyra.step_sequence import _extract_action, _split_actions
@@ -233,7 +272,7 @@ def _build_attack_paths(findings: List[Finding], file_texts: List[tuple]) -> Lis
                             attributes=dict(edge.attributes))
     all_paths.extend(PathAnalyzer(merged).analyze(compose=True))
 
-    return all_paths
+    return all_paths, merged
 
 
 def _confidence_for(f: Finding) -> Confidence:

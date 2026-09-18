@@ -428,6 +428,32 @@ The projection is exposed additively in reports: JSON
 `run.properties.component_security_scopes`, and a compact **Component Security
 Scope** HTML section. `attack_paths[*].context_components` is unchanged.
 
+**Component Security Scope becomes visible in scan/report output ONLY when
+explicit component-context associations are supplied** to the scanner:
+
+```python
+from veyra.scanner import scan_path
+from veyra.graph import ComponentContext, ComponentContextAssociation, NodeType, EdgeType
+
+result = scan_path(
+    "path",
+    component_context=[
+        ComponentContextAssociation(
+            edge_key=("SKILL:checkout", "SECRET:.env", EdgeType.READS),
+            component=ComponentContext("SKILL:checkout", NodeType.SKILL),
+        ),
+    ],
+)
+result.component_security_scopes  # populated from the explicit associations
+```
+
+With no explicit associations the field stays empty and reporting is unchanged—
+no ownership is inferred from `USES`, `CONTAINS`, `CALLS`, `TRUSTS`, `HANDOFF`,
+file paths, node IDs, labels, provenance, findings, or naming. Each supplied
+association is re-validated (its edge and component must actually exist in the
+scan's merged graph) and stale/invalid associations raise
+`ComponentContextError` deterministically.
+
 ## 🚫 Suppression / allowlist
 
 You can suppress known-safe findings with a project configuration file,
