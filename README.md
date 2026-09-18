@@ -733,6 +733,31 @@ scanning, and runtime analysis. These are explicitly **not** part of the current
 MVP. See `docs/data-flow-architecture-audit.md` for the Security Graph design
 and `docs/threat-model.md` for the security model.
 
+## 🧠 Threat Knowledge
+
+Veyra's **Threat Knowledge** is a small, deterministic, read-only internal
+foundation for a future threat-taxonomy and benchmark layer
+(`src/veyra/threats/`, Commit 23). It establishes a stable internal model —
+`ThreatScenario` (descriptive/evaluation metadata) and `ThreatSource`
+(provenance) — so that future adapters (e.g. OWASP, AgentDojo, AgentThreatBench,
+Agent Egress Corpus, internal scenarios) can be added later **without changing
+the core model**.
+
+The distinction:
+
+- **AttackPath** = a *proven security path* derived from the Security Graph.
+- **ThreatScenario** = *external / descriptive scenario metadata* (its id, name,
+  description, threat categories, attack behaviors, entry conditions, and
+  expected security properties).
+
+A `ThreatScenario` is purely descriptive and never modifies an `AttackPath`,
+creates graph nodes/edges, or introduces new `AttackType`/`EdgeType` values —
+it neither calculates risk nor assigns ownership/responsibility.
+
+> **Note:** OWASP taxonomy, AgentDojo, AgentThreatBench, Agent Egress Corpus,
+> runtime telemetry, and threat scoring are **not** integrated yet. This commit
+> only lays the stable internal model those adapters will use.
+
 ## 🛠️ Development
 
 ```bash
