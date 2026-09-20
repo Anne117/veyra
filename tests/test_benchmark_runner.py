@@ -63,8 +63,18 @@ def test_valid_case_observed_properties():
 
 
 def test_valid_case_violated_properties():
-    r = RUNNER.run(_case(), violated_properties=("x",))
-    assert r.violated_properties == ("x",)
+    # violated_properties are now derived by the evaluator from the scenario's
+    # expected properties vs the supplied observations.
+    case = _case()
+    # scenario has no expected_security_properties in the runner's _case helper;
+    # ensure expected/observed produce a violation deterministically.
+    sc = SecurityScenario(scenario_id="s", name="n", description="d",
+                         expected_security_properties=("prop-a",))
+    case2 = BenchmarkCase(benchmark_id=case.benchmark_id, case_id=case.case_id,
+                          name=case.name, description=case.description,
+                          scenario=sc, threat_mapping=case.threat_mapping)
+    r = RUNNER.run(case2, observed_properties=())
+    assert r.violated_properties == ("prop-a",)
     assert r.passed is False
 
 
@@ -146,7 +156,9 @@ def test_observed_properties_forwarded(monkeypatch):
     assert list(seen["observed_properties"]) == ["x", "y"]
 
 
-def test_violated_properties_forwarded(monkeypatch):
+def test_violated_properties_no_longer_passed(monkeypatch):
+    # violated_properties are derived by the evaluator's SecurityAssertion;
+    # the runner must not forward a caller-supplied violated_properties value.
     real = BenchmarkEvaluator()
     orig = BenchmarkEvaluator.evaluate
     seen = {}
@@ -154,8 +166,21 @@ def test_violated_properties_forwarded(monkeypatch):
         seen.update(kw)
         return orig(real, case, **kw)
     monkeypatch.setattr(BenchmarkEvaluator, "evaluate", _check)
-    RUNNER.run(_case(), violated_properties=("leak",))
-    assert list(seen["violated_properties"]) == ["leak"]
+    RUNNER.run(_case(), observed_properties=())
+    assert "violated_properties" not in seen
+
+
+def test_violated_properties_from_assertion(monkeypatch):
+    # The runner returns violations produced by the evaluator's assertion.
+    sc = SecurityScenario(scenario_id="s", name="n", description="d",
+                          expected_security_properties=("prop-x",))
+    case = _case()
+    case2 = BenchmarkCase(benchmark_id=case.benchmark_id, case_id=case.case_id,
+                          name=case.name, description=case.description,
+                          scenario=sc, threat_mapping=case.threat_mapping)
+    r = RUNNER.run(case2, observed_properties=())
+    assert r.violated_properties == ("prop-x",)
+    assert r.passed is False
 
 
 def test_status_forwarded(monkeypatch):
@@ -325,7 +350,7 @@ def test_no_scanner(monkeypatch):
 
 
 def test_no_risk_or_severity():
-    r = RUNNER.run(_case(), violated_properties=("leak",))
+    r = RUNNER.run(_case(), observed_properties=())
     for attr in ("risk_score", "severity", "confidence", "attack_type"):
         assert not hasattr(r, attr)
     assert not hasattr(r, "threat_ids")
@@ -333,10 +358,15 @@ def test_no_risk_or_severity():
 
 
 def test_no_expected_property_inference():
-    # expected_security_properties present, but runner must NOT auto-infer
-    # that a violation occurred when violated_properties is empty.
+    # A scenario that declares expected properties must NOT cause an
+    # automatic violation when all expected properties are observed.
+    sc = SecurityScenario(scenario_id="s", name="n", description="d",
+                          expected_security_properties=("no-exfiltration",))
     case = _case()
-    r = RUNNER.run(case, observed_properties=("secret-read",), violated_properties=())
+    case2 = BenchmarkCase(benchmark_id=case.benchmark_id, case_id=case.case_id,
+                          name=case.name, description=case.description,
+                          scenario=sc, threat_mapping=case.threat_mapping)
+    r = RUNNER.run(case2, observed_properties=("no-exfiltration",))
     assert r.passed is True
     assert r.violated_properties == ()
 
@@ -513,10 +543,7 @@ def test_input_case_unchanged():
 
 def test_observation_inputs_unchanged():
     observed = ("z", "a")
-    violated = ("q",)
     meta = (("k1", "v1"),)
-    RUNNER.run(_case(), observed_properties=observed, violated_properties=violated,
-               metadata=meta)
+    RUNNER.run(_case(), observed_properties=observed, metadata=meta)
     assert list(observed) == ["z", "a"]
-    assert list(violated) == ["q"]
     assert list(meta) == [("k1", "v1")]

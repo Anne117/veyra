@@ -64,7 +64,6 @@ class ObservationBenchmarkRunner:
         case: BenchmarkCase,
         *,
         observed_properties: Sequence[str] = (),
-        violated_properties: Sequence[str] = (),
         status: str = "completed",
         message: str = "",
         metadata: Sequence[Tuple[str, str]] = (),
@@ -79,11 +78,11 @@ class ObservationBenchmarkRunner:
         if request.benchmark_id != case.benchmark_id or request.case_id != case.case_id:
             raise ThreatModelError("execution request identity mismatch with case")
 
-        # Delegate evaluation to the canonical evaluator path.
+        # Delegate evaluation to the canonical evaluator path. violated_properties
+        # are derived by the evaluator's SecurityAssertion (single source of truth).
         return self._evaluator.evaluate(
             case,
             observed_properties=observed_properties,
-            violated_properties=violated_properties,
             status=status,
             message=message,
             metadata=metadata,

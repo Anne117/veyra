@@ -1066,6 +1066,24 @@ benchmarks. It compares property identifiers exactly after the standard threat
 model string normalization, and it is usable independently of `BenchmarkCase`,
 `BenchmarkEvaluator`, `BenchmarkRunner`, `AttackPath`, scanner, or OWASP.
 
+**`BenchmarkEvaluator`** now orchestrates the assertion comparison:
+
+```
+SecurityScenario.expected_security_properties
+        ↓
+SecurityAssertion.assert_properties(expected, observed)
+        ↓
+violated_properties
+        ↓
+BenchmarkEvaluationResult
+```
+
+- `observed_properties` are caller-supplied observations;
+- `violated_properties` are **derived**, not caller-controlled — the `evaluate()`
+  API no longer accepts a `violated_properties` argument (single source of truth);
+- the evaluator performs no security inference;
+- `SecurityAssertion` remains the canonical comparison layer.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
