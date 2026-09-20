@@ -836,6 +836,38 @@ canonicalization). OWASP identifiers are **not** automatically validated or
 resolved by this generic mapping layer. No benchmark integration and no
 evaluation execution exist yet.
 
+### Benchmark adapter foundation: `BenchmarkCase` / `BenchmarkAdapter`
+
+**`BenchmarkCase`** (`src/veyra/threats/benchmarks.py`, Commit 27) is the
+**internal normalized representation** of an external benchmark case. It is a
+stable, immutable transport model that carries only the benchmark-agnostic
+shape — `benchmark_id`, `case_id`, `name`, `description`, plus an embedded
+`SecurityScenario` and an explicit `SecurityScenarioThreatMapping`.
+
+**`BenchmarkAdapter`** is a minimal `Protocol` contract:
+`external benchmark case → BenchmarkCase`. It expresses only the conversion
+boundary. Adapters are **not** registered, auto-discovered, plugin-loaded, or
+executed by this layer, and `BenchmarkCase` performs **no execution**.
+
+This is a stable seam for future adapters. AgentDojo, AgentThreatBench, and the
+Agent Egress Security Corpus remain future adapters and are **not integrated
+yet**. No datasets are downloaded and no network access happens in this layer.
+No benchmark score or detection result exists at this stage — `BenchmarkCase`
+carries expectations (a `SecurityScenario` + explicit mapping), never observed
+results.
+
+The data flow this prepares for:
+
+```
+External benchmark case
+        ↓
+Benchmark adapter (not yet implemented for specific benchmarks)
+        ↓
+BenchmarkCase  =  SecurityScenario  +  SecurityScenarioThreatMapping
+        ↓
+future evaluation runner (not yet implemented)
+```
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,

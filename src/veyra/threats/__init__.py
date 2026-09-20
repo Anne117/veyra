@@ -38,6 +38,11 @@ from veyra.threats.mapping import (
     SecurityScenarioThreatMapping,
     serialize_security_scenario_threat_mapping,
 )
+from veyra.threats.benchmarks import (
+    BenchmarkAdapter,
+    BenchmarkCase,
+    serialize_benchmark_case,
+)
 
 __all__ = [
     "ThreatModelError",
@@ -49,6 +54,9 @@ __all__ = [
     "get_owasp_agentic_2026",
     "SecurityScenario",
     "SecurityScenarioThreatMapping",
+    "BenchmarkCase",
+    "BenchmarkAdapter",
+    "serialize_benchmark_case",
     "serialize_security_scenario",
     "serialize_security_scenario_threat_mapping",
     "serialize_threat_scenario",
