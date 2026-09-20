@@ -70,6 +70,10 @@ from veyra.threats.observations import (
     BenchmarkObservation,
     serialize_benchmark_observation,
 )
+from veyra.threats.execution_observation import (
+    BenchmarkExecutionObservation,
+    serialize_benchmark_execution_observation,
+)
 
 __all__ = [
     "ThreatModelError",
@@ -96,6 +100,8 @@ __all__ = [
     "SecurityAssertion",
     "BenchmarkObservation",
     "serialize_benchmark_observation",
+    "BenchmarkExecutionObservation",
+    "serialize_benchmark_execution_observation",
     "serialize_benchmark_case",
     "serialize_benchmark_evaluation_result",
     "serialize_benchmark_evaluation_summary",

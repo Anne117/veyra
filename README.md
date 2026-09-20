@@ -1126,6 +1126,34 @@ observations against `SecurityScenario.expected_security_properties`;
 `BenchmarkObservation` and delegates to the assertion; `BenchmarkEvaluationResult`
 remains the result contract.
 
+### Benchmark execution observation contract
+
+**`BenchmarkExecutionObservation`** (`src/veyra/threats/execution_observation.py`,
+Commit 39) represents the **explicit facts** reported by a future benchmark
+execution boundary: an execution `status`, an optional `message`, a
+`BenchmarkObservation`, and opaque `metadata`.
+
+It does **not** evaluate security: it computes no `passed`, no
+`violated_properties`, and makes no expected-vs-observed comparison.
+`BenchmarkEvaluator` remains responsible for evaluation (via
+`SecurityAssertion`), and `BenchmarkObservation` remains the only
+security-property observation representation.
+
+```
+future execution boundary
+        ↓
+BenchmarkExecutionObservation
+        ↓
+BenchmarkObservation
+        ↓
+BenchmarkEvaluator
+        ↓
+SecurityAssertion
+```
+
+Commit 39 introduces the contract only; actual benchmark execution will be
+implemented separately.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
