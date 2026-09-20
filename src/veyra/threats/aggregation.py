@@ -15,6 +15,7 @@ counter only; all other status strings remain opaque at this layer.
 
 from __future__ import annotations
 
+from collections.abc import Sequence as ABCSequence
 from dataclasses import dataclass
 from typing import Any, Dict, Sequence, Tuple
 
@@ -36,10 +37,12 @@ def _require_count(value: Any, what: str) -> int:
     return value
 
 
-def _require_status_pair(value: Any) -> Tuple[str, int] | None:
-    """Validate one (status, count) pair; returns None if the status is blank
-    after trimming (so blank entries can be dropped, consistent with the threat
-    model's tuple normalization).
+def _require_status_pair(value: Any) -> Tuple[str, int]:
+    """Validate one (status, count) pair.
+
+    Status must be a string, is trimmed, and must NOT be blank/whitespace-only
+    (a blank status would silently discard its count — that is never allowed).
+    Count must be a non-negative integer.
     """
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         raise ThreatModelError(
@@ -52,7 +55,7 @@ def _require_status_pair(value: Any) -> Tuple[str, int] | None:
         )
     status = status.strip()
     if not status:
-        return None
+        raise ThreatModelError("status must not be empty or whitespace-only")
     count = _require_count(count, "status count")
     return (status, count)
 
@@ -61,8 +64,9 @@ def _normalize_statuses(values: Any) -> Tuple[Tuple[str, int], ...]:
     """Normalize a statuses sequence deterministically.
 
     Each entry is a (status, count) pair; status strings are trimmed, blank
-    entries dropped, duplicate identical statuses merged by summing counts, then
-    sorted lexicographically by status string.
+    statuses are rejected (never dropped — a non-zero count must never be
+    silently discarded), duplicate identical statuses are merged by summing
+    counts, then sorted lexicographically by status string.
     """
     if values is None:
         return ()
@@ -73,10 +77,8 @@ def _normalize_statuses(values: Any) -> Tuple[Tuple[str, int], ...]:
         )
     merged: dict[str, int] = {}
     for item in values:
-        pair = _require_status_pair(item)
-        if pair is not None:
-            status, count = pair
-            merged[status] = merged.get(status, 0) + count
+        status, count = _require_status_pair(item)
+        merged[status] = merged.get(status, 0) + count
     return tuple(sorted(merged.items()))
 
 
@@ -156,10 +158,15 @@ class BenchmarkEvaluationAggregator:
         benchmark_id: str,
         results: Sequence[BenchmarkEvaluationResult],
     ) -> BenchmarkEvaluationSummary:
-        if not isinstance(results, (list, tuple)):
+        # Align with the declared Sequence contract: accept any Sequence
+        # (tuple/list/etc.), but reject strings and non-Sequence scalars.
+        if isinstance(results, str) or not isinstance(results, ABCSequence):
             raise ThreatModelError(
-                f"results must be a sequence, got {type(results).__name__}"
+                f"results must be a sequence of BenchmarkEvaluationResult, "
+                f"got {type(results).__name__}"
             )
+
+        normalized_benchmark_id = _require_str(benchmark_id, "benchmark id")
 
         total = 0
         passed = 0
@@ -173,10 +180,10 @@ class BenchmarkEvaluationAggregator:
                     f"result must be a BenchmarkEvaluationResult, "
                     f"got {type(result).__name__}"
                 )
-            if result.benchmark_id != benchmark_id:
+            if result.benchmark_id != normalized_benchmark_id:
                 raise ThreatModelError(
                     f"result benchmark_id {result.benchmark_id!r} does not match "
-                    f"expected {benchmark_id!r}"
+                    f"expected {normalized_benchmark_id!r}"
                 )
             total += 1
             status = result.status
@@ -189,7 +196,7 @@ class BenchmarkEvaluationAggregator:
                 failed += 1
 
         return BenchmarkEvaluationSummary(
-            benchmark_id=benchmark_id,
+            benchmark_id=normalized_benchmark_id,
             total_cases=total,
             passed_cases=passed,
             failed_cases=failed,

@@ -227,12 +227,28 @@ def test_ws_status_trimmed():
 
 
 def test_blank_status_dropped():
-    # Total=0 so the (statuses_sum == total) invariant holds after the blank
-    # status is dropped; blank entry must not raise.
-    s = BenchmarkEvaluationSummary(benchmark_id="b", total_cases=0,
+    # A blank/whitespace-only status must be REJECTED (a count must never be
+    # silently discarded).
+    with pytest.raises(ThreatModelError):
+        BenchmarkEvaluationSummary(benchmark_id="b",
                                    passed_cases=0, failed_cases=0, error_cases=0,
-                                   statuses=(("   ", 1),))
-    assert s.statuses == ()
+                                   total_cases=0, statuses=(("   ", 1),))
+
+
+def test_empty_status_rejected():
+    with pytest.raises(ThreatModelError):
+        BenchmarkEvaluationSummary(benchmark_id="b", total_cases=0,
+                                   passed_cases=0, failed_cases=0, error_cases=0,
+                                   statuses=(("", 1),))
+
+
+def test_whitespace_status_nonzero_count_not_discarded():
+    # A non-zero count under a blank status must NOT be silently dropped; it
+    # must raise instead.
+    with pytest.raises(ThreatModelError):
+        BenchmarkEvaluationSummary(benchmark_id="b", total_cases=5,
+                                   passed_cases=0, failed_cases=0, error_cases=0,
+                                   statuses=(("   ", 5),))
 
 
 def test_invalid_count_type():
@@ -404,3 +420,51 @@ def _status_summary(**over):
                 failed_cases=0, error_cases=0)
     base.update(over)
     return BenchmarkEvaluationSummary(**base)
+
+
+# ---- corrective fixes (Commit 32.1) ----
+def test_sequence_contract_custom_sequence():
+    # A non-list/non-tuple Sequence is accepted (Sequence contract).
+    class MySeq(list):
+        pass
+
+    results = MySeq([_result(status="completed", passed=True)])
+    s = AGG.aggregate("b-1", results)
+    assert s.total_cases == 1
+    assert s.passed_cases == 1
+
+
+def test_sequence_contract_numpy_like_rejected():
+    # A bare iterable (not a Sequence) must be rejected.
+    def gen():
+        yield _result()
+    with pytest.raises(ThreatModelError):
+        AGG.aggregate("b-1", gen())
+
+
+def test_sequence_contract_scalar_string_rejected():
+    with pytest.raises(ThreatModelError):
+        AGG.aggregate("b-1", "not-a-sequence")
+
+
+def test_benchmark_id_whitespace_normalized():
+    # " b-1 " normalizes to "b-1"; result with "b-1" matches.
+    s = AGG.aggregate(" b-1 ", [_result(status="completed", passed=True)])
+    assert s.benchmark_id == "b-1"
+
+
+def test_benchmark_id_normalized_result_accepted():
+    s = AGG.aggregate("  b-1  ", [_result(status="completed", passed=True)])
+    assert s.statuses == (("completed", 1),)
+
+
+def test_benchmark_id_empty_rejected():
+    with pytest.raises(ThreatModelError):
+        AGG.aggregate("   ", [_result()])
+
+
+def test_benchmark_id_non_string_rejected():
+    with pytest.raises(ThreatModelError):
+        AGG.aggregate(12345, [_result(benchmark_id="12345")])
+    with pytest.raises(ThreatModelError):
+        AGG.aggregate(None, [_result()])  # type: ignore[arg-type]
