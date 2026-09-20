@@ -7,5 +7,6 @@ scanner execution, no LLM calls.
 """
 
 from veyra.threats.adapters.agentdojo import AgentDojoAdapter
+from veyra.threats.adapters.agentthreatbench import AgentThreatBenchAdapter
 
-__all__ = ["AgentDojoAdapter"]
+__all__ = ["AgentDojoAdapter", "AgentThreatBenchAdapter"]

@@ -890,6 +890,30 @@ Mapping behavior is explicit only:
 
 The evaluation runner that would consume these cases comes later.
 
+### AgentThreatBench adapter
+
+**`AgentThreatBenchAdapter`** (`src/veyra/threats/adapters/agentthreatbench.py`,
+Commit 29) converts an **already-supplied** AgentThreatBench-style case (the
+same small explicit mapping contract as the AgentDojo adapter) into a
+`BenchmarkCase`.
+
+It converts through an explicit adapter boundary — no AgentThreatBench
+dependency is required, no dataset is bundled, no network access occurs, and
+no benchmark execution happens. The adapter is a pure data transformation and
+implements only Veyra's explicitly documented small input contract (not the full
+AgentThreatBench schema).
+
+Mapping behavior is explicit only (identical to the AgentDojo adapter):
+
+- `threat_ids` are copied into `SecurityScenarioThreatMapping.threat_ids`;
+- `threat_categories` are copied into `SecurityScenario.threat_categories`;
+- `threat_categories` are **never** automatically converted into `threat_ids`;
+- identifiers are preserved exactly (case-sensitive, opaque) and are **not**
+  validated/resolved against the OWASP catalog;
+- scenario/mapping ids are both set to the supplied `case_id`.
+
+The evaluation runner that would consume these cases comes later.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
