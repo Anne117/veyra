@@ -1183,6 +1183,38 @@ serializers.
 Commit 40 introduces the contract only; actual benchmark execution is not
 implemented.
 
+### Execution observation → evaluation bridge
+
+**`BenchmarkExecutionEvaluator`** (`src/veyra/threats/execution_evaluator.py`,
+Commit 41) is a thin, stateless orchestration wrapper that connects an existing
+binding to the canonical evaluator:
+
+```
+BenchmarkExecutionBinding
+        ↓
+BenchmarkExecutionEvaluator
+        ↓
+BenchmarkEvaluator
+        ↓
+SecurityAssertion
+        ↓
+BenchmarkEvaluationResult
+```
+
+`evaluate(binding, case)` requires an explicit `BenchmarkCase` because
+`BenchmarkExecutionRequest` carries only `benchmark_id`/`case_id` and therefore
+cannot supply scenario expectations; the case is never reconstructed or invented
+from the request, and its identity must match `binding.request` exactly
+(otherwise `ThreatModelError`). Only
+`binding.observation.observed_properties.properties` is forwarded.
+
+Execution status is **not** a security verdict: `failed`/`timeout`/`error` do not
+mean `passed is False`, and `completed` does not mean `passed is True`. Status,
+message and metadata remain execution facts and are not used as evaluation input.
+`BenchmarkObservation` remains the canonical observed-property model,
+`BenchmarkEvaluator`/`SecurityAssertion` remain the canonical evaluation layer,
+and Commit 41 does not execute external benchmarks.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,

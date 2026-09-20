@@ -78,6 +78,7 @@ from veyra.threats.execution_binding import (
     BenchmarkExecutionBinding,
     serialize_benchmark_execution_binding,
 )
+from veyra.threats.execution_evaluator import BenchmarkExecutionEvaluator
 
 __all__ = [
     "ThreatModelError",
@@ -108,6 +109,7 @@ __all__ = [
     "serialize_benchmark_execution_observation",
     "BenchmarkExecutionBinding",
     "serialize_benchmark_execution_binding",
+    "BenchmarkExecutionEvaluator",
     "serialize_benchmark_case",
     "serialize_benchmark_evaluation_result",
     "serialize_benchmark_evaluation_summary",
