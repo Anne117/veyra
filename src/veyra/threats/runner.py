@@ -27,6 +27,14 @@ from veyra.threats.evaluation import BenchmarkEvaluationResult
 from veyra.threats.evaluator import BenchmarkEvaluator
 from veyra.threats.execution import BenchmarkExecutionBoundary
 
+# Static protocol-compatible placeholder for the benchmark-agnostic runner's
+# benchmark_id attribute. It is NEVER used for evaluation identity — the
+# runner's result identity always comes from the supplied BenchmarkCase
+# (result.benchmark_id == case.benchmark_id). This value exists only so that an
+# ObservationBenchmarkRunner instance structurally satisfies the
+# BenchmarkRunner @runtime_checkable Protocol.
+GENERIC_BENCHMARK_ID = "*generic*"
+
 
 class ObservationBenchmarkRunner:
     """Explicit observation-driven runner (the bridge to BenchmarkEvaluator).
@@ -35,6 +43,10 @@ class ObservationBenchmarkRunner:
     One ``run()`` call produces exactly one BenchmarkEvaluationResult. Identity
     comes exclusively from the supplied BenchmarkCase.
     """
+
+    # Satisfies BenchmarkRunner's class-level `benchmark_id` member; evaluation
+    # identity is NOT taken from here.
+    benchmark_id: str = GENERIC_BENCHMARK_ID
 
     def __init__(self, evaluator: BenchmarkEvaluator | None = None):
         if evaluator is None:

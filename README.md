@@ -1040,6 +1040,12 @@ OWASP categories, AttackPaths, or risk. Security assertions against
 `expected_security_properties` are intentionally **not** implemented yet. This is
 a bridge/foundation, not a real benchmark runtime.
 
+`ObservationBenchmarkRunner` structurally satisfies the `BenchmarkRunner`
+`@runtime_checkable` protocol. It carries a static class-level `benchmark_id`
+placeholder purely for protocol compatibility; this placeholder is **never** used
+for evaluation identity — `result.benchmark_id == case.benchmark_id` always, and
+the runner's identity always comes from the supplied `BenchmarkCase`.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,

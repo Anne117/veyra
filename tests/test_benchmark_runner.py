@@ -414,6 +414,96 @@ def test_repeated_runs_equal():
     assert a == b
 
 
+# ---- K. Protocol compatibility (corrective, Commit 35.1) ----
+def test_runner_satisfies_runtime_protocol():
+    from veyra.threats.execution import BenchmarkRunner
+    assert isinstance(RUNNER, BenchmarkRunner)
+    assert isinstance(ObservationBenchmarkRunner(), BenchmarkRunner)
+
+
+def test_protocol_placeholder_is_not_result_identity():
+    from veyra.threats.execution import BenchmarkRunner
+    assert isinstance(RUNNER, BenchmarkRunner)
+    # The class-level placeholder never leaks into the result identity.
+    case = _case(benchmark_id="real-1", case_id="c1")
+    res = RUNNER.run(case)
+    assert res.benchmark_id == "real-1"
+    assert res.case_id == "c1"
+    assert res.benchmark_id != RUNNER.benchmark_id
+
+
+def test_runner_still_preserves_case_benchmark_and_case_id():
+    for bid, cid in (("agentdojo", "ad-1"), ("agentthreatbench", "atb-9"),
+                     ("custom-bench", "case-42")):
+        case = _case(benchmark_id=bid, case_id=cid)
+        res = RUNNER.run(case)
+        assert (res.benchmark_id, res.case_id) == (bid, cid)
+
+
+def test_different_benchmark_ids_represented_correctly():
+    results = [
+        RUNNER.run(_case(benchmark_id="a", case_id="1")),
+        RUNNER.run(_case(benchmark_id="b", case_id="2")),
+        RUNNER.run(_case(benchmark_id="c", case_id="3")),
+    ]
+    assert [r.benchmark_id for r in results] == ["a", "b", "c"]
+    assert [r.case_id for r in results] == ["1", "2", "3"]
+
+
+def test_no_constructor_level_benchmark_identity():
+    import inspect
+    # Run method signature must not accept a benchmark_id override; and the
+    # class exposes no constructor benchmark_id parameter.
+    sig = inspect.signature(ObservationBenchmarkRunner.__init__)
+    assert "benchmark_id" not in sig.parameters
+    run_sig = inspect.signature(ObservationBenchmarkRunner.run)
+    assert "benchmark_id" not in run_sig.parameters
+
+
+def test_protocol_compat_preserves_evaluator_delegation():
+    from veyra.threats.execution import BenchmarkRunner
+    real = BenchmarkEvaluator()
+    orig = BenchmarkEvaluator.evaluate
+    seen = []
+    def _check(self, case, **kw):
+        seen.append(kw)
+        return orig(real, case, **kw)
+    import veyra.threats.evaluator as ev
+    import pytest as _pytest
+    from _pytest.monkeypatch import MonkeyPatch
+    mp = MonkeyPatch()
+    mp.setattr(ev.BenchmarkEvaluator, "evaluate", _check)
+    try:
+        runner = ObservationBenchmarkRunner(real)
+        # isinstance check is independent from evaluation behavior.
+        assert isinstance(runner, BenchmarkRunner)
+        runner.run(_case(), observed_properties=("p",))
+    finally:
+        mp.undo()
+    assert seen != []
+
+
+def test_protocol_compat_preserves_boundary_integration():
+    from veyra.threats.execution import BenchmarkRunner, BenchmarkExecutionBoundary
+    from _pytest.monkeypatch import MonkeyPatch
+    calls = []
+    orig = BenchmarkExecutionBoundary.create_request
+    def _spy(boundary, case):
+        calls.append(case)
+        return orig(boundary, case)
+    mp = MonkeyPatch()
+    mp.setattr(BenchmarkExecutionBoundary, "create_request", _spy)
+    try:
+        runner = ObservationBenchmarkRunner()
+        assert isinstance(runner, BenchmarkRunner)
+        case = _case()
+        runner.run(case)
+    finally:
+        mp.undo()
+    assert len(calls) == 1
+    assert calls[0].case_id == case.case_id
+
+
 def test_input_case_unchanged():
     case = _case()
     snap = (case.benchmark_id, case.case_id, case.name, case.description)
