@@ -1046,6 +1046,26 @@ placeholder purely for protocol compatibility; this placeholder is **never** use
 for evaluation identity — `result.benchmark_id == case.benchmark_id` always, and
 the runner's identity always comes from the supplied `BenchmarkCase`.
 
+### Security assertion layer
+
+**`SecurityAssertion`** (`src/veyra/threats/assertions.py`, Commit 36) is the
+deterministic comparison between explicit expectations and explicit
+observations:
+
+- **`SecurityScenario.expected_security_properties`** = explicit expectations.
+- **`SecurityAssertion.assert_properties(expected, observed)`** =
+  deterministic set difference returning `violated_properties`
+  (`expected` minus `observed`).
+- **`violated_properties`** = properties expected but not observed.
+- **`BenchmarkEvaluator`** = converts explicit `violated_properties` into the
+  benchmark evaluation result (`BenchmarkEvaluationResult.passed`).
+
+`SecurityAssertion` performs **no** inference: it does not calculate risk,
+assign severity, resolve OWASP categories, inspect `AttackPath`s, or execute
+benchmarks. It compares property identifiers exactly after the standard threat
+model string normalization, and it is usable independently of `BenchmarkCase`,
+`BenchmarkEvaluator`, `BenchmarkRunner`, `AttackPath`, scanner, or OWASP.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
