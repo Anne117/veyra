@@ -6,6 +6,7 @@ knowledge layer.
 - ``ThreatScenario`` / ``ThreatSource``       — generic descriptive scenario model
 - ``ThreatTaxonomy`` / ``ThreatTaxonomyEntry`` — taxonomy/catalog structure
 - ``OWASP_AGENTIC_2026``                       — one concrete taxonomy catalog
+- ``SecurityScenario``                         — evaluation/security test contract
 
 This commit does NOT infer OWASP categories from AttackPaths and does NOT yet
 implement AgentDojo, AgentThreatBench, Agent Egress Security Corpus, runtime
@@ -29,6 +30,10 @@ from veyra.threats.taxonomy import (
     serialize_threat_taxonomies,
     serialize_threat_taxonomy,
 )
+from veyra.threats.scenarios import (
+    SecurityScenario,
+    serialize_security_scenario,
+)
 
 __all__ = [
     "ThreatModelError",
@@ -38,6 +43,8 @@ __all__ = [
     "ThreatTaxonomyEntry",
     "OWASP_AGENTIC_2026",
     "get_owasp_agentic_2026",
+    "SecurityScenario",
+    "serialize_security_scenario",
     "serialize_threat_scenario",
     "serialize_threat_scenarios",
     "serialize_threat_taxonomy",

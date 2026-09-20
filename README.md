@@ -785,7 +785,32 @@ A `ThreatScenario` is purely descriptive and never modifies an `AttackPath`,
 creates graph nodes/edges, or introduces new `AttackType`/`EdgeType` values —
 it neither calculates risk nor assigns ownership/responsibility.
 
-### Taxonomy catalogs
+### Evaluation contract: `SecurityScenario`
+
+**`SecurityScenario`** (`src/veyra/threats/scenarios.py`, Commit 25) is the
+**evaluation/security test contract** — it describes *expected security
+behavior and properties* for a future evaluation, but performs **no analysis**.
+It is deliberately separate from Threat Knowledge:
+
+- **ThreatScenario** = *threat knowledge description* (descriptive metadata
+  about what a threat looks like).
+- **SecurityScenario** = *evaluation/security test contract* (what the system
+  under evaluation is expected NOT to do).
+
+A `SecurityScenario` holds a minimal, immutable schema: `scenario_id`, `name`,
+`description`, and the normalized tuple fields `threat_categories`,
+`attack_behaviors`, `entry_conditions`, `expected_security_properties`, plus an
+optional `source` (`ThreatSource`). It may **reference** threat categories by
+stable identifiers (e.g. `ASI01`), but does **not** resolve or validate them
+against the OWASP catalog — that mapping belongs to a later stage.
+
+`SecurityScenario` never builds a `SecurityGraph`, constructs `AttackPath`s,
+runs the scanner, infers `AttackType`/risk/severity/confidence, or makes
+network requests. Benchmark adapters (AgentDojo, AgentThreatBench, the Agent
+Egress Security Corpus) and an evaluation runner are **not** integrated yet; the
+`SecurityScenario` foundation merely exists as a stable contract for them.
+
+#### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
 named set of `ThreatTaxonomyEntry`s), distinct from the generic
