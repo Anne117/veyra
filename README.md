@@ -998,6 +998,25 @@ does not inspect scenarios, threat IDs, OWASP, AttackPaths, findings, or scanner
 output. This is reporting/aggregation only — it is not a security score or
 benchmark-quality rating.
 
+### Benchmark execution boundary
+
+**`BenchmarkRunner`** (`src/veyra/threats/execution.py`, Commit 34) is the
+**future execution interface** — a `@runtime_checkable` `Protocol` with
+`benchmark_id` and `run(case) -> BenchmarkEvaluationResult`. It provides no
+default execution implementation.
+
+**`BenchmarkExecutionBoundary`** currently only creates a typed
+**`BenchmarkExecutionRequest`** (`benchmark_id`, `case_id`) from an existing
+`BenchmarkCase` — the architectural seam between a `BenchmarkCase` and a
+future `BenchmarkEvaluationResult`.
+
+Commit 34 does **not** execute benchmarks. `BenchmarkAdapter` remains a data
+adaptation layer, `BenchmarkEvaluationResult` remains the canonical evaluation
+result, and concrete benchmark runners will be added later. This is an
+architectural boundary, not an execution engine — no runner discovery, registry,
+plugin loading, filesystem discovery, subprocess/network execution, or
+benchmark-specific branching.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
