@@ -941,25 +941,39 @@ evaluation live in a later layer.
 ### Benchmark evaluator
 
 **`BenchmarkEvaluator`** (`src/veyra/threats/evaluator.py`, Commit 31) is the
-first evaluation logic layer. It consumes a `BenchmarkCase` plus **explicit**
-observations and violations and produces a `BenchmarkEvaluationResult`.
+first evaluation logic layer. It consumes a `BenchmarkCase` plus **explicit
+observations** and produces a `BenchmarkEvaluationResult`.
 
-It calculates only the boolean benchmark property result:
+It orchestrates the canonical flow:
 
-- zero violated properties → `passed=True`
-- one or more violated properties → `passed=False`
+```
+SecurityScenario.expected_security_properties
+        ↓
+SecurityAssertion.assert_properties(expected, observed)
+        ↓
+derived violated_properties
+        ↓
+BenchmarkEvaluationResult
+```
 
-Here **`passed` means strictly "no explicitly supplied violated properties"**
-— it is not a Veyra security risk verdict and does not imply "secure", "safe",
-or "low risk". `passed` is derived from the `violated_properties` sequence only,
-never from `observed_properties`, scenario text, `expected_security_properties`,
+- `observed_properties` are **caller-supplied** observations;
+- expected properties come from `case.scenario.expected_security_properties`;
+- `violated_properties` are **derived exclusively by `SecurityAssertion`** —
+  `BenchmarkEvaluator` no longer accepts `violated_properties` as an argument;
+- `passed` is **True iff the derived `violated_properties` tuple is empty**.
+
+Here **`passed` means strictly "no derived violated properties"** — it is an
+evaluation property contract, NOT a Veyra security verdict, and does not imply
+"secure", "safe", or "low risk". `passed` is derived only from the asserted
+violations, never from `observed_properties` alone, scenario name/description,
 threat IDs, OWASP categories, severity/confidence/risk score, AttackType, or any
 scanner output.
 
-The evaluator is pure and deterministic: it does not execute benchmarks, load
-datasets, access the network, run subprocesses, run the Veyra scanner, build a
-`SecurityGraph`/`AttackPath`, compute Veyra risk, call an LLM, or infer anything.
-External benchmark execution will be a later adapter/runner layer.
+The evaluator is pure and deterministic: it performs no risk/severity/
+AttackPath/OWASP/threat inference, does not execute benchmarks, load datasets,
+access the network, run subprocesses, run the Veyra scanner, build a
+`SecurityGraph`/`AttackPath`, compute Veyra risk, or call an LLM. External
+benchmark execution will be a later adapter/runner layer.
 
 ### Benchmark evaluation aggregation
 
@@ -1027,8 +1041,9 @@ delegates evaluation to `BenchmarkEvaluator`:
 ```
 BenchmarkCase
     -> BenchmarkExecutionBoundary (identity only)
-    -> explicit observations
-    -> BenchmarkEvaluator.evaluate()
+    -> explicit observed_properties
+    -> BenchmarkEvaluator
+    -> SecurityAssertion (derives violated_properties)
     -> BenchmarkEvaluationResult
 ```
 
@@ -1036,9 +1051,9 @@ BenchmarkCase
 `BenchmarkEvaluator` remains responsible for constructing the canonical
 `BenchmarkEvaluationResult`. The runner preserves `case.benchmark_id` /
 `case.case_id` and infers nothing — no security properties, severity, threats,
-OWASP categories, AttackPaths, or risk. Security assertions against
-`expected_security_properties` are intentionally **not** implemented yet. This is
-a bridge/foundation, not a real benchmark runtime.
+OWASP categories, AttackPaths, or risk, and it does **not** itself perform the
+security assertion (that is delegated to `BenchmarkEvaluator`'s
+`SecurityAssertion`). This is a bridge/foundation, not a real benchmark runtime.
 
 `ObservationBenchmarkRunner` structurally satisfies the `BenchmarkRunner`
 `@runtime_checkable` protocol. It carries a static class-level `benchmark_id`
