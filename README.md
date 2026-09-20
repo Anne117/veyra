@@ -1154,6 +1154,35 @@ SecurityAssertion
 Commit 39 introduces the contract only; actual benchmark execution will be
 implemented separately.
 
+### Benchmark execution binding contract
+
+**`BenchmarkExecutionBinding`** (`src/veyra/threats/execution_binding.py`,
+Commit 40) is a passive, immutable identity/binding layer that states explicitly
+which execution request an execution observation belongs to:
+
+```
+BenchmarkExecutionRequest
+        +
+BenchmarkExecutionObservation
+        ↓
+BenchmarkExecutionBinding
+```
+
+It has exactly two fields, `request` and `observation`, both runtime-validated
+by type (no duck typing). It duplicates no identity: `binding.request.benchmark_id`
+and `binding.request.case_id` remain the authoritative execution identity, and
+the observation remains responsible only for execution facts.
+
+The binding executes nothing and evaluates nothing — no `passed`, no
+`violated_properties`, no expected-vs-observed comparison, no
+risk/severity/confidence, no threat/OWASP inference, and no AttackPath or scanner
+access. `BenchmarkEvaluator`/`SecurityAssertion` remain responsible for
+evaluation. Serialization delegates to the canonical request/observation
+serializers.
+
+Commit 40 introduces the contract only; actual benchmark execution is not
+implemented.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
