@@ -1017,6 +1017,29 @@ architectural boundary, not an execution engine — no runner discovery, registr
 plugin loading, filesystem discovery, subprocess/network execution, or
 benchmark-specific branching.
 
+### Benchmark runner evaluation bridge
+
+**`ObservationBenchmarkRunner`** (`src/veyra/threats/runner.py`, Commit 35) is
+the first concrete runner implementation. It does **not** execute an external
+benchmark — it accepts explicit observations at the execution boundary and
+delegates evaluation to `BenchmarkEvaluator`:
+
+```
+BenchmarkCase
+    -> BenchmarkExecutionBoundary (identity only)
+    -> explicit observations
+    -> BenchmarkEvaluator.evaluate()
+    -> BenchmarkEvaluationResult
+```
+
+`BenchmarkExecutionBoundary` remains responsible only for execution identity;
+`BenchmarkEvaluator` remains responsible for constructing the canonical
+`BenchmarkEvaluationResult`. The runner preserves `case.benchmark_id` /
+`case.case_id` and infers nothing — no security properties, severity, threats,
+OWASP categories, AttackPaths, or risk. Security assertions against
+`expected_security_properties` are intentionally **not** implemented yet. This is
+a bridge/foundation, not a real benchmark runtime.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
