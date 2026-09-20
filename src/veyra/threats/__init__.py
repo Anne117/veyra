@@ -66,6 +66,10 @@ from veyra.threats.execution import (
 )
 from veyra.threats.runner import ObservationBenchmarkRunner
 from veyra.threats.assertions import SecurityAssertion
+from veyra.threats.observations import (
+    BenchmarkObservation,
+    serialize_benchmark_observation,
+)
 
 __all__ = [
     "ThreatModelError",
@@ -90,6 +94,8 @@ __all__ = [
     "BenchmarkExecutionBoundary",
     "ObservationBenchmarkRunner",
     "SecurityAssertion",
+    "BenchmarkObservation",
+    "serialize_benchmark_observation",
     "serialize_benchmark_case",
     "serialize_benchmark_evaluation_result",
     "serialize_benchmark_evaluation_summary",

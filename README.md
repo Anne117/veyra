@@ -1099,6 +1099,33 @@ BenchmarkEvaluationResult
 - the evaluator performs no security inference;
 - `SecurityAssertion` remains the canonical comparison layer.
 
+### Benchmark observation contract
+
+**`BenchmarkObservation`** (`src/veyra/threats/observations.py`, Commit 38) is
+the immutable, normalized representation of the **explicit observed security
+properties** supplied at the evaluation boundary. It is a transport/contract
+model only: it trims, dedupes, and sorts property identifiers and rejects
+malformed runtime values — it performs **no** security inference and is not a
+security verdict.
+
+```
+explicit observed properties
+        ↓
+BenchmarkObservation
+        ↓
+SecurityAssertion
+        ↓
+violated_properties
+        ↓
+BenchmarkEvaluationResult
+```
+
+Observations are caller-supplied. `SecurityAssertion` compares these normalized
+observations against `SecurityScenario.expected_security_properties`;
+`BenchmarkEvaluator` remains the orchestration layer that constructs the
+`BenchmarkObservation` and delegates to the assertion; `BenchmarkEvaluationResult`
+remains the result contract.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,

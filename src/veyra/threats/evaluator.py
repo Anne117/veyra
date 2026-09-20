@@ -36,6 +36,7 @@ from veyra.threats._error import ThreatModelError
 from veyra.threats.assertions import SecurityAssertion
 from veyra.threats.benchmarks import BenchmarkCase
 from veyra.threats.evaluation import BenchmarkEvaluationResult
+from veyra.threats.observations import BenchmarkObservation
 
 DEFAULT_MESSAGE = "Benchmark evaluation completed."
 DEFAULT_STATUS = "completed"
@@ -74,10 +75,13 @@ class BenchmarkEvaluator:
         if isinstance(message, str) and (message == "" or not message.strip()):
             message = DEFAULT_MESSAGE
 
-        # Derive violated_properties via the canonical SecurityAssertion layer.
+        # Normalize the explicit observations through the BenchmarkObservation
+        # contract, then pass the normalized properties to SecurityAssertion
+        # (the ONLY violation-derivation layer).
+        observation = BenchmarkObservation(observed_properties)
         asserted_violations = self._assertion.assert_properties(
             case.scenario.expected_security_properties,
-            observed_properties,
+            observation.properties,
         )
         passed = len(asserted_violations) == 0
 
@@ -87,7 +91,7 @@ class BenchmarkEvaluator:
             passed=passed,
             status=status,
             message=message,
-            observed_properties=observed_properties,
+            observed_properties=observation.properties,
             violated_properties=asserted_violations,
             metadata=metadata,
         )
