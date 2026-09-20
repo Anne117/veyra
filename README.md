@@ -868,6 +868,28 @@ BenchmarkCase  =  SecurityScenario  +  SecurityScenarioThreatMapping
 future evaluation runner (not yet implemented)
 ```
 
+### AgentDojo adapter
+
+**`AgentDojoAdapter`** (`src/veyra/threats/adapters/agentdojo.py`, Commit 28)
+is the first concrete benchmark adapter. It converts an **already-supplied**
+AgentDojo-style case (a small mapping described in the module and its tests)
+into a `BenchmarkCase`.
+
+It converts through an explicit adapter boundary — no AgentDojo dependency is
+required, no dataset is bundled, no network access occurs, and no benchmark
+execution happens. The adapter is a pure data transformation.
+
+Mapping behavior is explicit only:
+
+- `threat_ids` are copied into `SecurityScenarioThreatMapping.threat_ids`;
+- `threat_categories` are copied into `SecurityScenario.threat_categories`;
+- `threat_categories` are **never** automatically converted into `threat_ids`;
+- identifiers are preserved exactly (case-sensitive, opaque) and are **not**
+  validated/resolved against the OWASP catalog;
+- scenario/mapping ids are both set to the supplied `case_id`.
+
+The evaluation runner that would consume these cases comes later.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
