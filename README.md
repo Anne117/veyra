@@ -938,6 +938,29 @@ not execute benchmarks, run Veyra scans, derive pass/fail, calculate Veyra risk,
 infer threat IDs/OWASP, or resolve mappings. Actual benchmark execution and
 evaluation live in a later layer.
 
+### Benchmark evaluator
+
+**`BenchmarkEvaluator`** (`src/veyra/threats/evaluator.py`, Commit 31) is the
+first evaluation logic layer. It consumes a `BenchmarkCase` plus **explicit**
+observations and violations and produces a `BenchmarkEvaluationResult`.
+
+It calculates only the boolean benchmark property result:
+
+- zero violated properties → `passed=True`
+- one or more violated properties → `passed=False`
+
+Here **`passed` means strictly "no explicitly supplied violated properties"**
+— it is not a Veyra security risk verdict and does not imply "secure", "safe",
+or "low risk". `passed` is derived from the `violated_properties` sequence only,
+never from `observed_properties`, scenario text, `expected_security_properties`,
+threat IDs, OWASP categories, severity/confidence/risk score, AttackType, or any
+scanner output.
+
+The evaluator is pure and deterministic: it does not execute benchmarks, load
+datasets, access the network, run subprocesses, run the Veyra scanner, build a
+`SecurityGraph`/`AttackPath`, compute Veyra risk, call an LLM, or infer anything.
+External benchmark execution will be a later adapter/runner layer.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
