@@ -914,6 +914,30 @@ Mapping behavior is explicit only (identical to the AgentDojo adapter):
 
 The evaluation runner that would consume these cases comes later.
 
+### Benchmark evaluation result
+
+**`BenchmarkEvaluationResult`** (`src/veyra/threats/evaluation.py`, Commit 30)
+is the result **data contract** that a future benchmark evaluator/runner
+produces. It is a **passive, benchmark-agnostic** model — it only records an
+explicit evaluator result and performs **no** analysis.
+
+It has no coupling to `BenchmarkCase`: it is independently serializable and
+carries no `AttackPath`, `SecurityGraph`, findings, severity, confidence,
+risk_score, `AttackType`, policy IDs, scanner output, or benchmark-specific
+execution data. Its fields are supplied explicitly by the future evaluator:
+
+- `benchmark_id`, `case_id` — opaque identifiers;
+- `passed` (`bool`) — explicit evaluator boolean (never derived here);
+- `status`, `message` — explicit opaque status string and human-readable message;
+- `observed_properties`, `violated_properties` — normalized property tuples
+  (trim, empty-removal, dedup, deterministic sort);
+- `metadata` — deterministic, normalized `(key, value)` string pairs.
+
+Like the other threat models, this is **not** yet a benchmark runner: it does
+not execute benchmarks, run Veyra scans, derive pass/fail, calculate Veyra risk,
+infer threat IDs/OWASP, or resolve mappings. Actual benchmark execution and
+evaluation live in a later layer.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,

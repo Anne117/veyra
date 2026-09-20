@@ -43,6 +43,10 @@ from veyra.threats.benchmarks import (
     BenchmarkCase,
     serialize_benchmark_case,
 )
+from veyra.threats.evaluation import (
+    BenchmarkEvaluationResult,
+    serialize_benchmark_evaluation_result,
+)
 
 __all__ = [
     "ThreatModelError",
@@ -56,7 +60,9 @@ __all__ = [
     "SecurityScenarioThreatMapping",
     "BenchmarkCase",
     "BenchmarkAdapter",
+    "BenchmarkEvaluationResult",
     "serialize_benchmark_case",
+    "serialize_benchmark_evaluation_result",
     "serialize_security_scenario",
     "serialize_security_scenario_threat_mapping",
     "serialize_threat_scenario",
