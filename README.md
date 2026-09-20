@@ -979,6 +979,25 @@ aggregation convention for the `error_cases` counter; all other status strings
 remain opaque. It infers nothing from scenarios, threat IDs, OWASP, AttackPaths,
 findings, or scanner output.
 
+### Cross-benchmark evaluation summary
+
+**`CrossBenchmarkEvaluationAggregator`** (`src/veyra/threats/cross_benchmark.py`,
+Commit 33) combines already-produced `BenchmarkEvaluationSummary` objects into
+a deterministic `CrossBenchmarkEvaluationSummary`: aggregate case counts
+(`total_benchmarks`, `total_cases`, `passed_cases`, `failed_cases`,
+`error_cases`) plus a sorted tuple of `(benchmark_id, case_count)` entries — one
+per distinct benchmark.
+
+Each benchmark contributes exactly one summary. Duplicate benchmark IDs are
+**rejected** (never merged). Empty input is valid. Benchmark entries are sorted
+deterministically by `benchmark_id`.
+
+It does not execute benchmarks or invoke `BenchmarkEvaluator` /
+`BenchmarkEvaluationAggregator`, does not calculate Veyra security risk, and
+does not inspect scenarios, threat IDs, OWASP, AttackPaths, findings, or scanner
+output. This is reporting/aggregation only — it is not a security score or
+benchmark-quality rating.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,

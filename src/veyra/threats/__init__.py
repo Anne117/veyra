@@ -53,6 +53,11 @@ from veyra.threats.aggregation import (
     BenchmarkEvaluationAggregator,
     serialize_benchmark_evaluation_summary,
 )
+from veyra.threats.cross_benchmark import (
+    CrossBenchmarkEvaluationSummary,
+    CrossBenchmarkEvaluationAggregator,
+    serialize_cross_benchmark_evaluation_summary,
+)
 
 __all__ = [
     "ThreatModelError",
@@ -70,9 +75,12 @@ __all__ = [
     "BenchmarkEvaluator",
     "BenchmarkEvaluationSummary",
     "BenchmarkEvaluationAggregator",
+    "CrossBenchmarkEvaluationSummary",
+    "CrossBenchmarkEvaluationAggregator",
     "serialize_benchmark_case",
     "serialize_benchmark_evaluation_result",
     "serialize_benchmark_evaluation_summary",
+    "serialize_cross_benchmark_evaluation_summary",
     "serialize_security_scenario",
     "serialize_security_scenario_threat_mapping",
     "serialize_threat_scenario",
