@@ -961,6 +961,24 @@ datasets, access the network, run subprocesses, run the Veyra scanner, build a
 `SecurityGraph`/`AttackPath`, compute Veyra risk, call an LLM, or infer anything.
 External benchmark execution will be a later adapter/runner layer.
 
+### Benchmark evaluation aggregation
+
+**`BenchmarkEvaluationAggregator`** (`src/veyra/threats/aggregation.py`,
+Commit 32) combines already-produced `BenchmarkEvaluationResult` objects into a
+deterministic, benchmark-agnostic `BenchmarkEvaluationSummary`:
+
+- `benchmark_id`, `total_cases`, `passed_cases`, `failed_cases`, `error_cases`;
+- `statuses` — a normalized, deduplicated, lexicographically-sorted tuple of
+  `(status, count)` pairs.
+
+Aggregation is derived **only** from each result's `benchmark_id`/`passed`/
+`status`. Empty result collections are valid (all counts `0`, `statuses=()`). It
+does **not** execute benchmarks, invoke `BenchmarkEvaluator`, run the Veyra
+scanner, or calculate Veyra security risk. `"error"` is only the explicit
+aggregation convention for the `error_cases` counter; all other status strings
+remain opaque. It infers nothing from scenarios, threat IDs, OWASP, AttackPaths,
+findings, or scanner output.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
