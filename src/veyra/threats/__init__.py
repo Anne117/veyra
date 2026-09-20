@@ -34,6 +34,10 @@ from veyra.threats.scenarios import (
     SecurityScenario,
     serialize_security_scenario,
 )
+from veyra.threats.mapping import (
+    SecurityScenarioThreatMapping,
+    serialize_security_scenario_threat_mapping,
+)
 
 __all__ = [
     "ThreatModelError",
@@ -44,7 +48,9 @@ __all__ = [
     "OWASP_AGENTIC_2026",
     "get_owasp_agentic_2026",
     "SecurityScenario",
+    "SecurityScenarioThreatMapping",
     "serialize_security_scenario",
+    "serialize_security_scenario_threat_mapping",
     "serialize_threat_scenario",
     "serialize_threat_scenarios",
     "serialize_threat_taxonomy",

@@ -810,6 +810,32 @@ network requests. Benchmark adapters (AgentDojo, AgentThreatBench, the Agent
 Egress Security Corpus) and an evaluation runner are **not** integrated yet; the
 `SecurityScenario` foundation merely exists as a stable contract for them.
 
+### Explicit mapping: `SecurityScenarioThreatMapping`
+
+**`SecurityScenarioThreatMapping`** (`src/veyra/threats/mapping.py`, Commit 26)
+is the **explicit, caller-supplied bridge** from an evaluation contract to
+threat-knowledge identifiers. It holds only `scenario_id` and a normalized
+tuple of opaque `threat_ids` (e.g. `ASI01`, ThreatScenario IDs, or future
+benchmark/threat identifiers).
+
+The three layers are distinct:
+
+- **SecurityScenario** = *evaluation/security test contract*.
+- **SecurityScenarioThreatMapping** = *explicit mapping* from that contract to
+  threat-knowledge identifiers.
+- **ThreatScenario / ThreatTaxonomy** = *threat knowledge*.
+
+The mapping is **caller-supplied**, **deterministic**, **taxonomy-agnostic**,
+and **non-inferential** — the system never guesses a mapping from names,
+descriptions, attack-behavior text, keywords, component names, `AttackPath`,
+`AttackType`, or graph structure. Only explicit identifiers supplied by the
+caller establish a mapping.
+
+Identifiers are preserved **exactly** (case-sensitive, no aliasing, no
+canonicalization). OWASP identifiers are **not** automatically validated or
+resolved by this generic mapping layer. No benchmark integration and no
+evaluation execution exist yet.
+
 #### Taxonomy catalogs
 
 A **`ThreatTaxonomy`** is a separate, taxonomy-agnostic catalog layer (a fixed,
