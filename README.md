@@ -90,6 +90,19 @@ The pipeline (see `src/veyra/scanner.py`, `src/veyra/graph/`, and
    attack paths + policy results/status), SARIF 2.1.0, or a standalone HTML
    security report.
 
+On top of this core pipeline sit two read-only projection layers:
+
+- **Component security projections** (`src/veyra/graph/context.py` and
+  `src/veyra/graph/declarations.py`, Commits 17–22) — explicitly declared
+  component relationships, an explicit component↔security-behavior
+  association, and derived per-component views (security scope, path
+  participation, path composition, and risk evidence). These are additive
+  metadata only and never modify the AttackPath, risk, or policy.
+- **Threat Knowledge** (`src/veyra/threats/`, Commits 23–24) — a
+  deterministic, read-only foundation (`ThreatScenario`, `ThreatTaxonomy`) plus
+  the OWASP Agentic AI 2026 catalog. Purely descriptive; no graph/path/risk
+  interaction yet.
+
 ## 🧩 Detection table
 
 | Rule | ID | Severity examples |
@@ -189,10 +202,12 @@ per-path **Provenance** (which scanned component/file contributed each node
 and edge), a per-path **Explanation** (summary, steps, impact, policies,
 breakpoints, components), per-path **Component Context** (which declared
 Agent/Skill/Tool/MCP component owns each security behavior edge), policy
-results, and the original findings. All dynamic values (from scanned files,
-node IDs, evidence, provenance, etc.) are HTML-escaped, so malicious content
-cannot inject markup. Open it directly from
-disk:
+results, and the original findings. When explicit component context is
+supplied, it also renders the **Component Security Scope**, **Component Path
+Participation**, **Component Path Composition**, and **Component Risk
+Evidence** sections. All dynamic values (from scanned files, node IDs,
+evidence, provenance, etc.) are HTML-escaped, so malicious content cannot inject
+markup. Open it directly from disk:
 
 ```bash
 veyra scan ./path/to/skill --format html > report.html
@@ -257,7 +272,11 @@ veyra scan ./path --format json
       "reason": "Proven secret exfiltration reaches an external endpoint."
     }
   ],
-  "policy_status": "FAIL"
+  "policy_status": "FAIL",
+  "component_security_scopes": [ ... ],
+  "component_path_participation": [ ... ],
+  "component_path_composition": [ ... ],
+  "component_risk_evidence": [ ... ]
 }
 ```
 
@@ -265,9 +284,12 @@ veyra scan ./path --format json
 object-continuity path (or an explicit `HANDOFF` chain). Each path carries a
 deterministic `path_id`, its ordered nodes/edges, attack type, and the
 risk/evidence/breakpoint fields. `policy_results` is the complete policy
-evaluation; `policy_status` is the aggregate `PASS`/`FAIL` decision. These add
-fields **without** changing the existing `target`/`score`/`risk_level`/
-`summary`/`findings` schema.
+evaluation; `policy_status` is the aggregate `PASS`/`FAIL` decision. When
+explicit component-context associations are supplied, the additive
+`component_security_scopes` / `component_path_participation` /
+`component_path_composition` / `component_risk_evidence` fields are emitted
+(and omitted when empty). These fields are added **without** changing the
+existing `target`/`score`/`risk_level`/`summary`/`findings` schema.
 
 ### Attack Paths
 
@@ -373,11 +395,15 @@ SARIF's `suppressions` array — they are never silently turned into clean
 secrets remain redacted. When a scan produces attack paths, each is additionally
 emitted as a SARIF result (level mapped from its existing risk severity, rule id
 derived from its attack type) with the path's `path_id`, `attack_type`, risk
-fields, evidence, and breakpoints exposed under the result's `properties`.
+fields, evidence, and breakpoints exposed under the result's `properties`. When
+explicit component context is supplied, the run-level properties also expose
+`component_security_scopes`, `component_path_participation`,
+`component_path_composition`, and `component_risk_evidence` as additive (never
+fabricated) metadata.
 
-### Component declarations, context, security scope, and path participation
+### Component declarations, context, security scope, participation, composition, and risk evidence
 
-Veyra keeps four distinct additive layers over the Security Graph — never
+Veyra keeps **six distinct additive layers** over the Security Graph — never
 merged, never inferred:
 
 - **Component Declarations** (`graph/declarations.py`) — explicit architecture
@@ -737,18 +763,23 @@ and `docs/threat-model.md` for the security model.
 
 Veyra's **Threat Knowledge** is a small, deterministic, read-only internal
 foundation for a future threat-taxonomy and benchmark layer
-(`src/veyra/threats/`, Commit 23). It establishes a stable internal model —
-`ThreatScenario` (descriptive/evaluation metadata) and `ThreatSource`
-(provenance) — so that future adapters (e.g. OWASP, AgentDojo, AgentThreatBench,
-Agent Egress Corpus, internal scenarios) can be added later **without changing
-the core model**.
+(`src/veyra/threats/`, Commits 23–24). It provides:
 
-The distinction:
+- `ThreatScenario` / `ThreatSource` — a generic descriptive/evaluation
+  scenario model and its provenance (Commit 23);
+- `ThreatTaxonomy` / `ThreatTaxonomyEntry` — a taxonomy-agnostic catalog
+  structure, plus serializers (Commit 24);
+- `OWASP_AGENTIC_2026` / `get_owasp_agentic_2026()` — one concrete taxonomy
+  catalog (Commit 24).
+
+The distinctions:
 
 - **AttackPath** = a *proven security path* derived from the Security Graph.
 - **ThreatScenario** = *external / descriptive scenario metadata* (its id, name,
   description, threat categories, attack behaviors, entry conditions, and
   expected security properties).
+- **ThreatTaxonomy** = the *catalog structure* that groups authoritative threat
+  entry IDs and names (e.g. the OWASP Agentic AI 2026 ASI01–ASI10 set).
 
 A `ThreatScenario` is purely descriptive and never modifies an `AttackPath`,
 creates graph nodes/edges, or introduces new `AttackType`/`EdgeType` values —
@@ -777,11 +808,12 @@ concise Veyra-written summary, not verbatim OWASP text.
 | ASI09 | Human-Agent Trust Exploitation |
 | ASI10 | Rogue Agents |
 
-> The current commit does **NOT** infer an OWASP category from an `AttackPath`.
+> The current commits do **NOT** infer an OWASP category from an `AttackPath`.
 > A taxonomy is descriptive catalog metadata only and never modifies the graph
 > or the attack path. Future adapters/catalogs may include AgentDojo,
 > AgentThreatBench, the Agent Egress Security Corpus, and internal security
-> scenarios — none are integrated yet.
+> scenarios — none of those are integrated yet (only the core model and the
+> OWASP Agentic AI 2026 catalog currently exist).
 
 ## 🛠️ Development
 
