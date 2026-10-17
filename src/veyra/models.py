@@ -123,6 +123,16 @@ class ScanResult:
     # serialize_component_risk_evidence). Additive metadata only: never
     # redistributes risk, never infers ownership/responsibility. Empty by default.
     component_risk_evidence: List[Dict[str, Any]] = field(default_factory=list)
+    # Deterministic mapping from finalized AttackPath.path_id to the real
+    # source file backing that path's entry node (the SKILL node label).
+    # Populated by the scanner from the same merged SecurityGraph that
+    # produced the paths; empty by default so callers that construct
+    # ScanResult manually continue to work. NEVER a fabricated location:
+    # a path appears in this map only when its entry_node resolves to a
+    # SKILL node whose label corresponds to an actually-scanned file.
+    # Reporters (e.g. SARIF) MUST treat absence as "location omitted" and
+    # mark that decision explicitly; they MUST NOT infer coordinates.
+    attack_path_entry_files: Dict[str, str] = field(default_factory=dict)
 
     @property
     def score(self) -> int:

@@ -166,6 +166,34 @@ def scan_path(
     result = ScanResult(target=target, findings=findings)
     attack_paths, merged = _build_attack_paths(findings, file_texts)
     result.attack_paths = attack_paths
+    # Derive a deterministic mapping from finalized attack paths to a real
+    # source file, using ONLY data already present in the merged SecurityGraph.
+    # The entry node of an AttackPath is a real graph node; when its type is
+    # SKILL, its label is the normalized file path that produced the finding.
+    # This is NOT a fabrication: it references an actual node in the same
+    # merged graph that produced the path itself. For non-SKILL entry nodes
+    # (e.g. a SECRET/DATA/ENDPOINT reached through an upstream component) we
+    # deliberately leave the path out of this map; SARIF will then explicitly
+    # mark `location_provenance = "omitted"` rather than invent coordinates.
+    from veyra.graph.builder import _component_id as _component_id_for_file
+    entry_files: Dict[str, str] = {}
+    for ap in attack_paths:
+        if not ap.entry_node:
+            continue
+        node = merged.get_node(ap.entry_node)
+        if node is None or node.type != NodeType.SKILL:
+            continue
+        file_path = (node.label or "").strip()
+        if not file_path:
+            continue
+        # Trust the builder's normalization only for files that actually
+        # produced findings; this avoids any chance of a synthetic node
+        # sneaking in. A file that did not produce a finding cannot have
+        # produced an attack path in the first place.
+        if file_path not in {_component_id_for_file(f.file) for f in findings if f.file}:
+            continue
+        entry_files[ap.ensure_path_id()] = file_path
+    result.attack_path_entry_files = entry_files
     # Evaluate the FINALIZED, deduplicated AttackPath objects with the built-in
     # PolicyEngine. PolicyEngine is the sole owner of policy trigger semantics;
     # the scanner only orchestrates finalized_paths -> evaluate() ->

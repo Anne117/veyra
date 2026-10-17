@@ -308,8 +308,10 @@ def test_sarif_additive_only():
         # message.text unchanged on the attack-path result.
         ap = [r for r in run["results"] if r["ruleId"].startswith("ATTACK-PATH")][0]
         assert "message" in ap
-        # No location fabricated.
-        assert "locations" not in ap
+        # Location is now derived from the real scanned SKILL.md file via
+        # the entry-node resolution; provenance must be marked explicitly.
+        assert "locations" in ap and ap["locations"]
+        assert ap["properties"]["location_provenance"] == "entry_node_skill_file"
 
 
 # 16. HTML renders and escapes scope data

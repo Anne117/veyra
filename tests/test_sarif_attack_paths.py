@@ -141,6 +141,10 @@ def test_sarif_secret_exfiltration():
     assert props["risk_score"] == 95
     assert props["evidence"] == ap.evidence
     assert "locations" not in result
+    # When the AttackPath has no entry-file mapping, location is explicitly
+    # omitted and the provenance reason is recorded for downstream consumers.
+    assert result["properties"]["location_provenance"] == "omitted"
+    assert "physicalLocation" not in json.dumps(result)
     # The attack-path rule is in the driver rules.
     driver_ids = [r["id"] for r in run["tool"]["driver"]["rules"]]
     assert ruleid in driver_ids
@@ -216,10 +220,14 @@ def test_sarif_ordering_preserves_path_id_order():
 def test_sarif_no_fabricated_locations():
     ap = _exfil_path("SECRET")
     result = _parse_sarif(render_sarif(_result_with([ap])))
-    # An AttackPath carries no trustworthy source file/line provenance; the
-    # SARIF result must not invent a location.
-    assert "locations" not in result["runs"][0]["results"][0]
-    assert "physicalLocation" not in json.dumps(result["runs"][0]["results"][0])
+    # An AttackPath carries no trustworthy source file/line provenance when
+    # no entry-file mapping is provided; the SARIF result must not invent a
+    # location and must mark the omission explicitly so consumers know it
+    # is deliberate (not a bug).
+    sarif_result = result["runs"][0]["results"][0]
+    assert "locations" not in sarif_result
+    assert "physicalLocation" not in json.dumps(sarif_result)
+    assert sarif_result["properties"]["location_provenance"] == "omitted"
 
 
 # H. End-to-end -------------------------------------------------------------
@@ -259,4 +267,104 @@ def test_sarif_attack_path_end_to_end():
         assert r["properties"]["attack_type"] == "DATA_EXFILTRATION"
         assert r["properties"]["risk_severity"] == "HIGH"
         assert r["properties"]["evidence"] == result.attack_paths[0].evidence
-        assert "locations" not in r
+        # End-to-end fixture now goes through the real scanner, which
+        # populates the entry-file mapping; the location is therefore derived
+        # from the actual scanned SKILL.md file and explicitly marked.
+        assert "locations" in r and r["locations"]
+        assert r["properties"]["location_provenance"] == "entry_node_skill_file"
+        loc_uri = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert loc_uri.endswith("SKILL.md")
+
+
+# I. Entry-file resolution (positive path) --------------------------------
+def test_sarif_attack_path_emits_location_when_entry_file_resolved():
+    """When the scanner maps the path to a real entry file, SARIF emits a
+    location derived from that file AND marks the provenance explicitly so
+    consumers can audit how the location was obtained."""
+    from veyra.graph.path import (
+        AttackPath,
+        AttackType,
+        assess_risk,
+        classify_path,
+        path_id_of,
+    )
+
+    nodes = ["SKILL:s", "ACTION:run"]
+    edges = [("SKILL:s", "ACTION:run", "EXECUTES")]
+    assoc = [("SKILL:s", "SECRET:token", "READS")]
+    ap = AttackPath(
+        nodes=nodes,
+        edges=edges,
+        associated_edges=assoc,
+        attack_type=AttackType.CORRELATED_SECRET_EXECUTION,
+        path_id=path_id_of(nodes, edges, assoc),
+    )
+    classify_path(ap)
+    assess_risk(ap)
+
+    result = ScanResult(
+        target="test",
+        attack_paths=[ap],
+        attack_path_entry_files={ap.path_id: "src/veyra/example.py"},
+    )
+    doc = _parse_sarif(render_sarif(result))
+    sarif_result = doc["runs"][0]["results"][0]
+    assert sarif_result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"].endswith("src/veyra/example.py")
+    assert sarif_result["properties"]["location_provenance"] == "entry_node_skill_file"
+
+
+def test_sarif_attack_path_omits_location_when_entry_file_unknown():
+    """When the scanner does NOT map the path to a file, SARIF omits the
+    location AND records the reason explicitly. No physicalLocation is
+    fabricated."""
+    ap = _execution_path()
+    result = ScanResult(target="test", attack_paths=[ap])  # no entry_files
+    doc = _parse_sarif(render_sarif(result))
+    sarif_result = doc["runs"][0]["results"][0]
+    assert "locations" not in sarif_result
+    assert sarif_result["properties"]["location_provenance"] == "omitted"
+    assert "physicalLocation" not in json.dumps(sarif_result)
+
+
+def test_sarif_attack_path_unknown_path_id_in_map_falls_back_to_omitted():
+    """Defensive: an entry_files entry with a path_id that does NOT match
+    any path is ignored (no spillover)."""
+    ap = _execution_path()
+    result = ScanResult(
+        target="test",
+        attack_paths=[ap],
+        attack_path_entry_files={"some-other-path-id": "src/veyra/example.py"},
+    )
+    doc = _parse_sarif(render_sarif(result))
+    sarif_result = doc["runs"][0]["results"][0]
+    assert "locations" not in sarif_result
+    assert sarif_result["properties"]["location_provenance"] == "omitted"
+
+
+# J. End-to-end against the real scanner on src/ ---------------------------
+def test_sarif_scan_src_every_result_has_location():
+    """Drive the real scanner against ``src/`` (the case that previously
+    produced 41 attack-path results without locations and broke the CI
+    ``upload-sarif`` job). Every SARIF result, attack-path or otherwise,
+    MUST carry at least one location."""
+    import os
+    if not os.path.isdir("src"):
+        # Skip outside the repository working tree.
+        return
+    real_result = scan_path("src")
+    doc = _parse_sarif(render_sarif(real_result))
+    results = doc["runs"][0]["results"]
+    assert results, "expected scanner to produce at least one result against src/"
+    missing = [r for r in results if "locations" not in r or not r["locations"]]
+    assert not missing, (
+        f"{len(missing)} SARIF results have no locations (first: {missing[0].get('ruleId')})"
+    )
+    # All attack-path results must additionally carry the provenance marker.
+    attack = [r for r in results if r["ruleId"].startswith("ATTACK-PATH")]
+    assert attack, "expected at least one attack-path result"
+    for r in attack:
+        assert r["properties"].get("location_provenance") == "entry_node_skill_file", (
+            f"unexpected provenance for {r['ruleId']}: {r['properties'].get('location_provenance')}"
+        )
+        loc = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert loc, "attack-path location uri must be a non-empty string"

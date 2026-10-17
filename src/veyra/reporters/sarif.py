@@ -158,15 +158,27 @@ def _build_attack_rules(paths: List[AttackPath]) -> List[Dict[str, Any]]:
     return list(rules.values())
 
 
-def _attack_path_result(path: AttackPath) -> Dict[str, Any]:
+def _attack_path_result(
+    path: AttackPath,
+    entry_files: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """Build a single SARIF result for one AttackPath.
 
     Only already-existing AttackPath fields are exposed, converted to their
     serialized representations (enum/objects are never placed directly into
     SARIF properties). ``path_id`` remains the stable deterministic identity.
-    Locations are intentionally omitted: an AttackPath carries no trustworthy
-    source file/line provenance, so nothing would be fabricated.
+
+    Location policy (honest, no fabrication):
+    - The scanner populates ``entry_files`` from the same merged SecurityGraph
+      that produced the path. The entry node of an AttackPath is a real graph
+      node; when it is a SKILL node, its label is the normalized file path of
+      the actually-scanned source. We expose THAT file as the SARIF location.
+    - When the entry node is not a SKILL node, or the path is unknown to the
+      scanner-derivable mapping, no location is emitted. Instead we mark
+      ``properties.location_provenance = "omitted"`` so consumers can see
+      the omission is deliberate, not a bug.
     """
+    entry_files = entry_files or {}
     # Serialize to stable, JSON-safe values.
     path_dict = path.to_dict()
     properties = {
@@ -208,12 +220,30 @@ def _attack_path_result(path: AttackPath) -> Dict[str, Any]:
     if path_dict.get("context_components"):
         properties["security_behavior_context"] = path_dict["context_components"]
 
-    return {
+    # --- Location derivation (entry-node SKILL file, never fabricated) ----
+    path_id = path.path_id or path.ensure_path_id()
+    entry_file = entry_files.get(path_id)
+    result: Dict[str, Any] = {
         "ruleId": _attack_type_rule_id(path.attack_type),
         "level": _level(path.risk_severity),
         "message": {"text": path.explanation or path.attack_type.value},
         "properties": properties,
     }
+    if entry_file:
+        result["locations"] = [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": _uri(entry_file)},
+                },
+            }
+        ]
+        properties["location_provenance"] = "entry_node_skill_file"
+    else:
+        # Honest omission: a SARIF consumer that requires at least one location
+        # must know this result deliberately has none, so we mark the reason
+        # explicitly. No physicalLocation is fabricated.
+        properties["location_provenance"] = "omitted"
+    return result
 
 
 def _component_security_scopes(result: ScanResult) -> List[Dict[str, Any]]:
@@ -236,13 +266,16 @@ def _component_risk_evidence(result: ScanResult) -> List[Dict[str, Any]]:
     return list(getattr(result, "component_risk_evidence", []))
 
 
-def _build_attack_path_results(paths: List[AttackPath]) -> List[Dict[str, Any]]:
+def _build_attack_path_results(
+    paths: List[AttackPath],
+    entry_files: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
     """Build the SARIF `results` array from attack paths.
 
     Deterministic: paths are consumed in their existing (path_id-ordered) order
     and emitted as-is, so repeated rendering of the same ScanResult is stable.
     """
-    return [_attack_path_result(p) for p in paths]
+    return [_attack_path_result(p, entry_files) for p in paths]
 
 
 def render_sarif(result: ScanResult) -> str:
@@ -258,7 +291,10 @@ def render_sarif(result: ScanResult) -> str:
             }
         },
         "artifacts": _build_artifacts(result),
-        "results": _build_results(result) + _build_attack_path_results(result.attack_paths),
+        "results": _build_results(result) + _build_attack_path_results(
+            result.attack_paths,
+            getattr(result, "attack_path_entry_files", None),
+        ),
     }
     # Run-level additive component-security-scope projection. Present only when
     # the caller supplied explicit scope data; never fabricated.

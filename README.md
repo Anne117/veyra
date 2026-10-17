@@ -395,7 +395,22 @@ SARIF's `suppressions` array — they are never silently turned into clean
 secrets remain redacted. When a scan produces attack paths, each is additionally
 emitted as a SARIF result (level mapped from its existing risk severity, rule id
 derived from its attack type) with the path's `path_id`, `attack_type`, risk
-fields, evidence, and breakpoints exposed under the result's `properties`. When
+fields, evidence, and breakpoints exposed under the result's `properties`.
+
+**SARIF locations for attack-path results** are derived only from real data:
+when the scanner can resolve the path's entry node to a real scanned SKILL
+file (i.e. the same file that produced the findings behind the path), the
+SARIF result carries one `physicalLocation` whose `artifactLocation.uri`
+points to that file. The provenance reason is recorded explicitly under
+`properties.location_provenance = "entry_node_skill_file"`. When the entry
+node is not a SKILL or no entry-file mapping is available, the result is
+emitted **without** a `locations` array and with
+`properties.location_provenance = "omitted"` — a deliberate, audited
+omission rather than fabricated coordinates. This keeps GitHub Code
+Scanning's `expected at least one location` check satisfiable for every
+attack-path result while preserving the no-fabrication rule.
+
+When
 explicit component context is supplied, the run-level properties also expose
 `component_security_scopes`, `component_path_participation`,
 `component_path_composition`, and `component_risk_evidence` as additive (never
