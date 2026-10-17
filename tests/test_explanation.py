@@ -340,11 +340,39 @@ def test_html_explanation_xss():
 
 
 # S-N. Regression: existing features intact -----------------------------------
+# The visualization legend is the user-visible proof that the contiguous graph
+# block is rendered. We bind this regression check to the renderer output
+# itself ("Contiguous attack path" is the exact string produced by
+# veyra.reporters.html.render_html) and to public app APIs only -- never to a
+# sibling test helper, which would make the test fail under plain `pytest -q`
+# when cwd does not put ``tests/`` on sys.path.
+_GRAPH_LEGEND = "Contiguous attack path"
+
+
+def _minimal_exfil_path():
+    nodes = [
+        "SKILL:payment",
+        "SECRET:.aws/credentials",
+        "DATA:payload",
+        "ENDPOINT:https://example.com",
+    ]
+    edges = [
+        ("SKILL:payment", "SECRET:.aws/credentials", "READS"),
+        ("SECRET:.aws/credentials", "DATA:payload", "FLOWS_TO"),
+        ("DATA:payload", "ENDPOINT:https://example.com", "SENDS_TO"),
+    ]
+    return AttackPath(
+        nodes=nodes,
+        edges=edges,
+        path_id=path_id_of(nodes, edges, []),
+        attack_type=AttackType.SECRET_EXFILTRATION,
+    )
+
+
 def test_graph_visualization_intact():
-    from tests.test_html_report import _exfil_path, GRAPH_LEGEND
-    p = _exfil_path("SECRET")
+    p = _minimal_exfil_path()
     doc = render_html(ScanResult(target="x", attack_paths=[p]))
-    assert GRAPH_LEGEND in doc  # Commit 13 visualization still present
+    assert _GRAPH_LEGEND in doc  # Commit 13 visualization still present
 
 
 def test_provenance_intact():
