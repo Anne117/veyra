@@ -16,6 +16,7 @@ subprocesses so sys.path state from one run cannot mask the other.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -30,11 +31,19 @@ def _collect(cmd):
 
 
 def _pytest_bin():
-    p = subprocess.run(
-        ["bash", "-lc", "command -v pytest || true"],
-        cwd=str(REPO_ROOT), capture_output=True, text=True,
-    )
-    return p.stdout.strip() or None
+    """Resolve the `pytest` console script deterministically.
+
+    The interpreter running this test is authoritative: the console script
+    shipped next to it belongs to the same installation the tests are imported
+    from. An ambient PATH lookup is only a fallback, so `.venv/bin/pytest` and
+    a venv activated on PATH behave identically instead of one of them failing
+    on an environment detail.
+    """
+    exe = Path(sys.executable)
+    for candidate in (exe.with_name("pytest"), exe.with_name("pytest.exe")):
+        if candidate.exists():
+            return str(candidate)
+    return shutil.which("pytest") or None
 
 
 def _collected_ids(out: str):
