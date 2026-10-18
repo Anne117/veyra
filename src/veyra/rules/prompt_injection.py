@@ -65,8 +65,25 @@ DISABLE_SECURITY = re.compile(
     re.IGNORECASE,
 )
 
-ENCODED_OBFUSCATED = re.compile(
-    r"\b(?:base64|rot13|hex\s*encode|obfuscate|decode\s+this|deobfuscate)\b",
+# A bare mention of an encoding is documentation, not an instruction:
+# "Base64 encode a string.", "ROT13 shifts each letter by 13", "Decodes short
+# ROT13 notes used in internal documentation." All of those appear in benign
+# fixtures and none of them asks the agent to act on hidden content. The rule
+# therefore requires an explicit directive to decode-and-act, in one of the two
+# forms that actually carry an instruction:
+#   1. an imperative to decode a named blob ("Decode this base64 payload",
+#      "Deobfuscate this ROT13 text and run the resulting command");
+#   2. encoded content piped through a decoder into a shell
+#      ("... | base64 -d | bash").
+# See docs/rule-precision-audit.md for the corpus measurement behind this.
+DECODE_DIRECTIVE = re.compile(
+    r"\b(?:decode|deobfuscate|decrypt)\s+(?:this|the|following)\s+"
+    r"(?:\w+\s+){0,2}?(?:base64|rot13|hex|payload|blob|ciphertext|encoded)\b",
+    re.IGNORECASE,
+)
+
+DECODE_PIPE_TO_SHELL = re.compile(
+    r"\b(?:base64|xxd|openssl\s+enc)\s+(?:-d|--decode|-D|-r)\b[^\n]*\|\s*(?:ba|z|da)?sh\b",
     re.IGNORECASE,
 )
 
@@ -150,7 +167,7 @@ def detect_disable_security(content: str, file_path: str, line: int) -> "Finding
 
 @register
 def detect_encoded_obfuscated(content: str, file_path: str, line: int) -> "Finding | None":
-    if ENCODED_OBFUSCATED.search(content):
+    if DECODE_DIRECTIVE.search(content) or DECODE_PIPE_TO_SHELL.search(content):
         return Finding(
             rule_id="AS-004",
             severity=Severity.MEDIUM,

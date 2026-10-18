@@ -377,9 +377,9 @@ EXPECTED_CASE_RESULTS = {
     ('v2-obfuscation', 'benign-encoded-data'): DETECTED,
     ('v2-obfuscation', 'benign-rot13-explainer'): DETECTED,
     # --- v2-rot13-nl (E-3a adversarial set) ---
-    # Measured, not aspirational: AS-004/MEDIUM fires on all six fixtures
-    # (triggered by the word "ROT13"), so it carries no signal; the three
-    # attacks are genuinely MISSED and the benign notes are correctly clean.
+    # Measured, not aspirational: after the P-1 precision audit (AS-004 no
+    # longer fires on a bare encoding mention) nothing fires on these six, so
+    # the three attacks are genuinely MISSED and the benign notes are clean.
     ('v2-rot13-nl', 'decoded-delete-prod-tree'): MISSED,
     ('v2-rot13-nl', 'decoded-exfil-private-keys'): MISSED,
     ('v2-rot13-nl', 'decoded-remote-installer-root'): MISSED,

@@ -6,9 +6,10 @@ must decode to a real, concrete dangerous action (not vague prose); each
 benign fixture must decode to harmless text. The expected classifications are
 measurements of the current detector, not targets:
 
-    attacks  -> MISSED      (only AS-004/MEDIUM fires, which is triggered by
-                             the word "ROT13" and fires on every benign file
-                             too, so it cannot count as a partial detection)
+    attacks  -> MISSED      (no rule fires: after the P-1 precision audit
+                             AS-004 no longer raises on a bare mention of
+                             "ROT13", and nothing else confirms the decoded
+                             action — see docs/rule-precision-audit.md)
     benign   -> not HIGH    (correctly clean at the detection threshold)
 
 If a future rule makes an attack DETECTED, this file must be updated
@@ -102,19 +103,20 @@ def test_benign_notes_are_not_high_severity():
         )
 
 
-def test_current_signal_does_not_discriminate():
-    """AS-007 never confirms; the only signal (AS-004/MEDIUM) fires on 6/6.
+def test_no_rule_fires_on_the_family():
+    """No rule fires on either half of the family — the baseline is silence.
 
-    This test documents WHY the attacks are MISSED rather than PARTIAL: a
-    signal shared by every benign fixture cannot be counted as detection.
+    Before the P-1 precision audit AS-004/MEDIUM fired on 6/6 purely because the
+    fixtures mention "ROT13"; that signal was identical on benign and attack
+    notes, so it carried no information. The rule now requires a decode-and-act
+    directive, which these fixtures do not contain. A rule that starts firing
+    here must be justified by confirming the decoded action, not the keyword.
     """
     seen = {}
     for name in sorted(ATTACKS | BENIGN):
         findings = scan_path(str(FIXTURES / name / "SKILL.md")).findings
-        assert not [f for f in findings if f.rule_id == "AS-007"], f"{name}: AS-007 fired"
         seen[name] = {(f.rule_id, f.severity.value) for f in findings}
 
-    assert all(seen.values()), "expected the framing indicator to fire on every fixture"
-    assert all(sig == {("AS-004", "MEDIUM")} for sig in seen.values()), (
-        f"non-discriminating signal changed: {seen}"
+    assert all(sig == set() for sig in seen.values()), (
+        f"a rule started firing on the ROT13 natural-language family: {seen}"
     )
