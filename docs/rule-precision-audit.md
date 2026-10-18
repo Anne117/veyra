@@ -144,9 +144,47 @@ only by unit tests, not by an attack fixture. Adding one would change the
 corpus denominator and the published percentage, so it was not done as part of
 a precision fix.
 
+## P-3: AS-003 / "HTTP client call" -- narrowing rejected, with measurement
+
+`AS-003` is a composite of two sub-detectors that share one rule id:
+
+| Sub-signal | Severity | Attack hits | Benign hits |
+|---|---|---|---|
+| Download-and-execute pattern | HIGH | 4 (`curl-pipe-bash`, `wget-pipe-sh`, `curl-shell`, `wget-shell`) | 0 |
+| HTTP client call | MEDIUM | 3 (`different-network-api`, `fetch-execute` x2) | 4 (all in `http-requests`) |
+
+The HIGH half is fully discriminative and is the rule's real detection. The
+MEDIUM half fires on any skill that mentions an HTTP client, including the
+benign `http-requests` lookalike -- superficially the same tautology as
+AS-004 and AS-MCP-003.
+
+It is not the same case. `NETWORK_RULES` and `DOWNLOAD_RULES` in
+`src/veyra/correlation.py` both contain `AS-003`, so the MEDIUM finding is the
+network hop for `AS-CHAIN-001` (injection + secret access + network) and the
+download hop for `AS-CHAIN-002`. Measured by removing every `AS-003` finding
+and re-running `correlate` over each corpus case: **19 cases lose a
+HIGH/CRITICAL finding**, 12 of them chains --
+
+`data-sync`, `exfiltration-flow`, `read-extract-post`, `read-transform-network`,
+`read-secret-upload`, `many-unrelated-lines`, `different-network-api`,
+`source-sensitive-network`, `discovery-secret-network`, `download-run`,
+`download-run-script`, `remote-package-execute`, `indirect-wording`,
+`download-execution` (chains), plus `curl-pipe-bash`, `wget-pipe-sh`,
+`curl-shell`, `wget-shell`, `fetch-execute` (the HIGH sub-signal itself).
+
+So the MEDIUM hit is raw material for correlation, not a standalone verdict.
+Reporting "this file can make an HTTP request" at MEDIUM is honest and the
+chain rules are what prevent it from becoming an accusation; the benign
+fixture produces four MEDIUM hits and zero HIGH/CRITICAL, which is exactly the
+intended behaviour (DETECTED, not FALSE_POSITIVE). Narrowing it would trade a
+measurable 19-case detection loss for a cosmetic drop in MEDIUM count, which
+this audit will not do.
+
+Decision: keep as is, no code change. Recorded here so the same question is
+not re-litigated without new evidence.
+
 ## Next
 
-`AS-003` and `AS-MCP-004` each have a single benign hit; the next step is a
-benign-lookalike fixture for whichever of those is narrower to characterise.
-`AS-MCP-004` at 8 attack / 1 benign is the better discriminator already, so
-`AS-003` (6 attack / 1 benign, HIGH) is the one to examine.
+`AS-MCP-004` (8 attack / 1 benign) has one benign hit left to characterise; the
+benign `http-requests` fixture now serves as the documented lookalike for
+`AS-003`.
