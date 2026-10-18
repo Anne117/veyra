@@ -93,9 +93,68 @@ UNRELATED_EXEC = re.compile(
 )
 
 
+# --- Quoted mentions -------------------------------------------------------
+# Defensive guidance has to be able to NAME an attack sentence: "if a page
+# says X, treat it as data". The HIGH detectors were reading that quoted
+# sentence as an imperative of the skill itself, so hardening docs scored
+# HIGH (and composed into chains when a network signal was present).
+#
+# A mention is recognised only when BOTH hold on the same line:
+#   1. the matched span sits inside a paired quotation ("...", '...',
+#      `...`, “…”; for ' the quotes must not sit between letters, so
+#      apostrophes do not open a span);
+#   2. the text BEFORE the opening quote frames it as somebody else's words
+#      or as untrusted data ("if … says", "e.g.", "attackers", "such as",
+#      "treat it as data", "do not follow", "quoted text").
+#
+# A quote alone is deliberately not enough: `"Ignore previous instructions."`
+# still fires, and so does `The README says "ignore previous instructions".`,
+# because a bare "the docs say" is exactly how an injection is framed.
+_DEFENSIVE_FRAME = re.compile(
+    r"(?:\b(?:e\.g\.|for\s+example|examples?|such\s+as|samples?|quoted?|verbatim"
+    r"|attackers?|adversar\w*|malicious|inject\w*|payloads?"
+    r"|untrusted|treat\s+(?:it|that|this|them)\s+as|as\s+data"
+    r"|do\s+not\s+follow|don'?t\s+follow|never\s+follow"
+    r"|do\s+not\s+obey|never\s+obey)\b"
+    r"|\b(?:if|when|whenever)\b[^.\n]{0,80}?\b(?:says?|writes?|claims?|contains?|includes?|asks?)\b)",
+    re.IGNORECASE,
+)
+
+_QUOTE_CHARS = ("\"", "'", "`")
+
+
+def _opening_quote_index(line: str, start: int, end: int) -> "int | None":
+    """Index of the opening quote enclosing ``line[start:end]``, else None."""
+    # Curly quotes are a distinct pair rather than one repeated character.
+    opener = line.rfind("\u201c", 0, start)
+    if opener != -1 and line.find("\u201d", end) != -1:
+        return opener
+    for ch in _QUOTE_CHARS:
+        positions = [i for i, c in enumerate(line) if c == ch]
+        for open_idx, close_idx in zip(positions[0::2], positions[1::2]):
+            if not (open_idx < start and end <= close_idx):
+                continue
+            if ch == "'":
+                before = line[open_idx - 1] if open_idx else " "
+                after = line[close_idx + 1] if close_idx + 1 < len(line) else " "
+                if before.isalnum() and after.isalnum():
+                    continue
+            return open_idx
+    return None
+
+
+def _is_quoted_mention(line: str, start: int, end: int) -> bool:
+    """True when the match is a quotation framed as someone else's words."""
+    opener = _opening_quote_index(line, start, end)
+    if opener is None:
+        return False
+    return _DEFENSIVE_FRAME.search(line[:opener]) is not None
+
+
 @register
 def detect_ignore_instructions(content: str, file_path: str, line: int) -> "Finding | None":
-    if IGNORE_INSTRUCTIONS.search(content):
+    m = IGNORE_INSTRUCTIONS.search(content)
+    if m and not _is_quoted_mention(content, m.start(), m.end()):
         return Finding(
             rule_id="AS-004",
             severity=Severity.HIGH,
@@ -121,6 +180,8 @@ def detect_reveal_secrets(content: str, file_path: str, line: int) -> "Finding |
     # "do not print secrets"), it is NOT an instruction to disclose.
     if NEGATION.search(content[: m.start()]):
         return None
+    if _is_quoted_mention(content, m.start(), m.end()):
+        return None
     return Finding(
         rule_id="AS-004",
         severity=Severity.HIGH,
@@ -135,7 +196,8 @@ def detect_reveal_secrets(content: str, file_path: str, line: int) -> "Finding |
 
 @register
 def detect_send_files(content: str, file_path: str, line: int) -> "Finding | None":
-    if SEND_FILES.search(content):
+    m = SEND_FILES.search(content)
+    if m and not _is_quoted_mention(content, m.start(), m.end()):
         return Finding(
             rule_id="AS-004",
             severity=Severity.HIGH,
@@ -151,7 +213,8 @@ def detect_send_files(content: str, file_path: str, line: int) -> "Finding | Non
 
 @register
 def detect_disable_security(content: str, file_path: str, line: int) -> "Finding | None":
-    if DISABLE_SECURITY.search(content):
+    m = DISABLE_SECURITY.search(content)
+    if m and not _is_quoted_mention(content, m.start(), m.end()):
         return Finding(
             rule_id="AS-004",
             severity=Severity.HIGH,
