@@ -68,6 +68,30 @@ REFERENCE_ROOTS = {
 }
 
 
+_MASK_CHARS = set("*…•.-_ ")
+
+
+def _is_mask_placeholder(value: str) -> bool:
+    """True when the captured value is a redaction mask, not a credential.
+
+    Setup docs render keys as ``********`` or ``sk-...****``; a value built only
+    from mask and decoration characters carries no secret material.
+    """
+    if not any(ch in value for ch in "*…"):
+        return False
+    return all(ch in _MASK_CHARS for ch in value)
+
+
+def _followed_by_mask(content: str, end: int) -> bool:
+    """True when the captured value is cut short by a mask (``sk-proj-****``).
+
+    ``GENERIC_KEY`` stops at the first character outside the key charset, so a
+    masked example yields only the prefix of a key-looking token. A real secret
+    is never immediately followed by asterisks, so this is a mask, not a key.
+    """
+    return end < len(content) and content[end] in "*…"
+
+
 def _is_runtime_reference(value: str) -> bool:
     """True when the captured value names a lookup, not a hardcoded secret."""
     root = value.split(".", 1)[0].lower()
@@ -181,6 +205,8 @@ def detect_generic_key(content: str, file_path: str, line: int) -> "Finding | No
     name, value = m.group(1), m.group(2)
     if value.lower() in PLACEHOLDER_VALUES:
         return None
+    if _is_mask_placeholder(value) or _followed_by_mask(content, m.end(2)):
+        return None
     if _is_runtime_reference(value):
         return None
     return Finding(
@@ -217,6 +243,8 @@ def detect_password(content: str, file_path: str, line: int) -> "Finding | None"
     if not m:
         return None
     if m.group(2).lower() in PLACEHOLDER_VALUES:
+        return None
+    if _is_mask_placeholder(m.group(2)):
         return None
     return Finding(
         rule_id="AS-001",

@@ -367,3 +367,49 @@ Also unchanged from round 5 and still open: an OpenAI-style placeholder key
 (`***` in a setup doc) at HIGH, and the AWS documentation example key id
 `AKIA…EXAMPLE` at CRITICAL (a test asserts that detection, so reversing it is
 the owner's call).
+
+## Round 7 — masked credential examples (AS-001 HIGH/CRITICAL)
+
+Last open shape from the round-5 battery: a setup doc that renders a key as a
+mask (`OPENAI_API_KEY: "sk-proj-********"`) produced a HIGH "hardcoded secret".
+Measured on a fresh battery of seven realistic config lines:
+
+| Line | Before | After |
+|---|---|---|
+| `OPENAI_API_KEY: "sk-proj-********"` | HIGH | no finding |
+| `OPENAI_API_KEY="sk-proj-********abcdef"` | HIGH | no finding |
+| `API_KEY = "abcdefghijklmnop*"` | HIGH | no finding |
+| `password = "********"` | HIGH | no finding |
+| `API_KEY = "supersecretvalue123"` | HIGH | HIGH (unchanged) |
+| `TOKEN = "ghp_1234567890abcdefghij"` | CRITICAL + HIGH | unchanged |
+| `API_KEY = "sk-proj-"` (bare prefix, no mask) | HIGH | HIGH (unchanged) |
+
+The mechanism was a charset limit, not a weak pattern: `GENERIC_KEY` captures
+`[A-Za-z0-9_\-.]{8,}`, so `sk-proj-********` yielded the eight-character prefix
+`sk-proj-` as if it were the value, and `PASSWORD` captured the asterisks
+themselves. Both were then reported as credentials.
+
+Fix in `src/veyra/rules/secrets.py`: a captured value is a mask, not a secret,
+when (a) the character immediately after it is `*` or `…` (the token continues
+into a redaction), or (b) it consists only of mask/decoration characters
+(`*`, `…`, `•`, `.`, `-`, `_`, space) and contains at least one asterisk.
+Provider-pattern rules (`sk-`, `ghp_`, `AKIA…`) are untouched and run before the
+generic rule, so a real key on a masked-looking line still fires CRITICAL.
+
+Delta: battery 8 findings → 4 (all four removed were masks); a masked key next
+to an HTTP client call drops from score 35/MEDIUM to 10/LOW (only the MEDIUM
+`AS-003` network note remains — the masked key was never a chain hop).
+Corpus unchanged: 105 / 98 DETECTED / 4 PARTIAL / 3 MISSED / 0 FP (93.3%);
+suite 1641 → 1644 tests.
+
+Honest limits, recorded rather than papered over:
+
+- A truncated prefix without a mask (`API_KEY = "sk-proj-"`) still fires HIGH.
+  Suppressing it would require treating "short and ends with a separator" as a
+  placeholder, which is a guess about the author's intent, not evidence.
+- A value that is a real secret followed immediately by `*` is now read as a
+  mask. Keys do not contain `*`, so this costs a MEDIUM/HIGH on a shape that
+  does not occur, while the provider-pattern rules still cover the real ones.
+- Still open and deliberately not touched: the AWS documentation example key id
+  `AKIA…EXAMPLE` at CRITICAL (a test asserts that detection, so reversing it is
+  the owner's call, as recorded in round 5).

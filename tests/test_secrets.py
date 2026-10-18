@@ -107,3 +107,27 @@ def test_literal_value_after_reference_exemption_still_flagged():
         f = detect_generic_key(line, "x.py", 1)
         assert f is not None, line
         assert f.severity.value == "HIGH"
+
+
+def test_masked_key_examples_are_not_hardcoded_secrets():
+    # Setup docs render credentials as masks; there is no secret inside `****`.
+    for line in (
+        'OPENAI_API_KEY: "sk-proj-********"',
+        'OPENAI_API_KEY="sk-proj-********abcdef"',
+        'API_KEY = "abcdefghijklmnop*"',
+    ):
+        assert detect_generic_key(line, "setup.md", 1) is None, line
+
+
+def test_mask_exemption_does_not_hide_real_keys():
+    # The mask exemption must not weaken provider-pattern detection.
+    f = detect_openai_key('key = "sk-proj-abcdefghijklmnop1234"', "x.py", 1)
+    assert f is not None and f.severity.value == "CRITICAL"
+    f = detect_generic_key('API_KEY = "sk-proj-abcdefghijklmnop1234"', "x.py", 1)
+    assert f is not None and f.severity.value == "HIGH"
+    assert detect_generic_key("TOKEN=ghp_1234567890abcdefghij", "x.py", 1) is not None
+
+
+def test_masked_password_is_not_a_hardcoded_secret():
+    assert detect_password('password = "********"', "x.py", 1) is None
+    assert detect_password('password = "hunter2secret"', "x.py", 1) is not None
