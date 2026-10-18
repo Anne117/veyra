@@ -256,7 +256,7 @@ def test_benign_clean_detected():
 # intentionally PARTIAL or MISSED, that expectation is preserved here unless
 # there is a deliberate, reviewed detection improvement.
 
-EXPECTED_TOTAL = 96
+EXPECTED_TOTAL = 98
 EXPECTED_FALSE_POSITIVES = 0
 # Updated 2026-10-18 (Phase 1, Q-1):
 #   AS-MCP-007 was token-precise (per-arg) and escalated to HIGH for
@@ -273,7 +273,7 @@ EXPECTED_FALSE_POSITIVES = 0
 #     - v2/mcp-security/uvx-exec   (command=uvx, args=["some-package"])
 #     - v2/mcp-security/broad-fs   (already DETECTED but bare "server" arg
 #                                   also triggers the new HIGH escalation)
-EXPECTED_DETECTED = 92
+EXPECTED_DETECTED = 94
 EXPECTED_PARTIALLY_DETECTED = 4
 EXPECTED_MISSED = 0
 
@@ -394,6 +394,9 @@ EXPECTED_CASE_RESULTS = {
     ('v2-sensitive-path', 'private-key-read'): DETECTED,
     ('v2-sensitive-path', 'benign-docs'): DETECTED,
     ('v2-sensitive-path', 'benign-normal-read'): DETECTED,
+    # --- v2 sensitive-binary-action (Q-5) ---
+    ('v2-sensitive-binary-action', 'key-exec'): DETECTED,
+    ('v2-sensitive-binary-action', 'benign-key-doc'): DETECTED,
 
 }
 

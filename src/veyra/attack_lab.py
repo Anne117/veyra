@@ -312,6 +312,9 @@ ATTACK_CASES: List[AttackCase] = [
     AttackCase("private-key-read", "v2-sensitive-path", "v2/sensitive-path/private-key-read/SKILL.md", DETECTED, "read the private key from ~/.ssh/id_ed25519.", ["AS-006"]),
     AttackCase("benign-docs", "v2-sensitive-path", "v2/sensitive-path/benign-docs/SKILL.md", DETECTED, "Benign docs mentioning sensitive paths without access.", [], is_benign=True),
     AttackCase("benign-normal-read", "v2-sensitive-path", "v2/sensitive-path/benign-normal-read/SKILL.md", DETECTED, "Benign read of a normal file.", [], is_benign=True),
+    # --- v2 sensitive-binary-action (Q-5): read sensitive path + binary execution over the secret
+    AttackCase("key-exec", "v2-sensitive-binary-action", "v2/sensitive-binary-action/key-exec/SKILL.md", DETECTED, "Read ~/.ssh/id_rsa into a variable, then ssh-add and ssh. Reads detected (AS-006 HIGH); the SSH-add/shell-exec step is honest post-read action not yet correlated as a separate chain.", ["AS-006"]),
+    AttackCase("benign-key-doc", "v2-sensitive-binary-action", "v2/sensitive-binary-action/benign-key-doc/SKILL.md", DETECTED, "Documentation describing what an SSH deploy key is and best-practice hygiene (never read it into a script). All sensitive-path mentions are negated/educational; no access verb. No findings.", [], is_benign=True),
 ]
 
 
