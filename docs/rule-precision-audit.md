@@ -188,3 +188,67 @@ not re-litigated without new evidence.
 `AS-MCP-004` (8 attack / 1 benign) has one benign hit left to characterise; the
 benign `http-requests` fixture now serves as the documented lookalike for
 `AS-003`.
+
+## P-4: AS-MCP-004 / "Dynamic package execution" -- one true-but-undiscriminating half, one real false HIGH
+
+Measured over the same corpus (8 attack hits, 1 benign hit), split by severity:
+
+| Half | Severity | Attack hits | Benign hits | Evidence |
+|---|---|---|---|---|
+| Bare unpinned package | HIGH | 6 | 0 | `npx`/`uvx` + `some-package`, `some-server`, `server` |
+| Runner with no package token | MEDIUM | 2 | 1 | `Dynamic runner: npx` only |
+
+The MEDIUM half has zero discrimination inside the `filesystem-access` family:
+`benign/.mcp.json` and `broad-fs/.mcp.json` are byte-identical except for path
+arguments (`/tmp/project` vs `/`,`/home`,`/etc`), so the rule fires on both and
+their difference is carried by `AS-MCP-007` (filesystem scope), not by the
+runner. `v2-mcp-security/dynamic-package` is the same command line again
+(`npx -y @modelcontextprotocol/server-filesystem`) and its PARTIALLY_DETECTED
+verdict rests on this single MEDIUM finding.
+
+Decision: keep the MEDIUM form, no narrowing. Measured justification: suppress
+every MEDIUM `AS-MCP-004` finding, re-run `correlate` over each corpus case --
+one verdict changes (`dynamic-package`: PARTIALLY_DETECTED -> MISSED), no case
+loses a HIGH/CRITICAL and no chain is lost *on the corpus*. The reason not to
+take that trade is structural, not cosmetic: `AS-MCP-004` is the only input to
+`MCP_DYNAMIC_EXEC_RULES`, i.e. the dynamic-execution hop of `AS-CHAIN-003`
+(remote MCP endpoint + dynamic execution). Dropping the MEDIUM form silently
+disables that chain for every future scoped/pinned runner config, including
+ones outside the corpus. The MEDIUM text is also factually true -- `npx -y
+@modelcontextprotocol/server-filesystem` does fetch and execute a package from
+a registry at runtime; it asserts the property, not malice, and never reaches
+HIGH/CRITICAL alone.
+
+What the audit did find, and fix, is a genuine false HIGH in the escalation
+path: `_is_bare_unpinned_package` treated package-manager *verbs* and *local
+files* as registry package references.
+
+| Config | Before | After |
+|---|---|---|
+| `npm run start` | HIGH, "bare unpinned package(s): run, start" | MEDIUM |
+| `npm install` | HIGH, "…: install" | MEDIUM |
+| `pip install -r requirements.txt` | HIGH, "…: install, requirements.txt" | MEDIUM |
+| `uv run build.py` | HIGH, "…: run, build.py" | MEDIUM |
+| `npm install some-package` | HIGH, "…: some-package" | HIGH (unchanged) |
+| `pnpm dlx some-pkg` | HIGH, "…: dlx, some-pkg" | HIGH, "…: some-pkg" |
+| `npx -y some-package` | HIGH | HIGH (unchanged) |
+
+`npm run start` is the shape a normal repo-local MCP server uses; at HIGH it
+would have been scored as a detection on a benign config and would have made
+`AS-CHAIN-003` fire on any remote endpoint. Fix: a runner's leading verb is not
+a package; for script verbs (`run`, `start`, `test`, `build`, `serve`, …) the
+next token is a script name, not a package; tokens naming a file (`*.py`,
+`*.js`, `*.txt`, `*.json`, …) are local references. Flag tokens are still
+rejected by the existing prefix check, and packages after `install`/`dlx`/
+`exec` are still evaluated, so `npm install some-package` and `pnpm dlx
+some-pkg` keep their HIGH with the package named in the evidence.
+
+Corpus after the change: 8 attack hits / 1 benign hit, classification
+unchanged at 98 DETECTED / 4 PARTIAL / 3 MISSED / 0 FP (93.3%). Covered by five
+unit tests (verb-only, `-r` file, `uv run *.py`, plus the two keep-detection
+cases); no fixture was added, so the corpus denominator is untouched.
+
+Known limit, recorded rather than papered over: the verb set is a vocabulary,
+not a per-runner grammar, so a package literally named like a verb (e.g.
+`npx install`) is not escalated. That is a rarer shape than `npm run start` and
+costs one MEDIUM instead of a false HIGH.
