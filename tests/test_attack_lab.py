@@ -256,7 +256,7 @@ def test_benign_clean_detected():
 # intentionally PARTIAL or MISSED, that expectation is preserved here unless
 # there is a deliberate, reviewed detection improvement.
 
-EXPECTED_TOTAL = 99
+EXPECTED_TOTAL = 105
 EXPECTED_FALSE_POSITIVES = 0
 # Updated 2026-10-18 (Phase 1, Q-1):
 #   AS-MCP-007 was token-precise (per-arg) and escalated to HIGH for
@@ -273,9 +273,16 @@ EXPECTED_FALSE_POSITIVES = 0
 #     - v2/mcp-security/uvx-exec   (command=uvx, args=["some-package"])
 #     - v2/mcp-security/broad-fs   (already DETECTED but bare "server" arg
 #                                   also triggers the new HIGH escalation)
-EXPECTED_DETECTED = 95
+# Updated 2026-10-18 (Phase 1, E-3a):
+#   Added the ROT13 natural-language adversarial set (6 cases, category
+#   v2-rot13-nl): 3 attacks + 3 benign. No rule was touched, so the measured
+#   result is the honest baseline: all 3 attacks are MISSED, all 3 benign
+#   stay non-HIGH (DETECTED = correctly clean). Detection percentage drops
+#   96.0% -> 93.3% because the new cases are harder, not because anything
+#   regressed.
+EXPECTED_DETECTED = 98
 EXPECTED_PARTIALLY_DETECTED = 4
-EXPECTED_MISSED = 0
+EXPECTED_MISSED = 3
 
 # Per-case expected classifications. Keyed by (category, name).
 # These are the current verified classifications; update deliberately when a
@@ -369,6 +376,16 @@ EXPECTED_CASE_RESULTS = {
     ('v2-obfuscation', 'encoded-url'): DETECTED,
     ('v2-obfuscation', 'benign-encoded-data'): DETECTED,
     ('v2-obfuscation', 'benign-rot13-explainer'): DETECTED,
+    # --- v2-rot13-nl (E-3a adversarial set) ---
+    # Measured, not aspirational: AS-004/MEDIUM fires on all six fixtures
+    # (triggered by the word "ROT13"), so it carries no signal; the three
+    # attacks are genuinely MISSED and the benign notes are correctly clean.
+    ('v2-rot13-nl', 'decoded-delete-prod-tree'): MISSED,
+    ('v2-rot13-nl', 'decoded-exfil-private-keys'): MISSED,
+    ('v2-rot13-nl', 'decoded-remote-installer-root'): MISSED,
+    ('v2-rot13-nl', 'decoded-cipher-primer'): DETECTED,
+    ('v2-rot13-nl', 'decoded-release-note'): DETECTED,
+    ('v2-rot13-nl', 'decoded-meeting-note'): DETECTED,
     # --- v2-multi-stage ---
     ('v2-multi-stage', 'source-sensitive-network'): DETECTED,
     ('v2-multi-stage', 'download-execution'): DETECTED,

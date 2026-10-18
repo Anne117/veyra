@@ -287,6 +287,27 @@ ATTACK_CASES: List[AttackCase] = [
     AttackCase("encoded-url", "v2-obfuscation", "v2/obfuscation/encoded-url/SKILL.md", DETECTED, "Encoded URL to fetch.", ["AS-004"]),
     AttackCase("benign-encoded-data", "v2-obfuscation", "v2/obfuscation/benign-encoded-data/SKILL.md", DETECTED, "Benign encoding helper that does not execute.", [], is_benign=True),
     AttackCase("benign-rot13-explainer", "v2-obfuscation", "v2/obfuscation/benign-rot13-explainer/SKILL.md", DETECTED, "Benign educational ROT13 explainer that describes the cipher without doing anything dangerous.", [], is_benign=True),
+    # --- v2 ROT13 natural-language (E-3a adversarial set) ---
+    # Natural-language instructions (not shell syntax) hidden behind ROT13.
+    #
+    # Measured baseline (2026-10-18, E-3a): all three attacks are MISSED.
+    # The only finding on any of the six fixtures is AS-004/MEDIUM
+    # ("encoded/obfuscated content detected"), raised by the literal word
+    # "ROT13" in the framing. It fires on 3/3 attacks AND 3/3 benign notes,
+    # so it has zero discriminating power here; counting it as a partial
+    # detection would inflate the metric. AS-007 cannot close the gap:
+    #   - ROT13 branch requires a >=16-char single token, while these
+    #     payloads are sentences (spaces break the token);
+    #   - it only recognises shell-command syntax (rm -rf, curl|sh, ...),
+    #     not natural-language dangerous actions.
+    # These labels are honest measurements, not targets. Do not upgrade them
+    # without a rule change backed by this fixture set.
+    AttackCase("decoded-delete-prod-tree", "v2-rot13-nl", "v2/rot13-nl/decoded-delete-prod-tree/SKILL.md", MISSED, "ROT13 hides a natural-language instruction to delete production files and wipe backups.", ["AS-007"]),
+    AttackCase("decoded-exfil-private-keys", "v2-rot13-nl", "v2/rot13-nl/decoded-exfil-private-keys/SKILL.md", MISSED, "ROT13 hides a natural-language instruction to upload private SSH keys to an external endpoint.", ["AS-007"]),
+    AttackCase("decoded-remote-installer-root", "v2-rot13-nl", "v2/rot13-nl/decoded-remote-installer-root/SKILL.md", MISSED, "ROT13 hides a natural-language instruction to download and run a remote installer as root.", ["AS-007"]),
+    AttackCase("decoded-cipher-primer", "v2-rot13-nl", "v2/rot13-nl/decoded-cipher-primer/SKILL.md", DETECTED, "Benign ROT13 note explaining the cipher; no dangerous decoded action.", [], is_benign=True),
+    AttackCase("decoded-release-note", "v2-rot13-nl", "v2/rot13-nl/decoded-release-note/SKILL.md", DETECTED, "Benign ROT13 release note about typos and spelling.", [], is_benign=True),
+    AttackCase("decoded-meeting-note", "v2-rot13-nl", "v2/rot13-nl/decoded-meeting-note/SKILL.md", DETECTED, "Benign ROT13 note about a moved team meeting.", [], is_benign=True),
     # --- v2 multi-stage ---
     AttackCase("source-sensitive-network", "v2-multi-stage", "v2/multi-stage/source-sensitive-network/SKILL.md", DETECTED, "source -> sensitive -> network.", ["AS-CHAIN-001"]),
     AttackCase("download-execution", "v2-multi-stage", "v2/multi-stage/download-execution/SKILL.md", DETECTED, "download -> execution.", ["AS-CHAIN-002"]),
