@@ -23,6 +23,11 @@ try:
 except Exception:  # pragma: no cover
     _HAS_YAML = False
 
+# Rule emitted when a YAML MCP config could not be parsed because PyYAML is
+# not installed. Severity INFO: this is a coverage gap, not a finding about
+# the scanned code itself.
+_YAML_DEP_RULE_ID = "AS-MCP-WARN-YAML-DEP-MISSING"
+
 # --- MCP config file identification ----------------------------------------
 
 # Files that are always treated as MCP config.
@@ -78,7 +83,13 @@ def _is_mcp_config(path: str) -> bool:
 
 
 def _parse(text: str, path: str) -> Optional[Dict[str, Any]]:
-    """Parse JSON or YAML into a dict. Returns None if unparseable."""
+    """Parse JSON or YAML into a dict. Returns None if unparseable.
+
+    Note: when a YAML MCP file is encountered but PyYAML is unavailable, this
+    function returns None and the caller is expected to surface a warning
+    finding (see _YAML_DEP_RULE_ID) so the report honestly indicates the gap
+    instead of silently dropping the file.
+    """
     name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     if ext == "json" or name in {".mcp.json", "mcp.json", "mcp_servers.json"}:
@@ -94,6 +105,13 @@ def _parse(text: str, path: str) -> Optional[Dict[str, Any]]:
         except Exception:
             return None
     return None
+
+
+def _is_yaml_mcp_path(path: str) -> bool:
+    """True if the file path looks like a YAML MCP config."""
+    name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return ext in {"yaml", "yml"} or name in MCP_FILENAMES and name.endswith((".yaml", ".yml"))
 
 
 def _find_server_map(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -153,6 +171,32 @@ def scan_mcp_config(text: str, file_path: str) -> List[Finding]:
     """Analyze an MCP configuration file for security issues."""
     if not _is_mcp_config(file_path):
         return []
+
+    # Honest-about-uncertainty: if this is a YAML MCP file but PyYAML is not
+    # available, do not silently drop it. Emit an explicit low-severity
+    # finding so the user can see which MCP configs were NOT analyzed.
+    if _is_yaml_mcp_path(file_path) and not _HAS_YAML:
+        return [
+            Finding(
+                rule_id=_YAML_DEP_RULE_ID,
+                severity=Severity.INFO,
+                title="YAML MCP config not analyzed: PyYAML not installed",
+                description=(
+                    "This file looks like a YAML MCP configuration, but the "
+                    "PyYAML runtime dependency is not available in this "
+                    "environment. The file was NOT parsed and any MCP server "
+                    "definitions it contains were NOT checked. Install "
+                    "PyYAML (>=6.0) to enable full YAML MCP analysis."
+                ),
+                file=file_path,
+                line=None,
+                evidence=file_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1],
+                remediation=(
+                    "pip install PyYAML>=6.0  (or  pip install veyra  to pick "
+                    "up the declared runtime dependency)."
+                ),
+            )
+        ]
 
     data = _parse(text, file_path)
     if data is None:

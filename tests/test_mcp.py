@@ -131,3 +131,76 @@ def test_finding_fields_present():
         assert f.file
         assert f.evidence
         assert f.remediation
+
+
+# --- YAML dependency coverage (WU-3) -------------------------------------
+
+def test_yaml_mcp_config_emits_warning_when_pyyaml_missing(monkeypatch):
+    """When a YAML MCP file is scanned but PyYAML is unavailable, the rule
+    must NOT silently return []. It must emit a low-severity finding that
+    names the missing dependency, so the user can act on the coverage gap.
+    """
+    import veyra.rules.mcp as mcp_mod
+
+    # Simulate the runtime where PyYAML is not importable, without touching
+    # the real interpreter importlib state for other tests.
+    monkeypatch.setattr(mcp_mod, "_HAS_YAML", False)
+    monkeypatch.setattr(mcp_mod, "yaml", None)
+
+    yaml_text = (
+        "mcpServers:\n"
+        "  remote:\n"
+        "    url: https://example.invalid/mcp\n"
+    )
+    findings = mcp_mod.scan_mcp_config(yaml_text, "mcp_servers.yaml")
+    assert findings, "YAML MCP file was silently dropped — coverage gap hidden"
+    warn = [f for f in findings if f.rule_id == "AS-MCP-WARN-YAML-DEP-MISSING"]
+    assert len(warn) == 1, f"expected exactly one warning finding, got {warn}"
+    assert warn[0].severity.value == "INFO"
+    assert "PyYAML" in warn[0].description
+    assert warn[0].file == "mcp_servers.yaml"
+    assert warn[0].remediation
+
+
+def test_yaml_mcp_config_analyzed_when_pyyaml_available():
+    """Positive case: with PyYAML installed (the declared runtime dep), the
+    YAML MCP config is parsed and produces concrete findings, not just a
+    warning.
+    """
+    import veyra.rules.mcp as mcp_mod
+    assert mcp_mod._HAS_YAML, (
+        "PyYAML must be available — it is declared as a runtime dependency "
+        "in pyproject.toml"
+    )
+    yaml_text = (
+        "mcpServers:\n"
+        "  remote:\n"
+        "    url: https://example.invalid/mcp\n"
+    )
+    findings = mcp_mod.scan_mcp_config(yaml_text, "mcp_servers.yaml")
+    assert any(f.rule_id == "AS-MCP-001" for f in findings), (
+        f"expected AS-MCP-001 for remote URL, got: "
+        f"{[(f.rule_id, f.severity.value) for f in findings]}"
+    )
+    assert not any(
+        f.rule_id == "AS-MCP-WARN-YAML-DEP-MISSING" for f in findings
+    ), "no warning expected when PyYAML is available"
+
+
+def test_non_yaml_mcp_file_unaffected_by_yaml_dep():
+    """Regression: a JSON MCP file must never trigger the YAML-missing
+    warning, even when PyYAML is hypothetically unavailable.
+    """
+    import veyra.rules.mcp as mcp_mod
+    monkeypatch = __import__("pytest").MonkeyPatch()
+    try:
+        monkeypatch.setattr(mcp_mod, "_HAS_YAML", False)
+        monkeypatch.setattr(mcp_mod, "yaml", None)
+        text = json.dumps({"mcpServers": {"local": {"command": "python"}}})
+        findings = mcp_mod.scan_mcp_config(text, ".mcp.json")
+        assert not any(
+            f.rule_id == "AS-MCP-WARN-YAML-DEP-MISSING" for f in findings
+        ), f"JSON file wrongly triggered YAML warning: {findings}"
+        assert any(f.rule_id == "AS-MCP-003" for f in findings)
+    finally:
+        monkeypatch.undo()
