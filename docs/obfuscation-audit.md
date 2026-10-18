@@ -180,3 +180,66 @@ missed, 0 FP, 90.5%**. `encoded-shell-command` and `encoded-url` are DETECTED,
 plus `base64-exec` and `base64-instruction` improved from PARTIAL to DETECTED.
 `rot13-exec`/`rot13-instruction` remain PARTIAL (ROT13 payloads without an
 explicit indicator are not decoded). All 10 benign-lookalikes remain clean.
+
+## Measured: ROT13 natural-language instructions (E-3a / E-3b)
+
+`tests/fixtures/attacks/v2/rot13-nl/` holds six fixtures added specifically
+to measure this boundary: three attacks whose decoded text is a concrete
+dangerous action in plain English, three benign notes. Locked by
+`tests/test_rot13_nl_adversarial.py`; no rule was changed to produce these
+numbers.
+
+| Fixture | Decoded payload | Result |
+| --- | --- | --- |
+| `decoded-delete-prod-tree` | delete every file under `/srv/production`, wipe DB backups | **MISSED** |
+| `decoded-exfil-private-keys` | send private SSH keys to `https://collect.example.net/upload` | **MISSED** |
+| `decoded-remote-installer-root` | download `https://cdn.example.org/setup.sh`, run it as root | **MISSED** |
+| `decoded-cipher-primer` | explanation of the ROT13 cipher | clean (no HIGH) |
+| `decoded-release-note` | release note about typos and spelling | clean (no HIGH) |
+| `decoded-meeting-note` | note about a moved team meeting | clean (no HIGH) |
+
+Corpus after the addition: 105 cases — 98 DETECTED, 4 PARTIALLY_DETECTED,
+3 MISSED, 0 false positives (93.3%). The 96.0% → 93.3% movement is the cost
+of a harder set, not a regression.
+
+The three attacks are labelled MISSED rather than PARTIALLY_DETECTED on
+purpose. AS-004/MEDIUM fires on **all six** fixtures because the framing says
+"ROT13"; a signal that fires identically on benign and malicious input has no
+discriminating power, so counting it as detection would inflate the metric.
+`test_current_signal_does_not_discriminate` pins that fact.
+
+### Two mechanical gaps in AS-007's ROT13 branch
+
+1. **Tokenisation.** The branch iterates `[A-Za-z0-9+/]{16,}` tokens. A ROT13
+   sentence is separated by spaces, so no token ever contains more than one
+   word; the payload never reaches the decoder whole.
+2. **Vocabulary.** Even after decoding, `DANGEROUS_COMMAND` matches shell
+   syntax only. Natural-language dangerous actions never match.
+
+Gap (1) is deterministic and, by itself, adds no FP surface. Gap (2) is where
+the risk lives — it is the same problem recorded for
+`rot13-exec`/`rot13-instruction`: separating an instruction from a
+_description_ of the same action in English is not a regex-shaped problem.
+
+### Decision (E-3b): do not ship a rule
+
+No detection rule is added for this gap. The measured set is 3 attacks and
+3 benign notes — enough to expose the gap honestly, not enough to establish
+precision. Any rule written against it would be a list of imperative verbs
+plus sensitive nouns, evaluated against exactly three negatives; it would
+turn the corpus greener while saying nothing about real false-positive
+behaviour, and a single rephrasing would bypass it. Under this project's
+rules (`UNKNOWN` over unconfirmed, no LLM in the canonical path, FP-gated
+severity), the honest output for a decoded instruction whose action is stated
+in prose is "not confirmed".
+
+This decision should be revisited when, and only when:
+
+- the attack set grows to a size where a rule can be measured rather than
+  fitted (target: ≥15 distinct phrasings per side, including security
+  documentation that describes deletion/exfiltration without instructing it);
+- full-sentence ROT13 decoding (gap 1) is implemented and shown to raise no
+  findings by itself; and
+- the rule's severity can be justified without broadening `DANGEROUS_COMMAND`
+  to ordinary English verbs.
+

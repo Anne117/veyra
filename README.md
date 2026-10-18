@@ -784,6 +784,13 @@ derived from the score:
   tool schemas are not fully analyzed.
 - **Obfuscation decoding covers only base64/ROT13** with execution/fetch
   context; arbitrary encodings are not decoded.
+- **ROT13-encoded natural-language instructions are not confirmed** — 3/3
+  fixtures in the `v2-rot13-nl` attack set are MISSED. Two independent,
+  mechanical reasons: AS-007's ROT13 branch only decodes single tokens of
+  ≥16 characters (a sentence is split by spaces), and after decoding it only
+  recognises shell syntax (`rm -rf`, `curl | sh`), not natural-language
+  actions ("delete every file under …", "send the keys to …"). The decision
+  and the measured base are recorded in `docs/obfuscation-audit.md`.
 
 ## 🗺️ Roadmap
 
