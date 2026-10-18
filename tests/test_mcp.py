@@ -455,3 +455,105 @@ def test_dynamic_runner_only_flags_stays_medium():
         f"flags-only dynamic runner call must stay MEDIUM, got "
         f"{dyn[0].severity.value}"
     )
+
+
+def test_runner_script_verb_is_not_a_package():
+    """``npm run start``: neither the verb nor the script name is a registry
+    package, so AS-MCP-004 must not claim a "bare unpinned package" and must
+    stay MEDIUM (previously HIGH with "run, start" as the claimed packages)."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "npm-script": {"command": "npm", "args": ["run", "start"]},
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/npm-script/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "MEDIUM", (
+        f"npm run start must stay MEDIUM, got {dyn[0].severity.value}: "
+        f"{dyn[0].evidence}"
+    )
+    assert "unpinned package" not in (dyn[0].evidence or "")
+
+
+def test_runner_install_verb_without_package_stays_medium():
+    """``pip install -r requirements.txt`` installs from a file, not a bare
+    registry package: the verb and the ``.txt`` argument are not packages."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "pip-req": {
+                    "command": "pip",
+                    "args": ["install", "-r", "requirements.txt"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/pip-req/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "MEDIUM", (
+        f"pip install -r requirements.txt must stay MEDIUM, got "
+        f"{dyn[0].severity.value}: {dyn[0].evidence}"
+    )
+
+
+def test_runner_run_verb_with_local_script_stays_medium():
+    """``uv run build.py`` executes a local script; the verb and the file are
+    not package references."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "uv-run": {"command": "uv", "args": ["run", "build.py"]},
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/uv-run/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "MEDIUM", (
+        f"uv run build.py must stay MEDIUM, got {dyn[0].severity.value}"
+    )
+
+
+def test_runner_dlx_verb_keeps_package_detection():
+    """Verb skipping must not lose the package itself: ``pnpm dlx some-pkg``
+    still escalates to HIGH and names the package."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "pnpm-dlx": {"command": "pnpm", "args": ["dlx", "some-pkg"]},
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/pnpm-dlx/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "HIGH", (
+        f"pnpm dlx some-pkg must be HIGH, got {dyn[0].severity.value}"
+    )
+    assert "some-pkg" in (dyn[0].evidence or "")
+
+
+def test_runner_install_verb_keeps_named_package_detection():
+    """``npm install some-package`` still names a bare unpinned package: the
+    verb is skipped, the package after it is not."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "npm-install": {
+                    "command": "npm",
+                    "args": ["install", "some-package"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/npm-install/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "HIGH", (
+        f"npm install some-package must be HIGH, got {dyn[0].severity.value}"
+    )
+    assert "some-package" in (dyn[0].evidence or "")

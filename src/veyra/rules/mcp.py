@@ -56,6 +56,28 @@ DYNAMIC_RUNNERS = re.compile(
 _BARE_UNPINNED_PKG = re.compile(r"^[a-zA-Z][a-zA-Z0-9_\-\.]*$")
 _VERSION_PIN = re.compile(r"(?:@\d+\.\d+|==\d)")
 
+# Package-manager invocation grammar. The token right after the runner is a
+# verb (``npm run``, ``pip install``, ``pnpm dlx``), never a package name; for
+# the script-running verbs the following token is a script name from
+# package.json, also not a package. Only the positional tokens after that can
+# be registry package references.
+_RUNNER_SCRIPT_VERBS = {
+    "run", "run-script", "start", "test", "build", "serve", "stop", "restart",
+}
+_RUNNER_VERBS = _RUNNER_SCRIPT_VERBS | {
+    "exec", "x", "dlx", "create", "init", "install", "i", "ci", "add",
+    "remove", "rm", "uninstall", "update", "upgrade", "link", "publish",
+    "list", "ls", "show", "info", "view", "outdated", "audit", "why",
+    "doctor", "pack", "prune", "cache", "workspace",
+}
+# A token naming a file is a script/path reference, not a registry package:
+# ``pip install -r requirements.txt``, ``uv run build.py``, ``npx server.js``.
+_LOCAL_FILE_TOKEN = re.compile(
+    r"\.(?:py|js|mjs|cjs|ts|tsx|jsx|sh|bash|rb|pl|ps1|bat|cmd|json|toml|"
+    r"ya?ml|txt|lock|cfg|ini|md)$",
+    re.IGNORECASE,
+)
+
 
 # AS-MCP-003 precision. Every stdio MCP server is started by *some* command
 # (``npx ...``, ``python -m ...``), so "a command exists" describes the
@@ -116,7 +138,26 @@ def _is_bare_unpinned_package(token):
         return False
     if _VERSION_PIN.search(token):
         return False
+    if _LOCAL_FILE_TOKEN.search(token):
+        return False
     return bool(_BARE_UNPINNED_PKG.match(token))
+
+
+def _package_candidate_tokens(args):
+    """Positional args of a runner that could be registry package references.
+
+    Skips the runner verb (``npm run``, ``pip install``, ``pnpm dlx``) and, for
+    script-running verbs, the script name (``npm run start``) -- neither is a
+    package. Flags stay in the list but are rejected by
+    :func:`_is_bare_unpinned_package`.
+    """
+    tokens = [str(a) for a in (args or []) if isinstance(a, str)]
+    verb = tokens[0].lower() if tokens else ""
+    if verb in _RUNNER_SCRIPT_VERBS:
+        return tokens[2:]
+    if verb in _RUNNER_VERBS:
+        return tokens[1:]
+    return tokens
 
 # Secret-looking environment variable names.
 SECRET_ENV_NAMES = re.compile(
@@ -381,8 +422,8 @@ def _analyze_server(name: str, cfg: Dict[str, Any], text: str, file_path: str) -
         # @modelcontextprotocol/server-filesystem@1.0.0) stay MEDIUM because
         # they pin identity to a known publisher.
         bare_pkg_args = [
-            str(a) for a in (args or [])
-            if isinstance(a, str) and _is_bare_unpinned_package(a)
+            a for a in _package_candidate_tokens(args)
+            if _is_bare_unpinned_package(a)
         ]
         dyn_severity = Severity.HIGH if bare_pkg_args else Severity.MEDIUM
         dyn_evidence = (
