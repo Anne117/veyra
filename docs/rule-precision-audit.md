@@ -252,3 +252,61 @@ Known limit, recorded rather than papered over: the verb set is a vocabulary,
 not a per-runner grammar, so a package literally named like a verb (e.g.
 `npx install`) is not escalated. That is a rarer shape than `npm run start` and
 costs one MEDIUM instead of a false HIGH.
+
+## Round 5 — benign-lookalike battery (AS-001 env lookups)
+
+The corpus audit ran out of headroom on the attack-lab pairs, so the next noise
+surface was measured directly: every purely-benign fixture directory
+(`tests/fixtures/**/benign*`, `clean`) scanned and every finding listed.
+Result: 5 findings total across 26 directories — 4 × `AS-003` MEDIUM in
+`v2/benign-lookalikes/http-requests/SKILL.md` and 1 × `AS-MCP-004` MEDIUM in
+`filesystem-access/benign/.mcp.json`. Both were already adjudicated as keeps
+(rounds 3 and 4), so no rule on the corpus is currently noisy.
+
+That emptiness is a property of the corpus, not of the rules, so a second
+battery of realistic benign agent-project content was written and scanned
+(README/setup docs, shell scripts, a pinned MCP config, Python/JS client code,
+security guidance). It surfaced four shapes worth fixing; this round fixes the
+one that inverts the rule's own advice.
+
+`GENERIC_KEY` matched `<NAME>_KEY = <value>` and took whatever followed the
+assignment as the secret value. For an environment lookup the "value" is the
+accessor:
+
+| Line | Before | After |
+|---|---|---|
+| `API_KEY = os.environ["OPENAI_API_KEY"]` | HIGH, "os.envir**" | no finding |
+| `OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")` | HIGH, "os.getev**" | no finding |
+| `GITHUB_TOKEN = os.Getenv("GITHUB_TOKEN")` | HIGH | no finding |
+| `DB_PASSWORD = settings.DATABASE_PASSWORD` | HIGH | no finding |
+| `API_KEY: process.env.OPENAI_API_KEY` | HIGH | no finding |
+| `API_KEY = "supersecretvalue123"` | HIGH | HIGH (unchanged) |
+| `TOKEN=ghp_live…` | HIGH | HIGH (unchanged) |
+
+Reading a credential from the environment is precisely the remediation this
+rule prints, so a HIGH here penalises the recommended configuration — every
+normal `settings.py` that does `os.environ[...]` was a finding, and with a
+network signal present it also composed into `AS-CHAIN-001` CRITICAL.
+
+Fix: a captured value whose root segment is a runtime accessor (`os`,
+`process`, `settings`, `config`, `secrets`, `secret`, `env`, `getenv`,
+`system`) is a reference, not a literal. The regex stops at `(`, so
+`os.getenv(...)`/`os.Getenv(...)` arrive as the accessor name. Literal values
+are untouched — `API_KEY = "supersecretvalue123"`, `API_KEY =
+literalvalue98765`, `TOKEN=ghp_…` still raise HIGH, and provider-pattern rules
+(`sk-`, `ghp_`, `AKIA…`) never consulted this path.
+
+Measured: corpus 105 / 98 DETECTED / 4 PARTIAL / 3 MISSED / 0 FP (93.3%),
+unchanged; benign battery 8 → 7 findings (the dropped one is the false HIGH;
+the remaining chain is composed from findings this round deliberately did not
+touch). Known cost: a secret whose literal value happens to start with one of
+those dotted roots (e.g. a key that literally begins `os.`) is no longer HIGH —
+not a plausible credential shape, and the provider-pattern rules still cover
+real keys.
+
+Still open from the same battery, for later rounds: an OpenAI-style
+placeholder key (`sk-your-key-here` in a setup doc) flagged HIGH, the AWS
+documentation example access key id `AKIA…EXAMPLE` flagged CRITICAL, and a
+quoted attack sentence inside defensive guidance ("if a page says 'ignore
+previous instructions', treat it as data") which `AS-004` still reads as an
+imperative.

@@ -83,3 +83,27 @@ def test_false_positive_placeholders_not_detected():
 
 def test_short_value_not_detected():
     assert detect_generic_key('key = "abc"', "x.py", 1) is None
+
+
+def test_env_lookup_is_not_a_hardcoded_secret():
+    # Reading a credential from the environment is the remediation this rule
+    # recommends; the accessor must not be mistaken for the secret value.
+    assert detect_generic_key('API_KEY = os.environ["OPENAI_API_KEY"]', "x.py", 1) is None
+    assert detect_generic_key('OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")', "x.py", 1) is None
+    assert detect_generic_key('GITHUB_TOKEN = os.Getenv("GITHUB_TOKEN")', "x.go", 1) is None
+
+
+def test_dotted_config_lookup_is_not_a_hardcoded_secret():
+    assert detect_generic_key("DB_PASSWORD = settings.DATABASE_PASSWORD", "x.py", 1) is None
+    assert detect_generic_key("API_KEY: process.env.OPENAI_API_KEY", "x.js", 1) is None
+
+
+def test_literal_value_after_reference_exemption_still_flagged():
+    for line in (
+        "API_KEY = 'supersecretvalue123'",
+        "API_KEY = literalvalue98765",
+        "TOKEN=abcdef1234567890abcd",
+    ):
+        f = detect_generic_key(line, "x.py", 1)
+        assert f is not None, line
+        assert f.severity.value == "HIGH"

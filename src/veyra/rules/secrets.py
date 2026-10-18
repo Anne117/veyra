@@ -49,6 +49,33 @@ PLACEHOLDER_VALUES = {
 }
 
 
+# Runtime references rather than literals: `API_KEY = os.environ["API_KEY"]`,
+# `TOKEN = process.env.TOKEN`, `PASSWORD = settings.DB_PASSWORD`. Reading a
+# credential from the environment is the remediation this rule recommends, so
+# treating the accessor as the secret value inverts the finding. Matching stops
+# at the first `(` (the regex value class has no parens), so `os.getenv(...)`
+# and `os.Getenv(...)` are seen as `os.getenv` / `os.Getenv`.
+REFERENCE_ROOTS = {
+    "os",
+    "process",
+    "settings",
+    "config",
+    "secrets",
+    "secret",
+    "env",
+    "getenv",
+    "system",
+}
+
+
+def _is_runtime_reference(value: str) -> bool:
+    """True when the captured value names a lookup, not a hardcoded secret."""
+    root = value.split(".", 1)[0].lower()
+    if root in REFERENCE_ROOTS:
+        return True
+    return value.lower() in REFERENCE_ROOTS
+
+
 # --- Patterns --------------------------------------------------------------
 
 # OpenAI-style keys: sk-... (sk-proj-, sk-svcacct-, sk-)
@@ -153,6 +180,8 @@ def detect_generic_key(content: str, file_path: str, line: int) -> "Finding | No
         return None
     name, value = m.group(1), m.group(2)
     if value.lower() in PLACEHOLDER_VALUES:
+        return None
+    if _is_runtime_reference(value):
         return None
     return Finding(
         rule_id="AS-001",
