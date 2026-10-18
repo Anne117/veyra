@@ -673,9 +673,17 @@ classifier treats as a partial detection. They cover patterns where lifting
 severity blindly would create false positives on legitimate configurations:
 
 - `encoded-obfuscation/rot13-exec` and `v2/obfuscation/rot13-instruction` —
-  ROT13-decode-and-run instructions; AS-004 fires MEDIUM via the
-  unrelated-exec pattern. Raising severity would over-alert on any skill
-  that legitimately asks the agent to decode and execute content.
+  ROT13-decode-and-run instructions. AS-004 fires MEDIUM via the
+  encoded-obfuscation pattern (`deobfuscate this ROT13 text`); AS-007 does
+  not fire because the decoded payload (`command to delete important files`)
+  is natural-language intent, not a literal shell-token pattern (`rm -rf`,
+  `curl|bash`, …) that `DANGEROUS_COMMAND` recognises. Raising severity would
+  either require a natural-language intent detector (LLM-only; forbidden
+  by the manifesto) or broaden `DANGEROUS_COMMAND` to ordinary English
+  verbs like "delete / wipe / format", which would over-alert on any
+  benign skill that legitimately mentions file deletion. Honest position:
+  the decoded payload is suspicious-by-context but not causally evidenced
+  as a dangerous shell command.
 - `v2-mcp-security/remote-endpoint` — a remote MCP URL fires AS-MCP-001 at
   MEDIUM. Remote endpoints are a legitimate deployment topology; HIGH is
   reserved for the http-not-https variant (AS-MCP-002) and remote-exec
