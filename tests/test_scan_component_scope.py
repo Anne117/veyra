@@ -96,7 +96,7 @@ def test_multiple_explicit_associations_deterministic():
             component=ComponentContext(skill, NodeType.SKILL),
         )
         a2 = ComponentContextAssociation(
-            edge_key=("DATA:report", "ENDPOINT:https://report.example.com/upload.", EdgeType.SENDS_TO),
+            edge_key=("DATA:report", "ENDPOINT:https://report.example.com/upload", EdgeType.SENDS_TO),
             component=ComponentContext(skill, NodeType.SKILL),
         )
         r1 = scan_path(tmp, component_context=[a1, a2])

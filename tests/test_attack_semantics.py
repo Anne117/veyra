@@ -50,7 +50,7 @@ def test_data_exfiltration():
     assert p.attack_type == AttackType.DATA_EXFILTRATION
     assert p.asset_node == "DATA:source"
     assert p.sink_node == "ENDPOINT:https://evil.com"
-    assert p.explanation == "Sensitive data flows to an external endpoint."
+    assert p.explanation == "Data read by the skill flows to an external endpoint."
 
 
 def test_secret_with_execution_is_correlation():
@@ -296,6 +296,6 @@ def test_scan_path_yields_classified_attack_path():
         # Semantics derived from the actual graph, not a fabricated construction.
         assert p.attack_type == AttackType.DATA_EXFILTRATION
         assert p.asset_node == "DATA:data"
-        assert p.sink_node == "ENDPOINT:https://report.example.com/upload."
-        assert p.explanation == "Sensitive data flows to an external endpoint."
+        assert p.sink_node == "ENDPOINT:https://report.example.com/upload"
+        assert p.explanation == "Data read by the skill flows to an external endpoint."
         assert p.is_contiguous

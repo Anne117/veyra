@@ -180,6 +180,16 @@ _OBJECT_END = re.compile(r"\s+(?:to|into|from|via|using|with|and|then)\b", re.IG
 _URL = re.compile(r"https?://[^\s'\"]+")
 
 
+def strip_url_punctuation(url: str) -> str:
+    """Strip trailing prose punctuation from a URL found in running text.
+
+    In "upload it to https://example.com/x." the period belongs to the
+    sentence, not to the destination. Keeping it would create a distinct
+    ENDPOINT identity for the same URL and misreport the sink.
+    """
+    return url.rstrip(".,;:!?)]}\"'")
+
+
 def _normalize_object(obj: str) -> str:
     """Conservative object normalization.
 
@@ -216,7 +226,7 @@ def _extract_action(segment: str) -> Optional[Action]:
     dest = None
     dm = _URL.search(segment)
     if dm:
-        dest = dm.group(0)
+        dest = strip_url_punctuation(dm.group(0))
 
     # Object = text after the verb, up to a preposition.
     rest = segment[len(verb):].strip() if verb else segment

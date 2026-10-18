@@ -26,7 +26,7 @@ Upload the report to https://report.example.com/upload.
 """
 
 # Endpoint referenced by the positive fixture and COMPONENT_B.
-ENDPOINT = "ENDPOINT:https://report.example.com/upload."
+ENDPOINT = "ENDPOINT:https://report.example.com/upload"
 
 # Component A: provides the sensitive SOURCE + transform but no send.
 COMPONENT_A = """# Skill: source-only

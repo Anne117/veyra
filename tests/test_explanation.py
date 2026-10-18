@@ -86,7 +86,10 @@ def test_secret_exfil_explanation():
 def test_data_exfil_explanation():
     p = _data_exfil()
     e = _associated_expl(p)
-    assert "Sensitive data" in e.summary
+    # The summary must not assert "sensitive": a DATA asset does not by itself
+    # prove sensitivity (only SECRET assets do).
+    assert "Sensitive" not in e.summary
+    assert "Data" in e.summary
     assert "external endpoint" in e.summary
 
 

@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from veyra.graph.models import EdgeType, Node, NodeType, SecurityGraph
 from veyra.models import Confidence, Finding, Severity
-from veyra.step_sequence import ACTION_CATEGORY_TRANSFER
+from veyra.step_sequence import ACTION_CATEGORY_TRANSFER, strip_url_punctuation
 
 _URL = re.compile(r"https?://[^\s'\"]+", re.IGNORECASE)
 
@@ -46,11 +46,17 @@ def _node_id(type_: NodeType, key: str) -> str:
 
 
 def _extract_endpoint(finding: Finding) -> Optional[str]:
-    """Extract a concrete endpoint URL from a finding, or None."""
+    """Extract a concrete endpoint URL from a finding, or None.
+
+    Trailing sentence punctuation is stripped: in prose ("upload it to
+    https://example.com/x.") the period belongs to the sentence, not to the
+    URL. Keeping it would mint a different ENDPOINT identity for the same
+    destination and make the reported sink inaccurate.
+    """
     for text in (getattr(finding, "matched_text", "") or "", finding.evidence or ""):
         m = _URL.search(text)
         if m:
-            return m.group(0)
+            return strip_url_punctuation(m.group(0))
     return None
 
 

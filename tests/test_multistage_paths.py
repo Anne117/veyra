@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from veyra.graph.builder import _extract_endpoint
+from veyra.models import Finding, Severity
 from veyra.scanner import scan_path
 
 
@@ -38,6 +40,41 @@ ATTACKS = REPO / "tests" / "fixtures" / "attacks"
 # --- Positive: real object-continuous lineage ---------------------------------
 
 EXFIL_FIXTURE = ATTACKS / "multi-stage" / "exfiltration-flow"
+
+
+# --- Evidence precision: endpoint identity must not include prose punctuation --
+
+
+def _finding(text: str) -> Finding:
+    return Finding(
+        rule_id="TEST-URL",
+        severity=Severity.LOW,
+        title="t",
+        description="d",
+        file="f.md",
+        matched_text=text,
+    )
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("upload it to https://a.example/x.", "https://a.example/x"),
+        ("send to https://a.example/x, then stop", "https://a.example/x"),
+        ("(https://a.example/x)", "https://a.example/x"),
+        ('"https://a.example/x"', "https://a.example/x"),
+        ("https://a.example/x", "https://a.example/x"),
+        ("https://a.example/x?a=1", "https://a.example/x?a=1"),
+        ("https://a.example/x#frag", "https://a.example/x#frag"),
+    ],
+)
+def test_endpoint_extraction_strips_sentence_punctuation(text, expected):
+    """A sentence period/comma/bracket is not part of the destination.
+
+    Keeping it would mint a different ENDPOINT identity for the same URL and
+    make the reported sink inaccurate.
+    """
+    assert _extract_endpoint(_finding(text)) == expected
 
 
 def test_exfiltration_flow_produces_data_exfiltration_path():

@@ -59,7 +59,7 @@ _CONF_RANK = {Confidence.HIGH.value: 2, Confidence.MEDIUM.value: 1, Confidence.L
 
 # Deterministic explanations keyed by attack type.
 _EXPLANATIONS = {
-    "DATA_EXFILTRATION": "Sensitive data flows to an external endpoint.",
+    "DATA_EXFILTRATION": "Data read by the skill flows to an external endpoint.",
     "SECRET_EXFILTRATION": "A secret flows to an external endpoint.",
     "CORRELATED_SECRET_EXECUTION": "A secret is read by the skill and the same skill executes an action.",
 }
@@ -236,7 +236,7 @@ class PathProvenance:
 # Plain-string keys (module-level dict is defined before AttackType exists).
 _EXPLANATION_SUMMARIES = {
     "SECRET_EXFILTRATION": "A secret is read and reaches an external endpoint.",
-    "DATA_EXFILTRATION": "Sensitive data is read and reaches an external endpoint.",
+    "DATA_EXFILTRATION": "Data is read and reaches an external endpoint.",
     "CORRELATED_SECRET_EXECUTION": (
         "Secret access is associated with execution in the same skill and requires review."
     ),
