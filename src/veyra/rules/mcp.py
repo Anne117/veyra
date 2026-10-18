@@ -47,6 +47,30 @@ DYNAMIC_RUNNERS = re.compile(
     re.IGNORECASE,
 )
 
+# A token is a bare, unpinned package reference when it looks like a
+# registry package name (letters/digits/_/-/.) without an explicit
+# version pin (@x.y.z or ==x.y.z) and without a scope prefix (@scope/).
+# Scoped packages like @modelcontextprotocol/server-filesystem are NOT
+# considered bare because they come from a known namespace.
+# Flags (starting with -) and filesystem paths are also excluded.
+_BARE_UNPINNED_PKG = re.compile(r"^[a-zA-Z][a-zA-Z0-9_\-\.]*$")
+_VERSION_PIN = re.compile(r"(?:@\d+\.\d+|==\d)")
+
+
+def _is_bare_unpinned_package(token):
+    """True if token looks like a bare, unpinned package reference.
+
+    A bare reference is riskier than a scoped or version-pinned one because
+    typosquats and dependency-confusion attacks exploit exactly this shape.
+    """
+    if not isinstance(token, str):
+        return False
+    if token.startswith(("@", "-", "/", ".", "C:", "C\\")):
+        return False
+    if _VERSION_PIN.search(token):
+        return False
+    return bool(_BARE_UNPINNED_PKG.match(token))
+
 # Secret-looking environment variable names.
 SECRET_ENV_NAMES = re.compile(
     r"(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|PRIVATE_?KEY|ACCESS_?KEY|SESSION)",
@@ -299,14 +323,32 @@ def _analyze_server(name: str, cfg: Dict[str, Any], text: str, file_path: str) -
 
     # --- AS-MCP-004: Dynamic package execution -----------------------------
     if isinstance(command, str) and DYNAMIC_RUNNERS.match(command.strip()):
+        # Severity escalates to HIGH when at least one arg is a bare,
+        # unpinned package reference (no @scope/, no version pin). A bare
+        # reference is a typosquat / dependency-confusion target: anyone
+        # can publish "some-package" to PyPI/npm and the runner will fetch
+        # and execute it. Scoped or version-pinned references (e.g.
+        # @modelcontextprotocol/server-filesystem@1.0.0) stay MEDIUM because
+        # they pin identity to a known publisher.
+        bare_pkg_args = [
+            str(a) for a in (args or [])
+            if isinstance(a, str) and _is_bare_unpinned_package(a)
+        ]
+        dyn_severity = Severity.HIGH if bare_pkg_args else Severity.MEDIUM
+        dyn_evidence = (
+            f"Dynamic runner: {command}; bare unpinned package(s): "
+            f"{', '.join(bare_pkg_args)}"
+            if bare_pkg_args
+            else f"Dynamic runner: {command}"
+        )
         findings.append(
             _mk(
                 "AS-MCP-004",
-                Severity.MEDIUM,
+                dyn_severity,
                 "Dynamic package execution",
                 f"MCP server '{name}' runs '{command}', which fetches and executes a package from a registry at runtime.",
                 file_path,
-                f"Dynamic runner: {command}",
+                dyn_evidence,
                 "Pin the package to a specific version and verify its provenance.",
                 text,
                 needle,

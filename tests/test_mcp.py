@@ -314,3 +314,94 @@ def test_broad_fs_relative_escape_flagged():
     assert any(f.rule_id == "AS-MCP-007" for f in findings), (
         f"relative escape should fire AS-MCP-007: {findings}"
     )
+
+
+def test_dynamic_runner_bare_unpinned_pkg_is_high():
+    """A dynamic runner executing a bare, unpinned package (e.g. ``uvx some-package``)
+    is a typosquat / dependency-confusion target and must escalate AS-MCP-004 to HIGH.
+    """
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "uvx-bare": {
+                    "command": "uvx",
+                    "args": ["some-package"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/bare/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "HIGH", (
+        f"bare unpinned package via dynamic runner must be HIGH, got "
+        f"{dyn[0].severity.value}"
+    )
+    # Evidence must mention the bare package so the user sees why.
+    assert "some-package" in (dyn[0].evidence or "")
+
+
+def test_dynamic_runner_scoped_pkg_stays_medium():
+    """A scoped, version-pinned package (e.g. ``@modelcontextprotocol/server-filesystem``)
+    is a known namespace and must NOT escalate AS-MCP-004 above MEDIUM."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "fs-scoped": {
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/scoped/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "MEDIUM", (
+        f"scoped package via dynamic runner must stay MEDIUM, got "
+        f"{dyn[0].severity.value}"
+    )
+
+
+def test_dynamic_runner_version_pinned_pkg_stays_medium():
+    """A version-pinned bare package (``pkg@1.2.3``) still triggers AS-MCP-004
+    but must NOT escalate to HIGH because the pin narrows the attack surface."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "pinned": {
+                    "command": "uvx",
+                    "args": ["some-package@2.0.1"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/pinned/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "MEDIUM", (
+        f"version-pinned bare package must stay MEDIUM, got "
+        f"{dyn[0].severity.value}"
+    )
+
+
+def test_dynamic_runner_only_flags_stays_medium():
+    """``npx -y pkg`` with no bare unpinned tokens still stays MEDIUM
+    (e.g. when the only args are flags and scoped paths)."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "flags-only": {
+                    "command": "npx",
+                    "args": ["-y", "/usr/local/bin/script"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/flags/.mcp.json")
+    dyn = [f for f in findings if f.rule_id == "AS-MCP-004"]
+    assert len(dyn) == 1
+    assert dyn[0].severity.value == "MEDIUM", (
+        f"flags-only dynamic runner call must stay MEDIUM, got "
+        f"{dyn[0].severity.value}"
+    )

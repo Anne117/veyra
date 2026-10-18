@@ -647,18 +647,18 @@ Veyra ships an internal adversarial corpus (`tests/fixtures/attacks/`)
 and an evaluator (`veyra attack-lab`) that measures detection on that
 corpus.
 
-**On the current 95-case internal Attack Lab corpus:**
+**On the current 96-case internal Attack Lab corpus:**
 
 | Metric | Value |
 |--------|-------|
-| Total cases | 95 |
-| Detected | 88 |
-| Partially detected | 7 |
+| Total cases | 96 |
+| Detected | 92 |
+| Partially detected | 4 |
 | Missed | 0 |
 | False positives | 0 |
-| Detection rate | 92.6% |
+| Detection rate | 95.8% |
 
-> This figure is **only** for the current 95-case internal Attack Lab corpus. It
+> This figure is **only** for the current 96-case internal Attack Lab corpus. It
 > is **not** a measure of real-world detection accuracy. Real skills are far
 > more varied, and the corpus does not cover every attack pattern. A clean scan
 > does **not** guarantee a resource is safe.
@@ -666,6 +666,27 @@ corpus.
 The Attack Lab is a regression harness: every future scanner change must keep
 previously detected cases detected and avoid new false positives. See
 `docs/attack-lab.md` and `docs/attack-lab-v2.md`.
+
+**About the 4 partially detected cases:** these are attack-lab fixtures where
+the expected rule fires at MEDIUM rather than HIGH/CRITICAL, which the
+classifier treats as a partial detection. They cover patterns where lifting
+severity blindly would create false positives on legitimate configurations:
+
+- `encoded-obfuscation/rot13-exec` and `v2/obfuscation/rot13-instruction` —
+  ROT13-decode-and-run instructions; AS-004 fires MEDIUM via the
+  unrelated-exec pattern. Raising severity would over-alert on any skill
+  that legitimately asks the agent to decode and execute content.
+- `v2-mcp-security/remote-endpoint` — a remote MCP URL fires AS-MCP-001 at
+  MEDIUM. Remote endpoints are a legitimate deployment topology; HIGH is
+  reserved for the http-not-https variant (AS-MCP-002) and remote-exec
+  combinations (AS-MCP-009).
+- `v2-mcp-security/dynamic-package` — `npx -y @scope/pkg` fires AS-MCP-004
+  at MEDIUM. Scoped packages from a known namespace stay MEDIUM; bare
+  unpinned references (the typosquat / dependency-confusion case) now
+  escalate to HIGH (see `v2-mcp-security/uvx-exec` and `broad-fs`).
+
+These boundaries are deliberate: detection rate is reported above for
+transparency, not as a target to maximise by relaxing severity.
 
 ## 🤖 GitHub Action
 

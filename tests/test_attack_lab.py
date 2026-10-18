@@ -265,8 +265,16 @@ EXPECTED_FALSE_POSITIVES = 0
 #   DETECTED because AS-MCP-007 reaches HIGH severity:
 #     - filesystem-access/broad-fs
 #     - v2/mcp-security/broad-fs
-EXPECTED_DETECTED = 91
-EXPECTED_PARTIALLY_DETECTED = 5
+# Updated 2026-10-18 (Phase 1, Q-3):
+#   AS-MCP-004 now escalates to HIGH when a dynamic runner is paired with a
+#   bare, unpinned package reference (no @scope/, no @x.y.z). This catches
+#   typosquat / dependency-confusion targets. Two more attack-lab cases now
+#   reach DETECTED:
+#     - v2/mcp-security/uvx-exec   (command=uvx, args=["some-package"])
+#     - v2/mcp-security/broad-fs   (already DETECTED but bare "server" arg
+#                                   also triggers the new HIGH escalation)
+EXPECTED_DETECTED = 92
+EXPECTED_PARTIALLY_DETECTED = 4
 EXPECTED_MISSED = 0
 
 # Per-case expected classifications. Keyed by (category, name).
