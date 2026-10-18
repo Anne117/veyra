@@ -281,40 +281,120 @@ EXPECTED_MISSED = 0
 # These are the current verified classifications; update deliberately when a
 # detection improvement is made and reviewed.
 EXPECTED_CASE_RESULTS = {
-    # v1 categories
-    ("prompt-injection", "override-instructions"): DETECTED,
-    ("prompt-injection", "disable-security"): DETECTED,
-    ("prompt-injection", "exfiltrate-files"): DETECTED,
-    ("prompt-injection", "benign"): DETECTED,
-    ("shell-execution", "os-system-var"): DETECTED,
-    ("shell-execution", "subprocess-shell"): DETECTED,
-    ("shell-execution", "eval-var"): DETECTED,
-    ("shell-execution", "benign"): DETECTED,
-    ("remote-download", "curl-pipe-bash"): DETECTED,
-    ("remote-download", "wget-pipe-sh"): DETECTED,
-    ("remote-download", "benign"): DETECTED,
-    ("encoded-obfuscation", "base64-exec"): DETECTED,
-    ("encoded-obfuscation", "rot13-exec"): PARTIALLY_DETECTED,
-    ("encoded-obfuscation", "benign"): DETECTED,
-    # Updated 2026-10-18 (Phase 1, Q-1): AS-MCP-007 escalates to HIGH
-    # for system-root paths + dynamic runners, so broad-fs is now DETECTED.
-    ("filesystem-access", "broad-fs"): DETECTED,
-    ("filesystem-access", "benign"): DETECTED,
-    ("mcp-attacks", "secrets-env"): DETECTED,
-    ("mcp-attacks", "remote-exec"): DETECTED,
-    ("mcp-attacks", "broad-fs-secrets"): DETECTED,
-    ("mcp-attacks", "benign"): DETECTED,
-    ("multi-stage", "data-sync"): DETECTED,
-    ("multi-stage", "download-run"): DETECTED,
-    ("multi-stage", "benign"): DETECTED,
-    ("multi-stage", "exfiltration-flow"): DETECTED,
-    ("secret-exfiltration", "env-dump"): DETECTED,
-    ("secret-exfiltration", "read-credentials"): DETECTED,
-    ("secret-exfiltration", "reveal-secrets"): DETECTED,
-    ("secret-exfiltration", "benign"): DETECTED,
-    # v2 categories — previously MISSED, now DETECTED via source-to-sink tracking
-    ("v2-secret-exfiltration", "read-transform-network"): DETECTED,
-    ("v2-multi-stage", "discovery-secret-network"): DETECTED,
+    # --- prompt-injection ---
+    ('prompt-injection', 'override-instructions'): DETECTED,
+    ('prompt-injection', 'disable-security'): DETECTED,
+    ('prompt-injection', 'exfiltrate-files'): DETECTED,
+    ('prompt-injection', 'benign'): DETECTED,
+    # --- secret-exfiltration ---
+    ('secret-exfiltration', 'env-dump'): DETECTED,
+    ('secret-exfiltration', 'read-credentials'): DETECTED,
+    ('secret-exfiltration', 'reveal-secrets'): DETECTED,
+    ('secret-exfiltration', 'benign'): DETECTED,
+    # --- shell-execution ---
+    ('shell-execution', 'os-system-var'): DETECTED,
+    ('shell-execution', 'subprocess-shell'): DETECTED,
+    ('shell-execution', 'benign'): DETECTED,
+    ('shell-execution', 'eval-var'): DETECTED,
+    # --- remote-download ---
+    ('remote-download', 'curl-pipe-bash'): DETECTED,
+    ('remote-download', 'wget-pipe-sh'): DETECTED,
+    ('remote-download', 'benign'): DETECTED,
+    # --- encoded-obfuscation ---
+    ('encoded-obfuscation', 'base64-exec'): DETECTED,
+    ('encoded-obfuscation', 'rot13-exec'): PARTIALLY_DETECTED,
+    ('encoded-obfuscation', 'benign'): DETECTED,
+    # --- filesystem-access ---
+    ('filesystem-access', 'broad-fs'): DETECTED,
+    ('filesystem-access', 'benign'): DETECTED,
+    # --- mcp-attacks ---
+    ('mcp-attacks', 'secrets-env'): DETECTED,
+    ('mcp-attacks', 'remote-exec'): DETECTED,
+    ('mcp-attacks', 'broad-fs-secrets'): DETECTED,
+    ('mcp-attacks', 'benign'): DETECTED,
+    # --- multi-stage ---
+    ('multi-stage', 'data-sync'): DETECTED,
+    ('multi-stage', 'download-run'): DETECTED,
+    ('multi-stage', 'benign'): DETECTED,
+    ('multi-stage', 'exfiltration-flow'): DETECTED,
+    # --- v2-prompt-injection ---
+    ('v2-prompt-injection', 'reveal-secrets-direct'): DETECTED,
+    ('v2-prompt-injection', 'reveal-secrets-indirect'): DETECTED,
+    ('v2-prompt-injection', 'ignore-previous'): DETECTED,
+    ('v2-prompt-injection', 'role-impersonation'): DETECTED,
+    ('v2-prompt-injection', 'hidden-in-docs'): DETECTED,
+    ('v2-prompt-injection', 'access-credentials'): DETECTED,
+    ('v2-prompt-injection', 'send-data-external'): DETECTED,
+    ('v2-prompt-injection', 'benign-prohibit'): DETECTED,
+    # --- v2-secret-access ---
+    ('v2-secret-access', 'env-file'): DETECTED,
+    ('v2-secret-access', 'aws-credentials'): DETECTED,
+    ('v2-secret-access', 'ssh-key'): DETECTED,
+    ('v2-secret-access', 'config-password'): DETECTED,
+    ('v2-secret-access', 'api-token'): DETECTED,
+    ('v2-secret-access', 'private-key'): DETECTED,
+    ('v2-secret-access', 'env-dump'): DETECTED,
+    ('v2-secret-access', 'benign'): DETECTED,
+    # --- v2-secret-exfiltration ---
+    ('v2-secret-exfiltration', 'read-extract-post'): DETECTED,
+    ('v2-secret-exfiltration', 'read-extract-webhook'): DETECTED,
+    ('v2-secret-exfiltration', 'read-transform-network'): DETECTED,
+    ('v2-secret-exfiltration', 'read-secret-upload'): DETECTED,
+    ('v2-secret-exfiltration', 'many-unrelated-lines'): DETECTED,
+    ('v2-secret-exfiltration', 'different-network-api'): DETECTED,
+    ('v2-secret-exfiltration', 'benign-read-network'): DETECTED,
+    # --- v2-download-execution ---
+    ('v2-download-execution', 'curl-shell'): DETECTED,
+    ('v2-download-execution', 'wget-shell'): DETECTED,
+    ('v2-download-execution', 'fetch-execute'): DETECTED,
+    ('v2-download-execution', 'download-run-script'): DETECTED,
+    ('v2-download-execution', 'remote-package-execute'): DETECTED,
+    ('v2-download-execution', 'indirect-wording'): DETECTED,
+    ('v2-download-execution', 'benign-download-only'): DETECTED,
+    ('v2-download-execution', 'benign-execute-only'): DETECTED,
+    # --- v2-mcp-security ---
+    ('v2-mcp-security', 'remote-endpoint'): PARTIALLY_DETECTED,
+    ('v2-mcp-security', 'http-not-https'): DETECTED,
+    ('v2-mcp-security', 'dynamic-package'): PARTIALLY_DETECTED,
+    ('v2-mcp-security', 'uvx-exec'): DETECTED,
+    ('v2-mcp-security', 'secret-env'): DETECTED,
+    ('v2-mcp-security', 'broad-fs'): DETECTED,
+    ('v2-mcp-security', 'suspicious-args'): DETECTED,
+    ('v2-mcp-security', 'remote-exec-combo'): DETECTED,
+    ('v2-mcp-security', 'benign'): DETECTED,
+    # --- v2-obfuscation ---
+    ('v2-obfuscation', 'base64-instruction'): DETECTED,
+    ('v2-obfuscation', 'rot13-instruction'): PARTIALLY_DETECTED,
+    ('v2-obfuscation', 'encoded-shell-command'): DETECTED,
+    ('v2-obfuscation', 'encoded-url'): DETECTED,
+    ('v2-obfuscation', 'benign-encoded-data'): DETECTED,
+    # --- v2-multi-stage ---
+    ('v2-multi-stage', 'source-sensitive-network'): DETECTED,
+    ('v2-multi-stage', 'download-execution'): DETECTED,
+    ('v2-multi-stage', 'sensitive-transform-network'): DETECTED,
+    ('v2-multi-stage', 'discovery-secret-network'): DETECTED,
+    ('v2-multi-stage', 'benign'): DETECTED,
+    # --- v2-benign-lookalikes ---
+    ('v2-benign-lookalikes', 'secrets-doc'): DETECTED,
+    ('v2-benign-lookalikes', 'secure-coding'): DETECTED,
+    ('v2-benign-lookalikes', 'never-reveal'): DETECTED,
+    ('v2-benign-lookalikes', 'legit-deps'): DETECTED,
+    ('v2-benign-lookalikes', 'local-build'): DETECTED,
+    ('v2-benign-lookalikes', 'legit-mcp'): DETECTED,
+    ('v2-benign-lookalikes', 'env-vars'): DETECTED,
+    ('v2-benign-lookalikes', 'http-requests'): DETECTED,
+    ('v2-benign-lookalikes', 'security-tutorial'): DETECTED,
+    ('v2-benign-lookalikes', 'incident-response'): DETECTED,
+    # --- v2-sensitive-path ---
+    ('v2-sensitive-path', 'env-read'): DETECTED,
+    ('v2-sensitive-path', 'aws-read'): DETECTED,
+    ('v2-sensitive-path', 'ssh-read'): DETECTED,
+    ('v2-sensitive-path', 'credentials-read'): DETECTED,
+    ('v2-sensitive-path', 'print-env'): DETECTED,
+    ('v2-sensitive-path', 'private-key-read'): DETECTED,
+    ('v2-sensitive-path', 'benign-docs'): DETECTED,
+    ('v2-sensitive-path', 'benign-normal-read'): DETECTED,
+
 }
 
 
@@ -359,3 +439,104 @@ def test_attack_lab_regression_per_case():
         assert key in by_key, f"case {key} not found in lab results"
         actual = by_key[key]
         assert actual == expected, f"case {key} regressed: {actual} != {expected}"
+
+
+
+def test_attack_lab_summary_matches_per_case():
+    """The aggregate summary must be derivable from the per-case results.
+
+    This makes the invariant bidirectional: any silent per-case change that
+    shifts a bucket (e.g. DETECTED -> PARTIALLY_DETECTED) MUST also shift the
+    summary, and vice-versa. Catches the past failure mode where PARTIAL
+    silently absorbed real detections and the aggregate still read green.
+
+    Soft check: per-category and overall totals must be self-consistent.
+    """
+    lab = run_attack_lab()
+    s = lab.summary()
+    cases = lab.cases
+
+    # Build per-case bucket counts.
+    counts = {
+        "detected": 0,
+        "partially_detected": 0,
+        "missed": 0,
+        "false_positives": 0,
+    }
+    for c in cases:
+        bucket = c["result"]
+        if bucket == "DETECTED":
+            counts["detected"] += 1
+        elif bucket == "PARTIALLY_DETECTED":
+            counts["partially_detected"] += 1
+        elif bucket == "MISSED":
+            counts["missed"] += 1
+        elif bucket == "FALSE_POSITIVE":
+            counts["false_positives"] += 1
+
+    for k, v in counts.items():
+        assert s[k] == v, (
+            f"summary[{k!r}]={s[k]} disagrees with per-case count={v} — "
+            f"summary and per-case results are out of sync"
+        )
+
+    # Total must equal the number of cases.
+    assert s["total"] == len(cases), (
+        f"summary total={s['total']} disagrees with len(cases)={len(cases)}"
+    )
+
+
+def test_attack_lab_v2_benign_lookalikes_zero_fp():
+    """The v2-benign-lookalikes category must produce zero false positives.
+
+    This is the most sensitive lookalike set: realistic-looking content that
+    mentions secrets, env vars, MCP servers, etc. without being malicious.
+    Any HIGH/CRITICAL finding here means a real-world prompt would be
+    wrongly flagged as an attack.
+    """
+    lab = run_attack_lab()
+    fps = [c for c in lab.cases if c["category"] == "v2-benign-lookalikes"
+           and c["result"] == "FALSE_POSITIVE"]
+    assert len(fps) == 0, (
+        f"v2-benign-lookalikes produced {len(fps)} false positives: "
+        f"{[(c['category'], c['name']) for c in fps]}"
+    )
+
+
+def test_attack_lab_per_category_totals_consistent():
+    """The categories() aggregator must be consistent with per-case results.
+
+    For every category, the sum of bucket-counts must equal the reported
+    total for that category.
+    """
+    lab = run_attack_lab()
+    cats = lab.categories()
+    # Build expected per-category counts from per-case results.
+    expected = {}
+    for c in lab.cases:
+        cat = c["category"]
+        ec = expected.setdefault(cat, {"total": 0, "detected": 0,
+                                        "partially_detected": 0,
+                                        "missed": 0, "false_positives": 0})
+        ec["total"] += 1
+        bucket = c["result"]
+        if bucket == "DETECTED":
+            ec["detected"] += 1
+        elif bucket == "PARTIALLY_DETECTED":
+            ec["partially_detected"] += 1
+        elif bucket == "MISSED":
+            ec["missed"] += 1
+        elif bucket == "FALSE_POSITIVE":
+            ec["false_positives"] += 1
+
+    assert set(cats.keys()) == set(expected.keys()), (
+        f"category-set mismatch: lab has {set(cats.keys())-set(expected.keys())}, "
+        f"expected has {set(expected.keys())-set(cats.keys())}"
+    )
+    for cat, ec in expected.items():
+        ac = cats[cat]
+        for k, v in ec.items():
+            assert ac[k] == v, (
+                f"category={cat} bucket={k}: categories()={ac[k]} != "
+                f"per-case sum={v}"
+            )
