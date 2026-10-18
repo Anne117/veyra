@@ -226,6 +226,14 @@ ATTACK_CASES: List[AttackCase] = [
         DETECTED, "Benign multi-step report generator should produce no findings.",
         [], is_benign=True,
     ),
+    AttackCase(
+        "exfiltration-flow", "multi-stage",
+        "multi-stage/exfiltration-flow/SKILL.md",
+        DETECTED,
+        "Multi-stage with object-continuous lineage: read -> transform -> upload. "
+        "Produces a contiguous DATA_EXFILTRATION AttackPath (READS -> FLOWS_TO -> SENDS_TO).",
+        ["AS-CHAIN-004"],
+    ),
     # ===================== Attack Lab v2 =====================
     # --- v2 prompt-injection ---
     AttackCase("reveal-secrets-direct", "v2-prompt-injection", "v2/prompt-injection/reveal-secrets-direct/SKILL.md", DETECTED, "Direct instruction to reveal API keys.", ["AS-004"]),

@@ -256,7 +256,7 @@ def test_benign_clean_detected():
 # intentionally PARTIAL or MISSED, that expectation is preserved here unless
 # there is a deliberate, reviewed detection improvement.
 
-EXPECTED_TOTAL = 95
+EXPECTED_TOTAL = 96
 EXPECTED_FALSE_POSITIVES = 0
 # Updated 2026-10-18 (Phase 1, Q-1):
 #   AS-MCP-007 was token-precise (per-arg) and escalated to HIGH for
@@ -265,7 +265,7 @@ EXPECTED_FALSE_POSITIVES = 0
 #   DETECTED because AS-MCP-007 reaches HIGH severity:
 #     - filesystem-access/broad-fs
 #     - v2/mcp-security/broad-fs
-EXPECTED_DETECTED = 90
+EXPECTED_DETECTED = 91
 EXPECTED_PARTIALLY_DETECTED = 5
 EXPECTED_MISSED = 0
 
@@ -299,6 +299,7 @@ EXPECTED_CASE_RESULTS = {
     ("multi-stage", "data-sync"): DETECTED,
     ("multi-stage", "download-run"): DETECTED,
     ("multi-stage", "benign"): DETECTED,
+    ("multi-stage", "exfiltration-flow"): DETECTED,
     ("secret-exfiltration", "env-dump"): DETECTED,
     ("secret-exfiltration", "read-credentials"): DETECTED,
     ("secret-exfiltration", "reveal-secrets"): DETECTED,
