@@ -286,6 +286,7 @@ ATTACK_CASES: List[AttackCase] = [
     AttackCase("encoded-shell-command", "v2-obfuscation", "v2/obfuscation/encoded-shell-command/run.sh", DETECTED, "Encoded shell command piped to bash.", ["AS-002"]),
     AttackCase("encoded-url", "v2-obfuscation", "v2/obfuscation/encoded-url/SKILL.md", DETECTED, "Encoded URL to fetch.", ["AS-004"]),
     AttackCase("benign-encoded-data", "v2-obfuscation", "v2/obfuscation/benign-encoded-data/SKILL.md", DETECTED, "Benign encoding helper that does not execute.", [], is_benign=True),
+    AttackCase("benign-rot13-explainer", "v2-obfuscation", "v2/obfuscation/benign-rot13-explainer/SKILL.md", DETECTED, "Benign educational ROT13 explainer that describes the cipher without doing anything dangerous.", [], is_benign=True),
     # --- v2 multi-stage ---
     AttackCase("source-sensitive-network", "v2-multi-stage", "v2/multi-stage/source-sensitive-network/SKILL.md", DETECTED, "source -> sensitive -> network.", ["AS-CHAIN-001"]),
     AttackCase("download-execution", "v2-multi-stage", "v2/multi-stage/download-execution/SKILL.md", DETECTED, "download -> execution.", ["AS-CHAIN-002"]),

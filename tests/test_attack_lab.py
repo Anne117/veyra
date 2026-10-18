@@ -256,7 +256,7 @@ def test_benign_clean_detected():
 # intentionally PARTIAL or MISSED, that expectation is preserved here unless
 # there is a deliberate, reviewed detection improvement.
 
-EXPECTED_TOTAL = 98
+EXPECTED_TOTAL = 99
 EXPECTED_FALSE_POSITIVES = 0
 # Updated 2026-10-18 (Phase 1, Q-1):
 #   AS-MCP-007 was token-precise (per-arg) and escalated to HIGH for
@@ -273,7 +273,7 @@ EXPECTED_FALSE_POSITIVES = 0
 #     - v2/mcp-security/uvx-exec   (command=uvx, args=["some-package"])
 #     - v2/mcp-security/broad-fs   (already DETECTED but bare "server" arg
 #                                   also triggers the new HIGH escalation)
-EXPECTED_DETECTED = 94
+EXPECTED_DETECTED = 95
 EXPECTED_PARTIALLY_DETECTED = 4
 EXPECTED_MISSED = 0
 
@@ -368,6 +368,7 @@ EXPECTED_CASE_RESULTS = {
     ('v2-obfuscation', 'encoded-shell-command'): DETECTED,
     ('v2-obfuscation', 'encoded-url'): DETECTED,
     ('v2-obfuscation', 'benign-encoded-data'): DETECTED,
+    ('v2-obfuscation', 'benign-rot13-explainer'): DETECTED,
     # --- v2-multi-stage ---
     ('v2-multi-stage', 'source-sensitive-network'): DETECTED,
     ('v2-multi-stage', 'download-execution'): DETECTED,
