@@ -11,6 +11,10 @@ from veyra.models import Severity
 from veyra.reporters import render_html, render_json, render_sarif, render_terminal
 from veyra.scanner import scan_path
 from veyra.suppress import apply_suppression, load_config
+from veyra.threats import (
+    OWASP_AGENTIC_2026,
+    serialize_threat_taxonomy,
+)
 
 # Severity ordering for the failure threshold.
 _SEVERITY_ORDER = {
@@ -49,6 +53,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum severity that causes a non-zero exit (default: HIGH).",
     )
 
+    threats_p = sub.add_parser(
+        "threats",
+        help="Inspect built-in threat-taxonomy catalogs (read-only).",
+    )
+    threats_sub = threats_p.add_subparsers(dest="threats_command", required=True)
+
+    tlist = threats_sub.add_parser(
+        "list",
+        help="List built-in threat-taxonomy catalogs and their entries.",
+    )
+    tlist.add_argument(
+        "--format",
+        choices=["terminal", "json"],
+        default="terminal",
+        help="Output format (default: terminal).",
+    )
+
+    tshow = threats_sub.add_parser(
+        "show",
+        help="Show one threat-taxonomy entry by ID (e.g. ASI05).",
+    )
+    tshow.add_argument(
+        "entry_id",
+        help="Taxonomy entry id (e.g. ASI05).",
+    )
+    tshow.add_argument(
+        "--format",
+        choices=["terminal", "json"],
+        default="terminal",
+        help="Output format (default: terminal).",
+    )
+
     lab = sub.add_parser("attack-lab", help="Run the adversarial attack corpus.")
     lab.add_argument(
         "--format",
@@ -75,6 +111,66 @@ def _exit_code(result, fail_on: str) -> int:
         if _SEVERITY_ORDER[f.severity.value] >= threshold:
             return 1
     return 0
+
+
+
+
+def _threat_catalogs():
+    """Return the static list of available threat-taxonomy catalogs.
+
+    Read-only: returns already-built immutable ThreatTaxonomy objects. Adding a
+    new catalog here is the only step needed to expose it through the CLI.
+    """
+    # Static list of (taxonomy, get_taxonomy) tuples.
+    return [
+        OWASP_AGENTIC_2026,
+    ]
+
+
+def _find_entry(taxonomy, entry_id):
+    for e in taxonomy.entries:
+        if e.entry_id == entry_id:
+            return e
+    return None
+
+
+def _render_threats_list(catalogs, fmt):
+    if fmt == "json":
+        payload = [serialize_threat_taxonomy(t) for t in catalogs]
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    lines = ["Veyra Threat Taxonomies", "=" * 25, ""]
+    for t in catalogs:
+        lines.append(f"{t.taxonomy_id}  v{t.version}  ({len(t.entries)} entries)")
+        lines.append(f"  Name:      {t.name}")
+        lines.append(f"  Reference: {t.reference}")
+        lines.append("  Entries:")
+        for e in t.entries:
+            lines.append(f"    {e.entry_id}  {e.name}")
+        lines.append("")
+    print("\n".join(lines))
+
+
+def _render_threats_show(taxonomy, entry, fmt):
+    if fmt == "json":
+        from veyra.threats.taxonomy import _serialize_entry
+        payload = {
+            "taxonomy": {
+                "taxonomy_id": taxonomy.taxonomy_id,
+                "name": taxonomy.name,
+                "version": taxonomy.version,
+                "reference": taxonomy.reference,
+            },
+            "entry": _serialize_entry(entry),
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    print(f"Veyra Threat Entry: {entry.entry_id}")
+    print("=" * (20 + len(entry.entry_id)))
+    print(f"Name:        {entry.name}")
+    print(f"Description: {entry.description}")
+    print(f"Taxonomy:    {taxonomy.name} (v{taxonomy.version})")
+    print(f"Reference:   {entry.source.reference}")
 
 
 def _render_attack_lab(lab) -> str:
@@ -136,6 +232,24 @@ def main(argv: list[str] | None = None) -> int:
         severity_code = _exit_code(result, args.fail_on)
         policy_code = 1 if result.policy_status == "FAIL" else 0
         return max(severity_code, policy_code)
+
+    if args.command == "threats":
+        catalogs = _threat_catalogs()
+        if args.threats_command == "list":
+            _render_threats_list(catalogs, args.format)
+            return 0
+        if args.threats_command == "show":
+            entry_id = args.entry_id
+            for t in catalogs:
+                entry = _find_entry(t, entry_id)
+                if entry is not None:
+                    _render_threats_show(t, entry, args.format)
+                    return 0
+            print(
+                f"Error: entry id '{entry_id}' not found in any built-in catalog.",
+                file=sys.stderr,
+            )
+            return 2
 
     if args.command == "attack-lab":
         lab = run_attack_lab()
