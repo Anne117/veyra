@@ -647,18 +647,18 @@ Veyra ships an internal adversarial corpus (`tests/fixtures/attacks/`)
 and an evaluator (`veyra attack-lab`) that measures detection on that
 corpus.
 
-**On the current 96-case internal Attack Lab corpus:**
+**On the current 98-case internal Attack Lab corpus:**
 
 | Metric | Value |
 |--------|-------|
-| Total cases | 96 |
-| Detected | 92 |
+| Total cases | 98 |
+| Detected | 94 |
 | Partially detected | 4 |
 | Missed | 0 |
 | False positives | 0 |
-| Detection rate | 95.8% |
+| Detection rate | 95.9% |
 
-> This figure is **only** for the current 96-case internal Attack Lab corpus. It
+> This figure is **only** for the current 98-case internal Attack Lab corpus. It
 > is **not** a measure of real-world detection accuracy. Real skills are far
 > more varied, and the corpus does not cover every attack pattern. A clean scan
 > does **not** guarantee a resource is safe.
