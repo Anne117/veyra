@@ -204,3 +204,113 @@ def test_non_yaml_mcp_file_unaffected_by_yaml_dep():
         assert any(f.rule_id == "AS-MCP-003" for f in findings)
     finally:
         monkeypatch.undo()
+
+
+def test_broad_fs_token_precision_scoped_path_does_not_flag():
+    """AS-MCP-007 should not fire on a scoped path like ``/tmp/project``.
+
+    The previous joined-string regex matched any '/' substring, which
+    produced false positives on scoped paths and even on npm package
+    names that happen to contain a slash.
+    """
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "scoped": {
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/project"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/scoped/.mcp.json")
+    assert not any(f.rule_id == "AS-MCP-007" for f in findings), (
+        f"scoped path /tmp/project should NOT be classified as broad: {findings}"
+    )
+
+
+def test_broad_fs_token_precision_npm_package_only_does_not_flag():
+    """AS-MCP-007 should not fire on a package name like
+    ``@modelcontextprotocol/server-filesystem`` (no filesystem paths in args).
+    """
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "npm_only": {
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/npm_only/.mcp.json")
+    assert not any(f.rule_id == "AS-MCP-007" for f in findings), (
+        f"package-name-only args should NOT be classified as broad: {findings}"
+    )
+
+
+def test_broad_fs_system_root_token_with_dynamic_runner_is_high():
+    """AS-MCP-007 must fire at HIGH severity when a dynamic runner
+    (``npx``/``uvx``/...) is granted system-root paths. This is the
+    canonical MCP exfiltration setup: a registry-fetched package with
+    access to /etc, /var, /home, or /.
+    """
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "dangerous": {
+                    "command": "npx",
+                    "args": ["-y", "some-server", "/", "/home", "/etc"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/dangerous/.mcp.json")
+    broad = [f for f in findings if f.rule_id == "AS-MCP-007"]
+    assert len(broad) == 1, f"expected exactly one AS-MCP-007, got: {findings}"
+    assert broad[0].severity.value == "HIGH", (
+        f"system-root access via dynamic runner must be HIGH, got "
+        f"{broad[0].severity.value}"
+    )
+
+
+def test_broad_fs_system_root_token_without_dynamic_runner_stays_medium():
+    """When the command is not a dynamic runner (e.g. plain ``python``),
+    system-root access is still risky but warrants MEDIUM, not HIGH.
+    HIGH is reserved for the dynamic-runner escalation."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "local_broad": {
+                    "command": "python",
+                    "args": ["-m", "some_module", "/", "/etc"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/local_broad/.mcp.json")
+    broad = [f for f in findings if f.rule_id == "AS-MCP-007"]
+    assert len(broad) == 1
+    assert broad[0].severity.value == "MEDIUM", (
+        f"non-dynamic runner system-root access should stay MEDIUM, got "
+        f"{broad[0].severity.value}"
+    )
+
+
+def test_broad_fs_relative_escape_flagged():
+    """A relative parent-directory escape (``../etc``) is broad even when
+    it does not start with a system-root prefix."""
+    text = json.dumps(
+        {
+            "mcpServers": {
+                "escape": {
+                    "command": "python",
+                    "args": ["-m", "mod", "../etc/passwd"],
+                }
+            }
+        }
+    )
+    findings = scan_mcp_config(text, "/tmp/escape/.mcp.json")
+    assert any(f.rule_id == "AS-MCP-007" for f in findings), (
+        f"relative escape should fire AS-MCP-007: {findings}"
+    )

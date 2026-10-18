@@ -53,11 +53,36 @@ SECRET_ENV_NAMES = re.compile(
     re.IGNORECASE,
 )
 
-# Broad filesystem access patterns in args.
-BROAD_FS = re.compile(
-    r"(?:/|/home|/Users|/root|/etc|/var|C:\\\\|C:/|\.\./|\.\.\\\\)",
-    re.IGNORECASE,
-)
+# System-root filesystem path tokens that, when granted as an MCP server
+# argument, give the agent access to top-level directories it normally would
+# not have. Detected per-argument (not on the joined string) so a token like
+# ``@modelcontextprotocol/server-filesystem`` is NOT misidentified as a path,
+# and a scoped path like ``/tmp/project`` is correctly left alone.
+_BROAD_FS_ROOT_TOKENS = {"/", "C:\\", "C:/", "."}
+_BROAD_FS_SYSTEM_DIRS = {"/home", "/Users", "/root", "/etc", "/var"}
+
+
+def _broad_path_arg_reason(token: str) -> Optional[str]:
+    """Return a human-readable reason if ``token`` is a broad filesystem path.
+
+    A token is "broad" when it grants access to a filesystem root
+    (e.g. ``/``, ``C:\\``), a system-level directory as a whole
+    (e.g. ``/etc``, ``/var``, ``/Users``), or escapes the working directory
+    via a relative parent (e.g. ``../etc``). Scoped paths such as
+    ``/tmp/project`` or ``/home/user/code`` and non-path tokens such as
+    ``@scope/pkg`` are intentionally left alone.
+    """
+    if not isinstance(token, str):
+        return None
+    if token in _BROAD_FS_ROOT_TOKENS:
+        return f"filesystem root ({token})"
+    norm = token.rstrip("/\\")
+    if norm in _BROAD_FS_SYSTEM_DIRS:
+        return f"system-level directory ({norm})"
+    parts = token.replace("\\", "/").split("/")
+    if ".." in parts:
+        return "parent-directory escape"
+    return None
 
 # Suspicious command arguments.
 SUSPICIOUS_ARGS = re.compile(
@@ -324,16 +349,35 @@ def _analyze_server(name: str, cfg: Dict[str, Any], text: str, file_path: str) -
 
     # --- AS-MCP-007: Broad filesystem/path access ---------------------------
     if isinstance(args, list):
-        joined = " ".join(str(a) for a in args)
-        if BROAD_FS.search(joined):
+        # Token-level detection: only count tokens that genuinely look like
+        # broad filesystem paths. Ignore flag values (-y, --allow-all) and
+        # package-name tokens (@scope/pkg) which used to false-positive
+        # against the old joined-string regex.
+        broad_reasons: List[str] = []
+        for arg in args:
+            reason = _broad_path_arg_reason(str(arg))
+            if reason is not None:
+                broad_reasons.append(reason)
+        if broad_reasons:
+            # Severity escalates to HIGH when the server also launches a
+            # dynamic package runner (npx/uvx/...), because handing root-
+            # level filesystem access to a registry-fetched package is the
+            # canonical MCP exfiltration setup.
+            cmd_str = (command or "").strip() if isinstance(command, str) else ""
+            is_dynamic_runner = bool(
+                cmd_str and DYNAMIC_RUNNERS.match(cmd_str)
+            )
+            fs_severity = (
+                Severity.HIGH if is_dynamic_runner else Severity.MEDIUM
+            )
             findings.append(
                 _mk(
                     "AS-MCP-007",
-                    Severity.MEDIUM,
+                    fs_severity,
                     "Broad filesystem access",
                     f"MCP server '{name}' is granted broad filesystem/path access via its arguments.",
                     file_path,
-                    f"Broad path in args: {joined[:120]}",
+                    "Broad path in args: " + "; ".join(broad_reasons),
                     "Restrict the server to the specific directories it needs.",
                     text,
                     needle,

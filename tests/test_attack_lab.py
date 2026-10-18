@@ -122,9 +122,15 @@ def test_secret_exfiltration_gaps_recorded():
 
 
 def test_filesystem_access():
+    """The filesystem-access category expects broad-fs to be DETECTED with
+    the system-root path + dynamic-runner combination escalating AS-MCP-007
+    to HIGH (Phase 1, Q-1)."""
     lab = run_attack_lab()
     cases = {c["name"]: c["result"] for c in lab.cases if c["category"] == "filesystem-access"}
-    assert cases["broad-fs"] == PARTIALLY_DETECTED
+    assert cases["broad-fs"] == DETECTED, (
+        f"broad-fs must be DETECTED once AS-MCP-007 escalates to HIGH; "
+        f"got {cases['broad-fs']}"
+    )
     assert cases["benign"] == DETECTED
 
 
@@ -252,8 +258,15 @@ def test_benign_clean_detected():
 
 EXPECTED_TOTAL = 95
 EXPECTED_FALSE_POSITIVES = 0
-EXPECTED_DETECTED = 88
-EXPECTED_PARTIALLY_DETECTED = 7
+# Updated 2026-10-18 (Phase 1, Q-1):
+#   AS-MCP-007 was token-precise (per-arg) and escalated to HIGH for
+#   system-root paths + dynamic runners. Two attack-lab cases that were
+#   previously PARTIALLY_DETECTED (only MEDIUM signals) now escalate to
+#   DETECTED because AS-MCP-007 reaches HIGH severity:
+#     - filesystem-access/broad-fs
+#     - v2/mcp-security/broad-fs
+EXPECTED_DETECTED = 90
+EXPECTED_PARTIALLY_DETECTED = 5
 EXPECTED_MISSED = 0
 
 # Per-case expected classifications. Keyed by (category, name).
@@ -275,7 +288,9 @@ EXPECTED_CASE_RESULTS = {
     ("encoded-obfuscation", "base64-exec"): DETECTED,
     ("encoded-obfuscation", "rot13-exec"): PARTIALLY_DETECTED,
     ("encoded-obfuscation", "benign"): DETECTED,
-    ("filesystem-access", "broad-fs"): PARTIALLY_DETECTED,
+    # Updated 2026-10-18 (Phase 1, Q-1): AS-MCP-007 escalates to HIGH
+    # for system-root paths + dynamic runners, so broad-fs is now DETECTED.
+    ("filesystem-access", "broad-fs"): DETECTED,
     ("filesystem-access", "benign"): DETECTED,
     ("mcp-attacks", "secrets-env"): DETECTED,
     ("mcp-attacks", "remote-exec"): DETECTED,
