@@ -84,7 +84,69 @@ proxy an attacker evades with one paraphrase, and it would contradict the
 recorded decision in `docs/obfuscation-audit.md` (E-3b: no ROT13 natural-language
 rule without decoding the content). The gap stays open and documented.
 
+## P-2: AS-MCP-003 / "Local command execution" also had zero discrimination
+
+Measured the same way as P-1. `AS-MCP-003` fired on 10 of 10 attack cases and 4
+of 4 benign lookalikes in `attack_lab`, and on 6 further benign fixture dirs
+(`tests/fixtures/mcp/{broad_fs,mixed,npx_server,safe_local,secrets}`), always
+with the same evidence: `Command: npx` / `Command: python` / `Command: uvx`.
+
+The cause is structural, not a weak pattern. An MCP stdio server *is* a local
+command by definition — the `command` field is the transport. Both members of
+each benign/attack pair carried `{"command": "python", "args": ["-m",
+"my_local_server"]}`; the rule fired identically on both. It reported the
+transport, not a property of the case.
+
+It also never contributed to a detection: severity MEDIUM is below the
+`DETECTION_SEVERITIES` threshold, so the attack lab neither counted it as
+DETECTED nor as FALSE_POSITIVE. Its only effect was adding MEDIUM weight to the
+score and a line to every report on every MCP config.
+
+### Refinement applied
+
+`AS-MCP-003` now fires only when the command line *hides* its payload
+(`_shell_wrapped_command` in `src/veyra/rules/mcp.py`):
+
+- the `command` is a shell (`bash`, `sh`, `zsh`, `dash`, `ksh`, `fish`, `csh`,
+  `tcsh`, `cmd`, `powershell`, `pwsh`, including absolute paths) and its `args`
+  contain an inline-payload flag (`-c`, `/c`, `--command`, `-Command`,
+  `-EncodedCommand`, `-e`); or
+- the `command` string itself contains shell metacharacters (`;`, `&&`, `||`,
+  `|`, backtick, `$(`, `(`, `)`, `<`, `>`).
+
+Plain launchers stay silent: `npx`, `python -m`, `uvx`, and also `python -c`
+(non-shell interpreter with a visible inline program — nothing is hidden).
+Their real risks remain covered by `AS-MCP-004` (dynamic runner / unpinned
+package), `AS-MCP-007` (filesystem scope) and `AS-MCP-008` (dangerous flags).
+Rule id and MEDIUM severity are unchanged, so scoring bounds, correlation and
+SARIF shapes do not move; only the title and evidence prefix changed.
+
+### Delta (measured, same corpus)
+
+| Metric | Before | After |
+|---|---|---|
+| AS-MCP-003 line-hits on `attack_lab` cases | 14 (10 attack + 4 benign) | 0 |
+| AS-MCP-003 cases firing | 14 | 0 |
+| AS-MCP-003 hits in standalone benign dirs | 6 | 0 |
+| detected / partial / missed / FP | 98 / 4 / 3 / 0 | 98 / 4 / 3 / 0 |
+| detection percentage | 93.3% | 93.3% |
+
+No detection was lost, because none was ever produced by this rule. Six new
+unit tests pin the new boundary: plain launchers (`npx`, `python -m`,
+`python -c`, `uvx`) are silent; `bash -c "<payload>"`, `/bin/sh -c`, `cmd.exe`,
+`powershell.exe` and metacharacter command lines fire; `bash server.sh` (a
+visible script argument) stays silent.
+
+### Honest limit
+
+The narrowed rule now fires on nothing in the current corpus, so it is covered
+only by unit tests, not by an attack fixture. Adding one would change the
+corpus denominator and the published percentage, so it was not done as part of
+a precision fix.
+
 ## Next
 
-`AS-MCP-003` (10 attack / 4 benign, MEDIUM) is now the highest-noise rule; `AS-003`
-and `AS-MCP-004` each have a single benign hit worth a lookalike fixture.
+`AS-003` and `AS-MCP-004` each have a single benign hit; the next step is a
+benign-lookalike fixture for whichever of those is narrower to characterise.
+`AS-MCP-004` at 8 attack / 1 benign is the better discriminator already, so
+`AS-003` (6 attack / 1 benign, HIGH) is the one to examine.

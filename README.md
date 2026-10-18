@@ -154,7 +154,7 @@ MCP-specific rules (IDs `AS-MCP-001` … `AS-MCP-010`):
 |------|----|----------|
 | Remote MCP endpoint | AS-MCP-001 | MEDIUM |
 | HTTP endpoint without HTTPS | AS-MCP-002 | HIGH |
-| Local command execution | AS-MCP-003 | MEDIUM |
+| Local command execution via shell wrapper | AS-MCP-003 | MEDIUM |
 | Dynamic package execution (npx/npm/uvx/pip) | AS-MCP-004 | MEDIUM |
 | Environment variables passed to server | AS-MCP-005 | LOW |
 | Secret-looking environment variables | AS-MCP-006 | HIGH |

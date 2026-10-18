@@ -57,6 +57,53 @@ _BARE_UNPINNED_PKG = re.compile(r"^[a-zA-Z][a-zA-Z0-9_\-\.]*$")
 _VERSION_PIN = re.compile(r"(?:@\d+\.\d+|==\d)")
 
 
+# AS-MCP-003 precision. Every stdio MCP server is started by *some* command
+# (``npx ...``, ``python -m ...``), so "a command exists" describes the
+# transport, not a risk: on the corpus it fired on 10/10 attack cases and
+# 4/4 benign lookalikes and separated nothing. The signal worth reporting is a
+# command line that hides its payload inside a shell invocation or shell
+# metacharacters -- the config then no longer says what will actually run.
+# Plain launchers stay covered by AS-MCP-004 (dynamic runner / unpinned
+# package), AS-MCP-007 (filesystem scope) and AS-MCP-008 (dangerous flags).
+_SHELL_EXEC = re.compile(
+    r"^(?:[A-Za-z]:\\[^\s]*\\|/[^\s]+/)?"
+    r"(?:bash|sh|zsh|dash|ksh|fish|csh|tcsh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?)\b",
+    re.IGNORECASE,
+)
+_SHELL_INLINE_FLAGS = {
+    "-c", "/c", "/C", "--command", "-command", "-Command",
+    "-encodedcommand", "-EncodedCommand", "-e",
+}
+_SHELL_METACHAR = re.compile(r"[;|&`$()<>]")
+
+
+def _shell_wrapped_command(command, args) -> Optional[str]:
+    """Return the command line when it hides its payload behind a shell.
+
+    Returns ``None`` for a plain launcher (``npx``, ``python``, ``uvx``) and
+    for a non-shell interpreter running an inline program
+    (``python -c "print(1)"``), because neither hides anything: the executable
+    and its arguments are both visible in the config.
+    """
+    if not isinstance(command, str):
+        return None
+    cmd = command.strip()
+    if not cmd:
+        return None
+    arg_tokens = [str(a) for a in args] if isinstance(args, list) else []
+    joined = " ".join([cmd, *arg_tokens])
+    if _SHELL_METACHAR.search(cmd):
+        return joined
+    if not _SHELL_EXEC.match(cmd):
+        return None
+    inline = any(
+        t in _SHELL_INLINE_FLAGS or t.startswith("--command=") for t in arg_tokens
+    )
+    if inline or _SHELL_METACHAR.search(joined):
+        return joined
+    return None
+
+
 def _is_bare_unpinned_package(token):
     """True if token looks like a bare, unpinned package reference.
 
@@ -305,17 +352,20 @@ def _analyze_server(name: str, cfg: Dict[str, Any], text: str, file_path: str) -
             )
         )
 
-    # --- AS-MCP-003: Local command execution -------------------------------
-    if command:
+    # --- AS-MCP-003: shell-wrapped local command execution ------------------
+    shell_line = _shell_wrapped_command(command, args)
+    if shell_line:
+        if len(shell_line) > 160:
+            shell_line = shell_line[:157] + "..."
         findings.append(
             _mk(
                 "AS-MCP-003",
                 Severity.MEDIUM,
-                "Local command execution",
-                f"MCP server '{name}' launches a local command. The command runs on the host when the server starts.",
+                "Local command execution via shell",
+                f"MCP server '{name}' hands its command line to a shell. The shell runs on the host when the server starts, and what it executes is not visible in the config.",
                 file_path,
-                f"Command: {command}",
-                "Review the command and ensure it is trusted and pinned to a known version.",
+                f"Shell command line: {shell_line}",
+                "Replace the shell wrapper with a direct executable, then review that command and pin it to a known version.",
                 text,
                 needle,
             )
