@@ -166,6 +166,37 @@ def _opening_quote_index(line: str, start: int, end: int) -> "int | None":
     return None
 
 
+def _quoted_spans(line: str) -> "list[tuple[int, int]]":
+    """Paired quotation spans on one line (apostrophes between letters skipped)."""
+    spans = []
+    for ch in _QUOTE_CHARS:
+        positions = [i for i, c in enumerate(line) if c == ch]
+        for open_idx, close_idx in zip(positions[0::2], positions[1::2]):
+            if ch == "'":
+                before = line[open_idx - 1] if open_idx else " "
+                after = line[close_idx + 1] if close_idx + 1 < len(line) else " "
+                if before.isalnum() and after.isalnum():
+                    continue
+            spans.append((open_idx, close_idx))
+    return spans
+
+
+def _is_vocabulary_row(line: str, start: int, end: int) -> bool:
+    """True when the match is one item of a quoted list, not a sentence.
+
+    A line carrying three or more quoted items is a pattern/signature table
+    (`"ignore previous instructions", "you are now", ...` or a detector's
+    `(pattern, reason)` row): the phrase is vocabulary the file names, not
+    prose addressed to a reader. Two quoted spans are deliberately NOT enough --
+    `He wrote "ignore previous instructions" and "reveal secrets"` still hands
+    the agent an instruction, and attack text is often quoted.
+    """
+    spans = _quoted_spans(line)
+    if len(spans) < 3:
+        return False
+    return any(open_idx < start and end <= close_idx for open_idx, close_idx in spans)
+
+
 def _is_quoted_mention(line: str, start: int, end: int) -> bool:
     """True when the match is a quotation framed as someone else's words."""
     opener = _opening_quote_index(line, start, end)
@@ -177,7 +208,11 @@ def _is_quoted_mention(line: str, start: int, end: int) -> bool:
 @register
 def detect_ignore_instructions(content: str, file_path: str, line: int) -> "Finding | None":
     m = IGNORE_INSTRUCTIONS.search(content)
-    if m and not _is_quoted_mention(content, m.start(), m.end()):
+    if (
+        m
+        and not _is_quoted_mention(content, m.start(), m.end())
+        and not _is_vocabulary_row(content, m.start(), m.end())
+    ):
         return Finding(
             rule_id="AS-004",
             severity=Severity.HIGH,
@@ -205,6 +240,8 @@ def detect_reveal_secrets(content: str, file_path: str, line: int) -> "Finding |
         return None
     if _is_quoted_mention(content, m.start(), m.end()):
         return None
+    if _is_vocabulary_row(content, m.start(), m.end()):
+        return None
     return Finding(
         rule_id="AS-004",
         severity=Severity.HIGH,
@@ -220,7 +257,11 @@ def detect_reveal_secrets(content: str, file_path: str, line: int) -> "Finding |
 @register
 def detect_send_files(content: str, file_path: str, line: int) -> "Finding | None":
     m = SEND_FILES.search(content)
-    if m and not _is_quoted_mention(content, m.start(), m.end()):
+    if (
+        m
+        and not _is_quoted_mention(content, m.start(), m.end())
+        and not _is_vocabulary_row(content, m.start(), m.end())
+    ):
         return Finding(
             rule_id="AS-004",
             severity=Severity.HIGH,
@@ -237,7 +278,11 @@ def detect_send_files(content: str, file_path: str, line: int) -> "Finding | Non
 @register
 def detect_disable_security(content: str, file_path: str, line: int) -> "Finding | None":
     m = DISABLE_SECURITY.search(content)
-    if m and not _is_quoted_mention(content, m.start(), m.end()):
+    if (
+        m
+        and not _is_quoted_mention(content, m.start(), m.end())
+        and not _is_vocabulary_row(content, m.start(), m.end())
+    ):
         return Finding(
             rule_id="AS-004",
             severity=Severity.HIGH,

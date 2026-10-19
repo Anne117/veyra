@@ -1144,3 +1144,41 @@ The five real AS-002 pipelines in the slice survive: `tools/tts_command_provider
   pattern; its line-4 pipeline still produces the CRITICAL, so no corpus bucket
   moved.
 
+
+## Round 17 — AS-004: a quoted vocabulary row is not a sentence
+
+Field slice (`agent/ tools/ acp_adapter/ skills/` of the Hermes tree): 997 findings,
+8 of them AS-004 HIGH. All eight are the scanner's own vocabulary:
+
+| file:line | matched phrase | what the line is |
+|---|---|---|
+| `tools/mcp_tool_schema.py:19` | `ignore previous instructions` | reason string inside a `(pattern, reason)` row |
+| `tools/skills_guard.py:349` | `send data to a URL` | reason string inside a `(pattern, id, level, …)` row |
+| `tools/skills_tool_plugin.py:18` | `ignore previous instructions` | one item of a quoted pattern list |
+| `tools/skills_tool_plugin.py:19` | `forget your instructions` | one item of a quoted pattern list |
+
+The other four are prose about code (`# … files that leak secrets`,
+`# … expose credentials embedded in provider exception text`, a docstring
+`Override to expose API key prompts`, and a comment quoting a directive). Those are
+comment/docstring text, a class this round does not touch.
+
+**Rule:** `_is_vocabulary_row` in `rules/prompt_injection.py` — suppress when the match
+sits inside a quotation *and* the line carries three or more quoted spans. Three is the
+line between a table and a sentence: `"ignore previous instructions", "you are now"` is
+vocabulary; `He wrote "ignore previous instructions" and "reveal secrets"` is still a
+sentence that hands the agent an instruction, and two spans keep firing. The existing
+`_is_quoted_mention` frame test is unchanged, so `"Ignore previous instructions."` alone
+still fires.
+
+| measurement | before | after |
+|---|---|---|
+| AS-004 HIGH, field slice | 8 | 4 |
+| total findings, same slice | 997 | 993 |
+| every other rule, same slice | 989 | 989 |
+| corpus (112 cases) | 102 D / 7 P / 3 M / 0 FP | unchanged, drift 0 |
+| suite | 1685 | 1691 |
+
+**Residual cost:** the four comment/docstring hits still fire (block-level comment and
+docstring handling is the separate round already noted above), and a genuine injection
+written as a third quoted item on a table-looking line would be missed. Both are recorded,
+not silenced.
