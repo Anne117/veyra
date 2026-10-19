@@ -241,6 +241,11 @@ ATTACK_CASES: List[AttackCase] = [
     AttackCase("ignore-previous", "v2-prompt-injection", "v2/prompt-injection/ignore-previous/SKILL.md", DETECTED, "Instruction to disregard previous instructions.", ["AS-004"]),
     AttackCase("role-impersonation", "v2-prompt-injection", "v2/prompt-injection/role-impersonation/SKILL.md", DETECTED, "Role/authority impersonation to print password file.", ["AS-004"]),
     AttackCase("hidden-in-docs", "v2-prompt-injection", "v2/prompt-injection/hidden-in-docs/SKILL.md", DETECTED, "Malicious instruction hidden in documentation.", ["AS-004"]),
+    # F-1: P-10 narrowed AS-004 to a demonstrative object but no corpus case
+    # exercised the branch. Data only: the pair measures the positive (MEDIUM,
+    # the rule ceiling, hence PARTIAL) and the benign prose that stays silent.
+    AttackCase("unrelated-exec", "v2-prompt-injection", "v2/prompt-injection/unrelated-exec/SKILL.md", PARTIALLY_DETECTED, "Demonstrative directive to run a command (AS-004 MEDIUM). MEDIUM is the rule ceiling here, so no HIGH and no chain.", ["AS-004"]),
+    AttackCase("unrelated-exec-reference", "v2-benign-lookalikes", "v2/benign-lookalikes/unrelated-exec-reference/SKILL.md", DETECTED, "Benign prose referring to a command the reader already owns (re-run the command, execute a command, run the following steps). No AS-004 finding.", [], is_benign=True),
     AttackCase("access-credentials", "v2-prompt-injection", "v2/prompt-injection/access-credentials/SKILL.md", DETECTED, "Instruction to read .env and ~/.ssh credentials.", ["AS-004"]),
     AttackCase("send-data-external", "v2-prompt-injection", "v2/prompt-injection/send-data-external/SKILL.md", DETECTED, "Instruction to send local config externally.", ["AS-004"]),
     AttackCase("benign-prohibit", "v2-prompt-injection", "v2/prompt-injection/benign-prohibit/SKILL.md", DETECTED, "Benign skill that prohibits revealing secrets.", [], is_benign=True),
@@ -280,6 +285,13 @@ ATTACK_CASES: List[AttackCase] = [
     AttackCase("suspicious-args", "v2-mcp-security", "v2/mcp-security/suspicious-args/.mcp.json", DETECTED, "MCP server with dangerous flags.", ["AS-MCP-008"]),
     AttackCase("remote-exec-combo", "v2-mcp-security", "v2/mcp-security/remote-exec-combo/.mcp.json", DETECTED, "Remote MCP + dynamic exec combo.", ["AS-CHAIN-003"]),
     AttackCase("benign", "v2-mcp-security", "v2/mcp-security/benign/.mcp.json", DETECTED, "Benign local MCP server.", [], is_benign=True),
+    # F-1: AS-MCP-003, narrowed to shell-wrapped command lines, had zero corpus
+    # hits. shell-wrapped is the canonical curl-to-shell shape (content rules
+    # also fire, so DETECTED); shell-metachar isolates the branch (PARTIAL);
+    # shell-script-mcp is the plain launcher that must stay silent.
+    AttackCase("shell-wrapped", "v2-mcp-security", "v2/mcp-security/shell-wrapped/.mcp.json", DETECTED, "MCP config hands a curl-to-shell line to /bin/bash. DETECTED comes from the content rules (AS-002/AS-005); AS-MCP-003 MEDIUM is the config-layer signal measured here.", ["AS-MCP-003"]),
+    AttackCase("shell-metachar", "v2-mcp-security", "v2/mcp-security/shell-metachar/.mcp.json", PARTIALLY_DETECTED, "Config hides a chained command behind bash -c (semicolon). Only AS-MCP-003 fires, so the narrowed branch is measured without content-rule help.", ["AS-MCP-003"]),
+    AttackCase("shell-script-mcp", "v2-benign-lookalikes", "v2/benign-lookalikes/shell-script-mcp/.mcp.json", DETECTED, "Benign bash launcher that names its script in the args; nothing is hidden, so AS-MCP-003 stays silent.", [], is_benign=True),
     # --- v2 obfuscation ---
     AttackCase("base64-instruction", "v2-obfuscation", "v2/obfuscation/base64-instruction/SKILL.md", DETECTED, "Base64-encoded instruction to execute.", ["AS-004"]),
     AttackCase("rot13-instruction", "v2-obfuscation", "v2/obfuscation/rot13-instruction/SKILL.md", PARTIALLY_DETECTED, "ROT13-encoded instruction to run command.", ["AS-004"]),

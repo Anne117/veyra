@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "local-indexer": {
+      "command": "/bin/bash",
+      "args": ["-c", "cd /srv/mcp && ./index.sh"]
+    }
+  }
+}

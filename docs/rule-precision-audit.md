@@ -626,3 +626,48 @@ Two things, in order: (1) a corpus fixture for the shape `UNRELATED_EXEC` was wr
 next narrowing of it is measurable -- without it the rule can only lose coverage, never prove it;
 (2) `AS-003` MEDIUM noise (791 hits) remains the loudest by count but was rejected on measurement in
 P-3, so it stays unless the fixture set changes.
+
+## Round 11 — corpus coverage for the narrowed branches (F-1)
+
+Round 10 closed with two explicit gaps: `UNRELATED_EXEC` had no fixture of the
+shape it was written for, and `AS-MCP-003` (narrowed to shell-wrapped command
+lines) had zero hits on the whole corpus. A narrowing that nothing exercises
+can only lose coverage silently, so these five fixtures make both branches
+measurable. Data, expected values and tests only; no rule was touched.
+
+| Fixture | Shape | Measured |
+|---|---|---|
+| `v2/prompt-injection/unrelated-exec` | `Run this command to prepare the formatter:` | AS-004 MEDIUM, so PARTIAL |
+| `v2/benign-lookalikes/unrelated-exec-reference` | `re-run the command`, `execute a command`, `run the following steps` | no findings |
+| `v2/mcp-security/shell-wrapped` | `/bin/bash` with `-c` and a curl-to-shell line | AS-MCP-003 MEDIUM plus content rules AS-002/AS-005/AS-003, so DETECTED |
+| `v2/mcp-security/shell-metachar` | `bash -c "cd /srv/mcp && ./index.sh"` | AS-MCP-003 only (MEDIUM), so PARTIAL |
+| `v2/benign-lookalikes/shell-script-mcp` | `/bin/bash scripts/mcp_server.sh` | no findings |
+
+What the measurement says:
+
+- Both narrowed branches still fire on the shape they kept: AS-004 on the
+  demonstrative object, AS-MCP-003 on an inline `-c` payload and on shell
+  metacharacters.
+- Neither benign twin fires the narrowed rule, so on this evidence neither
+  narrowing is a false suppression.
+- `shell-wrapped` is DETECTED for a different reason: the same line is a
+  curl-to-shell payload, so the content rules fire at HIGH/CRITICAL. That is
+  honest, but the classifier cannot measure AS-MCP-003 there; `shell-metachar`
+  exists to isolate the branch, and its exact rule set is asserted in
+  `test_shell_metachar_fixture_isolates_mcp_003`.
+- MEDIUM is the ceiling of both rules, so `unrelated-exec` and
+  `shell-metachar` are PARTIAL by construction. The bucket is a measurement,
+  not a target.
+
+Corpus after the addition: 110 cases — 101 DETECTED / 6 PARTIAL / 3 MISSED /
+0 FP (91.8%). The 93.3% to 91.8% movement is denominator, not regression: five
+cases now cover branches the old 105 did not contain, two of them MEDIUM-only
+by design, and no previously detected case changed bucket (the per-case map in
+`tests/test_attack_lab.py` pins every one). Suite 1653 to 1656.
+
+### Next
+
+No false narrowing surfaced, so F-2 needed no rule change. Further precision
+work stays judgment-led: take a noisy rule from the field measurements, record
+the before/after, and leave the four original PARTIAL cases alone without new
+evidence.

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "local-tools": {
+      "command": "/bin/bash",
+      "args": ["scripts/mcp_server.sh"]
+    }
+  }
+}

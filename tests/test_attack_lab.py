@@ -256,7 +256,7 @@ def test_benign_clean_detected():
 # intentionally PARTIAL or MISSED, that expectation is preserved here unless
 # there is a deliberate, reviewed detection improvement.
 
-EXPECTED_TOTAL = 105
+EXPECTED_TOTAL = 110
 EXPECTED_FALSE_POSITIVES = 0
 # Updated 2026-10-18 (Phase 1, Q-1):
 #   AS-MCP-007 was token-precise (per-arg) and escalated to HIGH for
@@ -280,8 +280,16 @@ EXPECTED_FALSE_POSITIVES = 0
 #   stay non-HIGH (DETECTED = correctly clean). Detection percentage drops
 #   96.0% -> 93.3% because the new cases are harder, not because anything
 #   regressed.
-EXPECTED_DETECTED = 98
-EXPECTED_PARTIALLY_DETECTED = 4
+# Updated 2026-10-19 (Phase 1, F-1):
+#   Added 5 precision fixtures for two already-narrowed branches: AS-004
+#   demonstrative object (+ benign twin) and AS-MCP-003 shell-wrapped
+#   command (+ isolated metachar shape + benign launcher). Two land in
+#   PARTIAL by design because MEDIUM is the rule ceiling; the benign
+#   twins are correctly clean. The percentage moves 93.3% -> 91.8%
+#   because the corpus now exercises branches it did not cover, not
+#   because a detection regressed.
+EXPECTED_DETECTED = 101
+EXPECTED_PARTIALLY_DETECTED = 6
 EXPECTED_MISSED = 3
 
 # Per-case expected classifications. Keyed by (category, name).
@@ -330,6 +338,7 @@ EXPECTED_CASE_RESULTS = {
     ('v2-prompt-injection', 'ignore-previous'): DETECTED,
     ('v2-prompt-injection', 'role-impersonation'): DETECTED,
     ('v2-prompt-injection', 'hidden-in-docs'): DETECTED,
+    ('v2-prompt-injection', 'unrelated-exec'): PARTIALLY_DETECTED,
     ('v2-prompt-injection', 'access-credentials'): DETECTED,
     ('v2-prompt-injection', 'send-data-external'): DETECTED,
     ('v2-prompt-injection', 'benign-prohibit'): DETECTED,
@@ -369,6 +378,8 @@ EXPECTED_CASE_RESULTS = {
     ('v2-mcp-security', 'suspicious-args'): DETECTED,
     ('v2-mcp-security', 'remote-exec-combo'): DETECTED,
     ('v2-mcp-security', 'benign'): DETECTED,
+    ('v2-mcp-security', 'shell-wrapped'): DETECTED,
+    ('v2-mcp-security', 'shell-metachar'): PARTIALLY_DETECTED,
     # --- v2-obfuscation ---
     ('v2-obfuscation', 'base64-instruction'): DETECTED,
     ('v2-obfuscation', 'rot13-instruction'): PARTIALLY_DETECTED,
@@ -403,6 +414,8 @@ EXPECTED_CASE_RESULTS = {
     ('v2-benign-lookalikes', 'http-requests'): DETECTED,
     ('v2-benign-lookalikes', 'security-tutorial'): DETECTED,
     ('v2-benign-lookalikes', 'incident-response'): DETECTED,
+    ('v2-benign-lookalikes', 'unrelated-exec-reference'): DETECTED,
+    ('v2-benign-lookalikes', 'shell-script-mcp'): DETECTED,
     # --- v2-sensitive-path ---
     ('v2-sensitive-path', 'env-read'): DETECTED,
     ('v2-sensitive-path', 'aws-read'): DETECTED,
@@ -561,3 +574,52 @@ def test_attack_lab_per_category_totals_consistent():
                 f"category={cat} bucket={k}: categories()={ac[k]} != "
                 f"per-case sum={v}"
             )
+
+
+def test_narrowed_branches_are_covered_by_fixture_pairs():
+    """F-1: the AS-004 demonstrative branch and AS-MCP-003 have both fixtures.
+    The classifier only counts HIGH/CRITICAL as a detection, so a MEDIUM-only
+    rule would look silent in the summary. These assertions measure the branch
+    directly: the positive fixture must raise the narrowed rule at its real
+    severity, and the benign twin must not raise it at all.
+    """
+    pairs = {
+        "AS-004": (
+            "v2/prompt-injection/unrelated-exec/SKILL.md",
+            "v2/benign-lookalikes/unrelated-exec-reference/SKILL.md",
+        ),
+        "AS-MCP-003": (
+            "v2/mcp-security/shell-wrapped/.mcp.json",
+            "v2/benign-lookalikes/shell-script-mcp/.mcp.json",
+        ),
+    }
+    for rule, (positive, benign) in pairs.items():
+        pos = {
+            f.rule_id: f.severity.value
+            for f in scan_path(str(FIXTURES / positive)).findings
+        }
+        neg = {f.rule_id for f in scan_path(str(FIXTURES / benign)).findings}
+        assert rule in pos, (positive, pos)
+        assert pos[rule] == "MEDIUM", (positive, pos[rule])
+        assert rule not in neg, (benign, neg)
+
+
+def test_shell_metachar_fixture_isolates_mcp_003():
+    """The metachar fixture must fire AS-MCP-003 and nothing else."""
+    ids = {
+        f.rule_id
+        for f in scan_path(
+            str(FIXTURES / "v2/mcp-security/shell-metachar/.mcp.json")
+        ).findings
+    }
+    assert ids == {"AS-MCP-003"}, ids
+
+
+def test_narrowed_branch_classifications_are_recorded():
+    """The corpus records the measured bucket for each new fixture."""
+    results = {c["name"]: c["result"] for c in run_attack_lab().cases}
+    assert results["unrelated-exec"] == PARTIALLY_DETECTED
+    assert results["unrelated-exec-reference"] == DETECTED
+    assert results["shell-wrapped"] == DETECTED
+    assert results["shell-metachar"] == PARTIALLY_DETECTED
+    assert results["shell-script-mcp"] == DETECTED
