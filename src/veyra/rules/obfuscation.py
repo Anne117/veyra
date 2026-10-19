@@ -76,12 +76,14 @@ def _decode_rot13(token: str) -> str:
     return codecs.decode(token, "rot13")
 
 
-def _line_for(text: str, needle: str) -> Optional[int]:
-    """Best-effort line number for a needle within the raw text."""
-    for i, line in enumerate(text.splitlines(), start=1):
-        if needle in line:
-            return i
-    return None
+def _line_at(text: str, offset: int) -> int:
+    """1-based line number for a character offset in the raw text.
+
+    Derived from the match offset, not from searching for the token text: the
+    same encoded payload can appear on several lines, and a text search would
+    attribute every occurrence to the first line that contains it.
+    """
+    return text.count("\n", 0, max(offset, 0)) + 1
 
 
 def _mk(
@@ -93,7 +95,7 @@ def _mk(
     evidence: str,
     remediation: str,
     text: str,
-    needle: str,
+    offset: int,
 ) -> Finding:
     return Finding(
         rule_id=rule_id,
@@ -101,7 +103,7 @@ def _mk(
         title=title,
         description=description,
         file=file_path,
-        line=_line_for(text, needle),
+        line=_line_at(text, offset),
         evidence=evidence,
         remediation=remediation,
     )
@@ -136,7 +138,7 @@ def scan_obfuscation(text: str, file_path: str) -> List[Finding]:
                     f"Base64 payload decodes to a shell command (method: Base64)",
                     "Do not decode and execute encoded content; review the payload.",
                     text,
-                    token,
+                    m.start(),
                 )
             )
             continue
@@ -153,7 +155,7 @@ def scan_obfuscation(text: str, file_path: str) -> List[Finding]:
                     f"Base64 payload decodes to a remote script URL (method: Base64)",
                     "Do not fetch and execute encoded remote content.",
                     text,
-                    token,
+                    m.start(),
                 )
             )
 
@@ -173,7 +175,7 @@ def scan_obfuscation(text: str, file_path: str) -> List[Finding]:
                         f"ROT13 payload decodes to a shell command (method: ROT13)",
                         "Do not decode and execute encoded content; review the payload.",
                         text,
-                        token,
+                        m.start(),
                     )
                 )
 

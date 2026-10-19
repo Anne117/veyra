@@ -105,3 +105,19 @@ def test_benign_encoded_helper_clean():
         "- Does not execute decoded content.\n"
     )
     assert _ids(text) == []
+
+
+def test_repeated_payload_is_reported_at_each_real_line():
+    # The same encoded payload may appear in several places. Each finding must
+    # point at its own line; searching for the token text reported every
+    # occurrence at the first line that contained it.
+    payload = "ZWNobyAicm0gLXJmIC90bXAvc2NyYXRjaCI="
+    text = (
+        "intro\n"
+        f'echo "{payload}" | base64 -d | bash\n'
+        "middle\n"
+        f'echo "{payload}" | base64 -d | bash\n'
+    )
+    findings = [f for f in _scan(text) if f.rule_id == "AS-007"]
+    assert [f.line for f in findings] == [2, 4]
+    assert len({f.evidence for f in findings}) == 1

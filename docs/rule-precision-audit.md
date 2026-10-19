@@ -861,3 +861,47 @@ canonical detectors.
 
 `AS-007` remains double-registered in `network`-adjacent modules the same way; it is outside
 this round's scope and needs its own measurement and commit.
+
+## Round 15 -- AS-007 findings point at the line they were found on
+
+This round started as "AS-007 is double-registered like AS-005". That premise was wrong and
+is corrected here.
+
+### What was actually true
+
+`AS-007` has exactly one registration: `scan_obfuscation` in `obfuscation.py`
+(`load_file_rules()` returns two file rules, each registered once). The duplicate-looking
+output came from `_line_for(text, needle)`, which searched the file text for the token and
+returned the **first** line containing it. When the same encoded payload appeared on several
+lines, every occurrence was reported at that first line -- four findings on line 17 of
+`tests/test_obfuscation.py` were four real occurrences (lines 17, 31, 82, 90), all
+misattributed to line 17.
+
+So the counts were right and the evidence was wrong. A finding pointing at the wrong line is
+an explainability defect: the report says "here is the payload" and points somewhere else.
+
+### Change
+
+The line is now derived from the regex match offset
+(`text.count("\n", 0, match.start()) + 1`) instead of a text search. No detector logic,
+severity, evidence string or threshold changed.
+
+### Measurement (same file, before -> after)
+
+`tests/test_obfuscation.py`:
+
+| | Before | After |
+|---|---|---|
+| AS-007 findings | 6 | 6 |
+| distinct lines reported | 17, 58 (two values) | 17, 31, 58, 66, 82, 90 |
+| findings per line | 17 x4, 58 x2 | one each |
+
+Whole-tree scan: AS-007 findings 15 -> 16 (the regression test adds one payload line),
+identical `(file, line, severity, evidence)` tuples 4 -> 0. Corpus buckets unchanged
+(110 cases, 101 D / 6 P / 3 M / 0 FP). Suite 1671 -> 1672.
+
+### Guard
+
+`test_repeated_payload_is_reported_at_each_real_line` puts the same payload on lines 2 and 4
+and asserts the findings land on `[2, 4]` with identical evidence. It fails on the previous
+implementation and passes now.
