@@ -53,9 +53,12 @@ REVEAL_SECRETS = re.compile(
 
 # Negation patterns that indicate the instruction is NOT to reveal secrets.
 # e.g. "never reveal secrets", "do not print secrets", "don't expose credentials",
-# "must not disclose API keys".
+# "must not disclose API keys". `cannot` is here for the decode branch: prose
+# that says a model "cannot decrypt the blob" is describing data, not asking
+# for a decode.
 NEGATION = re.compile(
-    r"\b(?:never|do\s+not|don'?t|must\s+not|should\s+not|shall\s+not|avoid|refrain\s+from|without)\b",
+    r"\b(?:never|do\s+not|don'?t|must\s+not|should\s+not|shall\s+not|avoid|refrain\s+from|without"
+    r"|cannot|can\s+not|can'?t)\b",
     re.IGNORECASE,
 )
 
@@ -298,17 +301,22 @@ def detect_disable_security(content: str, file_path: str, line: int) -> "Finding
 
 @register
 def detect_encoded_obfuscated(content: str, file_path: str, line: int) -> "Finding | None":
-    if DECODE_DIRECTIVE.search(content) or DECODE_PIPE_TO_SHELL.search(content):
-        return Finding(
-            rule_id="AS-004",
-            severity=Severity.MEDIUM,
-            title="Prompt injection",
-            description="Encoded/obfuscated content detected; instructions may be hidden in encoded text.",
-            file=file_path,
-            line=line,
-            evidence="Encoded/obfuscated content",
-            remediation="Decode and review the content; avoid executing hidden instructions.",
-        )
+    for pattern in (DECODE_DIRECTIVE, DECODE_PIPE_TO_SHELL):
+        m = pattern.search(content)
+        # A negated verb is not an instruction to decode: "cannot decrypt the
+        # blob", "never decode this payload". Same reading as REVEAL_SECRETS
+        # below, which already refuses "never reveal secrets".
+        if m and not NEGATION.search(content[: m.start()]):
+            return Finding(
+                rule_id="AS-004",
+                severity=Severity.MEDIUM,
+                title="Prompt injection",
+                description="Encoded/obfuscated content detected; instructions may be hidden in encoded text.",
+                file=file_path,
+                line=line,
+                evidence="Encoded/obfuscated content",
+                remediation="Decode and review the content; avoid executing hidden instructions.",
+            )
     return None
 
 
