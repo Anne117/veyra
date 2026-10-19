@@ -34,7 +34,10 @@ JS_SHELL_TRUE = re.compile(r"\b(?:exec|execSync|spawn|spawnSync)\([^)]*shell\s*:
 
 CURL_PIPE_SHELL = re.compile(r"\bcurl\b[^|;]*\|\s*(?:ba)?sh\b")
 WGET_PIPE_SHELL = re.compile(r"\bwget\b[^|;]*\|\s*(?:ba)?sh\b")
-SHELL_EVAL = re.compile(r"\beval\s+[^#\n]+")
+# `eval` takes code, so in real shell code the argument starts with a quote,
+# a variable/command expansion, or a path. Prose ("eval failed", "post-eval
+# page", "eval of a variable") does not, and used to be reported at HIGH.
+SHELL_EVAL = re.compile(r"\beval\s+(?:\$|[\"'`]|\(|/|\./|~/)")
 SHELL_EXEC = re.compile(r"\b(?:exec|source)\s+[^#\n]+")
 
 

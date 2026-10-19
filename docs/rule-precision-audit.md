@@ -790,3 +790,70 @@ AS-002 "Command execution" MEDIUM (23 slice hits) is the next precision round wi
 before/after measurement. Removing the duplicate registrations at the source (deleting the
 duplicated rule bodies from `suspicious_urls.py` instead of filtering at output) stays a
 separate, larger change -- it would have to move the divergence test.
+
+## Round 13 -- AS-002 `Shell eval`: the argument must be code
+
+Taken next after the counting fix. `AS-002` had 44 hits in the Hermes `tools/` slice; 14 of
+them were the `Shell eval` branch at HIGH.
+
+### What the field run actually showed
+
+Every one of the 14 lines was prose, a log/error string, a comment, or the rule's own
+description -- not a shell `eval` statement:
+
+| Shape | Example line |
+|---|---|
+| hyphenated compound | `after an eval that may navigate the page` (`post-eval page-URL recheck`) |
+| error string | `result.get("error", "eval failed")` |
+| comment | `# sh -c / bash -c / eval payloads still scan raw` |
+| rule metadata | `description="eval executes a string as shell code"` |
+
+The pattern was `\beval\s+[^#\n]+`: word-boundary plus "anything that is not a comment",
+so the English word "eval" inside a sentence was enough. It also fired on Veyra's own
+rule catalog (8 hits in `src/`, including the `AS-002` description and the MITRE label
+`"eval statement"`) and on the comment line of the corpus fixture `shell-execution/eval-var`
+-- a case whose code line already fires, i.e. the corpus was counting that case twice.
+
+### Refinement applied
+
+`eval` executes code, so in shell code its argument starts with a quote, a variable or
+command expansion, or a path. The rule now requires exactly that
+(``\beval\s+(?:\$|["'`]|\(|/|\./|~/)``) and no longer accepts an arbitrary prose word.
+Both forms that appear in real code stay covered: `eval $cmd`, `eval ${cmd}`,
+`eval "$(curl ...)"`, ``eval `${payload}` ``, and generated fragments like
+`f"eval '{escaped}'"` (kept -- that line in `environments/base_session_env.py` is a real
+shell eval in a generated script, and it was the one true positive in the slice).
+
+### Delta (same runs, before -> after)
+
+| Target | Before | After |
+|---|---|---|
+| Hermes `tools/` slice | 485 findings | 472 |
+| ... of which AS-002 | 44 | 31 |
+| ... of which `Shell eval` | 14 | 1 |
+| Hermes `agent/` slice | 407 | 407 (AS-002: 2 -> 0) |
+| Hermes `skills/` slice | 154 | 154 (no AS-002 shell-eval hits) |
+| Veyra `src/` | 146 | 138 (self-catalog hits only) |
+| Attack corpus (110 cases) | 101 D / 6 P / 3 M / 0 FP, 128 findings | same buckets, 127 findings |
+| suite | 1665 | 1667 |
+
+The corpus keeps its buckets: `eval-var` still detects off its `eval $cmd` line at HIGH;
+only the comment line stops being reported, which is why corpus findings drop by one. No
+previously detected case changed bucket.
+
+### Residual cost (measured, not hidden)
+
+- Bare-word `eval ls` / `eval script.sh` is no longer matched. Such code is legal shell
+  but indistinguishable from prose on a single line, and none of it exists in the slices
+  measured here (the drop is 100% prose; the one kept hit is quoted).
+- A *documented* payload (`` `eval "$(curl ...)"` `` inside backticks in defensive prose)
+  still fires: quoting is exactly the shape the rule keeps. That limit is inherent to
+  line-based rules and unchanged by this round.
+
+### Next
+
+The remaining AS-002 noise in `tools/` is the `Command execution` MEDIUM branch
+(`child_process exec/spawn`, 21 hits), which matches any `.exec(`/`.spawn(` method call and
+even prose `spawn (default)`, plus the `os.system` rule matching its own description text
+inside `skills_guard.py`. That branch and the child_process evidence string are the next
+precision round.
