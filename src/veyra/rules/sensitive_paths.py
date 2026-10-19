@@ -21,8 +21,24 @@ from veyra.rules import register
 # --- Sensitive path patterns ----------------------------------------------
 
 # Sensitive credential-bearing paths/files.
+# A sensitive path must be a *file or path*, not the bare noun. The previous
+# pattern accepted any occurrence of "credential"/"credentials", so a line such
+# as ``load_credentials()`` or ``self.env.get(...)`` counted as a credential-file
+# access as soon as the line also contained any access verb. Measured on a real
+# code slice (Hermes agent/, tools/, acp_adapter/, skills/): that alone produced
+# most of 116 HIGH findings on benign source. A noun only counts when it names a
+# file ("credentials file", "secret file") or sits in a path ("~/.aws/credentials").
 SENSITIVE_PATH = re.compile(
-    r"(?:\.env\b|\.aws(?:/|\\|\\b)|\.ssh(?:/|\\|\\b)|credentials?|secret(?:s)?\s+file|private\s+key|id_rsa|id_ed25519|\.pem\b|\.key\b)",
+    r"(?:"
+    r"\.env(?!\.?\w|\()"                         # dotenv file, not `.env.get(` / `.env.example`
+    r"|\.aws(?:[/\\]|\b)"                       # ~/.aws directory or its files
+    r"|\.ssh(?:[/\\]|\b)"                       # ~/.ssh directory or its files
+    r"|id_rsa|id_ed25519"                        # SSH private keys
+    r"|\.pem(?![\w(])|\.key(?![\w(])"            # key material files, not attribute access
+    r"|private\s+key"                            # "the private key"
+    r"|[/\\]credentials?\b"                      # credentials as a path element
+    r"|(?:credentials?|secrets?)\s+files?\b"      # "credentials file", "secret file"
+    r")",
     re.IGNORECASE,
 )
 
@@ -40,7 +56,7 @@ CONFIG_ACCESS = re.compile(
 
 # Explicit credential extraction terms.
 CREDENTIAL_EXTRACTION = re.compile(
-    r"\b(?:password|passwd|token|secret|credential|api\s*key|access\s*key|private\s*key)\b",
+    r"\b(?:password|passwd|tokens?|secrets?|credentials?|api\s*key|access\s+key|private\s+key)\b",
     re.IGNORECASE,
 )
 

@@ -413,3 +413,76 @@ Honest limits, recorded rather than papered over:
 - Still open and deliberately not touched: the AWS documentation example key id
   `AKIA…EXAMPLE` at CRITICAL (a test asserts that detection, so reversing it is
   the owner's call, as recorded in round 5).
+
+## P-8: AS-006 / "Sensitive credential file access" -- first field run on real code
+
+Earlier rounds measured the fixture corpus only; its benign members are synthetic and small.
+This round used real benign material: a bounded slice of the Hermes agent tree
+(`agent/`, `tools/`, `acp_adapter/`, `skills/` -- 40 MB, ordinary Python + markdown, scanned
+read-only). AS-006 produced **116 HIGH findings**, all with the same shape: an access verb
+(`read|get|load|open|...`) somewhere on the line plus a "credential" token somewhere on the line.
+
+### Cause
+
+`SENSITIVE_PATH` accepted bare nouns and bare suffixes wherever they appeared:
+
+- `credentials?` -- matched `load_credentials()`, `get the credential from the vault`, log strings;
+- `.env` -- matched `self.env.get(...)` (attribute access) and `.env.example` (a placeholder file);
+- `.key` -- matched `backend.key(args.get(...))` (attribute call).
+
+Because the access verb is searched line-wide, a comment *about* `.env` or a docstring *about*
+credential handling became a HIGH "credential file access" verdict.
+
+### Refinement applied
+
+`src/veyra/rules/sensitive_paths.py` (rule id, HIGH severity, titles and evidence strings unchanged):
+
+1. A noun counts only when it names a file or sits in a path: `credentials file`, `secret file`,
+   `~/.aws/credentials`, `/etc/app/credentials.yml`. The bare noun no longer matches.
+2. `.env` is excluded when immediately followed by `.`+word char or `(` -- i.e. attribute access
+   and `.env.example`, not a dotenv target.
+3. `.pem` / `.key` are excluded when followed by `(` -- attribute calls, not key files.
+4. `CREDENTIAL_EXTRACTION` now accepts plurals (`tokens?`, `secrets?`, `credentials?`). This is
+   not scope creep: narrowing signal 1 exposed a pre-existing gap the fixture suite had masked.
+   `read the config file to obtain credentials` was caught *only* because the bare noun matched
+   signal 1 -- signal 2's list was singular-only, so the plural never matched. Fixing the
+   extraction list is what keeps that documented behaviour alive.
+
+### Delta (same runs, before -> after)
+
+| Metric | Before | After |
+|---|---|---|
+| AS-006 HIGH findings, real benign slice (`agent/ tools/ acp_adapter/ skills/`) | 116 | 38 |
+| AS-006 HIGH findings, `agent/` | 56 | 12 |
+| AS-006 HIGH findings, `tools/` | 51 | 21 |
+| AS-006 HIGH findings, `skills/` | 8 | 4 |
+| corpus detected / partial / missed / FP | 98 / 4 / 3 / 0 | 98 / 4 / 3 / 0 |
+| corpus detection percentage | 93.3% | 93.3% |
+
+All 17 AS-006 corpus detections survive (8 `v2-sensitive-path` attacks, `read-credentials`,
+`aws-credentials`, `ssh-key`, `private-key`, `access-credentials`, `env-file`, `key-exec`,
+`read-secret-upload`, and the `config-password` signal-2 case).
+
+### Residual cost (measured, not hidden)
+
+The 38 remaining field hits are: quoted `.env`/`~/.ssh` mentions in comments, docstrings and tool
+deny-lists (`"deny": ["Read(.env)"]`), regex sources inside Hermes' own secret guards, one URL path
+segment (`.../apis/credentials`), and 2-3 genuine reads in helper code
+(`cat /run/user/1000/hermes-secrets.env` in a documented config example, `cat ~/.ssh/id_ed25519.pub`
+in a docs snippet). A line-based rule cannot separate "this code reads `.env`" from "this comment
+says the code reads `.env`" without AST/shell-context parsing; that is a structural change, not a
+precision fix, so it is not done here. Also recorded: `self.key = ...` (attribute assignment) still
+matches `.key` -- the guard covers calls, not assignments.
+
+### Note on the noisiest rule in the field
+
+`AS-003` (HTTP client call) fired 791 times at MEDIUM across the same slice, far more than AS-006.
+It was already rejected as a narrowing target in P-3 with measurement (19 corpus cases lose a
+HIGH/CRITICAL finding, 12 of them chains). Not re-litigated.
+
+### Next
+
+`AS-004` "Instruction to reveal secrets/credentials" fired 25 times at HIGH in `agent/` on prompts
+and code that quote the phrase as policy ("never reveal..."). That needs the P-7 masked-example
+treatment, with the same rule: if separating quote-from-instruction costs a real detection, record
+it and stop.

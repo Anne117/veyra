@@ -123,3 +123,49 @@ def test_negated_config_credential_not_detected():
 def test_unrelated_config_manipulation_not_detected():
     """Config manipulation without credential extraction must not be flagged."""
     assert detect_sensitive_path_access("update the config file to change the port", "SKILL.md", 1) is None
+
+
+# --- P-8: the sensitive "path" must be a path, not a bare noun ------------
+# Field run over a real benign code slice (Hermes agent/, tools/,
+# acp_adapter/, skills/) showed the bare-noun pattern firing 116 times at HIGH
+# on comments, docstrings and identifiers. These tests pin the boundary.
+
+def test_bare_credential_noun_is_not_a_path():
+    for line in [
+        "load credentials into the pool",
+        "get the credential from the vault client",
+        "read every credential the provider returned",
+        "def load_credentials(self):",
+    ]:
+        assert detect_sensitive_path_access(line, "x.py", 1) is None, f"noise: {line}"
+
+
+def test_attribute_access_is_not_a_file():
+    """.env / .key as attributes or example files are not credential files."""
+    for line in [
+        "candidate = self.env.get(env_var) or os.environ.get(env_var)",
+        "read .env.example instead",
+        'backend.key(args.get("keys", ""), **delivery)',
+    ]:
+        assert detect_sensitive_path_access(line, "x.py", 1) is None, f"noise: {line}"
+
+
+def test_credentials_file_noun_still_detected():
+    for line in [
+        "load the credentials file",
+        "read the secret file",
+        "open the credentials file",
+    ]:
+        f = detect_sensitive_path_access(line, "SKILL.md", 1)
+        assert f is not None, f"lost detection: {line}"
+        assert f.severity.value == "HIGH"
+
+
+def test_path_shaped_credential_detected():
+    for line in [
+        "cat ~/.aws/credentials",
+        "read /etc/app/credentials.yml",
+        "read the deploy key from deploy.pem",
+        "load ~/.ssh/config",
+    ]:
+        assert detect_sensitive_path_access(line, "SKILL.md", 1) is not None, f"lost: {line}"
