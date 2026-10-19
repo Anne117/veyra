@@ -30,9 +30,23 @@ _REVEAL_FILLER = (
     r"(?:the\s+)?(?:local\s+)?(?:database\s+)?(?:config\s+)?(?:file\s+)?(?:every\s+)?)?"
 )
 
+# Two of the reveal verbs are also attributive nouns in technical prose:
+# "output tokens" and "display token count" are noun phrases (LLM billing),
+# where `output` modifies `tokens` the way `context` modifies `window`. Read
+# as a verb, that produced HIGH "instruction to reveal secrets" on ordinary
+# accounting strings — 22 of 28 field hits over the Hermes tree. For those two
+# verbs the object must therefore be marked explicitly (a determiner or the
+# "value of"/"contents of" filler): "output the tokens", "display your API
+# keys". The other verbs keep firing on a bare object ("reveal secrets",
+# "print environment variables") because they have no attributive reading.
+_DETERMINER = r"(?:your|all|the|any|these|its|their|every)\s+"
+
 REVEAL_SECRETS = re.compile(
-    r"\b(?:reveal|print|show|expose|leak|output|display)\s+"
-    r"(?:your\s+)?(?:all\s+)?" + _REVEAL_FILLER + r"\s*"
+    r"\b(?:"
+    r"(?:reveal|print|show|expose|leak)\s+(?:your\s+)?(?:all\s+)?"
+    r"|(?:output|display)\s+" + _DETERMINER +
+    r")"
+    + _REVEAL_FILLER + r"\s*"
     r"(?:secrets?|api\s*keys?|api\s*tokens?|tokens?|credentials?|passwords?|environment\s+variables?)\b",
     re.IGNORECASE,
 )
