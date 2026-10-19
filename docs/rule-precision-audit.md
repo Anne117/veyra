@@ -671,3 +671,70 @@ No false narrowing surfaced, so F-2 needed no rule change. Further precision
 work stays judgment-led: take a noisy rule from the field measurements, record
 the before/after, and leave the four original PARTIAL cases alone without new
 evidence.
+
+## Round 12 -- AS-005 raw IP: loopback is not an external endpoint
+
+Round 11 left precision work judgment-led. The candidate was chosen from a fresh
+field scan of the whole Hermes tree (read-only), ranked by count inside the same
+slice used since P-8 (`agent/ tools/ acp_adapter/ skills/`):
+
+| Rule | Slice hits | Status |
+|---|---|---|
+| AS-003 "External network access" MEDIUM | 920 | rejected with measurement in P-3, not re-litigated |
+| AS-006 "Sensitive credential file access" HIGH | 38 | residual of P-8, structural limit (line-based rule cannot separate mention from access) |
+| AS-002 "Command execution" MEDIUM | 23 | next candidate |
+| AS-005 "Raw IP address in URL" MEDIUM | 10 findings / 5 lines | **this round** |
+
+### What the field run actually showed
+
+All five lines are the same benign class: local dev-server probes inside skills --
+`curl -s http://127.0.0.1:9229/json/list` (Node inspector), `HERMES_DESKTOP_DEV_SERVER=http://127.0.0.1:5174`.
+The rule's own description reads "URL uses a raw IP address instead of a domain name",
+and its remediation says to verify the endpoint is legitimate; a loopback address is
+not an external endpoint at all. The finding was true but undiscriminating.
+
+### Refinement applied
+
+`src/veyra/rules/network.py` and `src/veyra/rules/suspicious_urls.py` (rule id, MEDIUM
+severity, title, description and evidence strings unchanged):
+
+- A raw-IP URL on the line is skipped when **every** raw-IP URL on that line parses to a
+  loopback (`127.0.0.0/8`) or unspecified (`0.0.0.0`) address, via stdlib `ipaddress`.
+- RFC1918 (`192.168.x`, `10.x`, `172.16-31.x`) is **not** excluded: an attacker can still
+  choose a LAN endpoint, and the corpus case `tests/fixtures/urls/config.py`
+  (`http://192.168.1.1:8080/api`) must keep firing.
+- A line mixing one loopback and one external raw IP still fires (asserted).
+- Hosts that do not parse as an address (`999.1.1.1`) are treated as non-local, so
+  malformed octets keep their finding.
+
+### Delta (same runs, before -> after)
+
+| Metric | Before | After |
+|---|---|---|
+| AS-005 raw-IP MEDIUM, field slice (`agent/ tools/ acp_adapter/ skills/`) | 10 findings / 5 lines | 0 / 0 |
+| AS-005 raw-IP MEDIUM, whole Hermes tree | 2042 | 398 |
+| total findings, whole Hermes tree | 12952 | 11308 |
+| corpus detected / partial / missed / FP | 101 / 6 / 3 / 0 | 101 / 6 / 3 / 0 |
+| corpus detection percentage | 91.8% | 91.8% |
+| suite | 1656 | 1663 |
+
+The corpus `urls/config.py` raw-IP detection (`192.168.1.1`, MEDIUM) survives, so no
+AS-005 corpus case changed bucket.
+
+### Residual cost and an unrelated defect found while measuring
+
+The 398 remaining whole-tree hits are external or RFC1918 addresses outside the slice,
+which this round deliberately does not touch.
+
+Separately: **AS-005 raw-IP is registered twice** -- `detect_raw_ip_url` in `network.py`
+and `detect_raw_ip` in `suspicious_urls.py` are both loaded by `load_rules()`, so every
+hit is emitted twice. That is why the slice count was 10 findings for 5 lines. Both
+copies were narrowed identically here, and `test_both_raw_ip_modules_agree_on_local_endpoints`
+now pins them against divergence. De-duplicating the registration is a counting defect,
+not a precision fix, so it is recorded and not done in this commit.
+
+### Next
+
+Either de-duplicate the double-registered AS-005 rules (same measurement method: field
+counts, and the corpus buckets must not move), or take AS-002 "Command execution" MEDIUM
+(23 slice hits) as the next precision round.

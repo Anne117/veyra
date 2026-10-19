@@ -7,6 +7,7 @@ Does not classify a domain as malicious purely because it is unfamiliar.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 
 from veyra.models import Finding, Severity
@@ -35,10 +36,32 @@ URL_PIPE_SHELL = re.compile(
     re.IGNORECASE,
 )
 
+# --- Local endpoints -------------------------------------------------------
+
+RAW_IP_HOST = re.compile(r"https?://(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?")
+
+
+def _is_local_endpoint(content: str) -> bool:
+    """True when every raw-IP URL on the line is loopback or unspecified."""
+    matches = list(RAW_IP.finditer(content))
+    if not matches:
+        return False
+    for match in matches:
+        host_match = RAW_IP_HOST.match(match.group(0))
+        if host_match is None:
+            return False
+        try:
+            addr = ipaddress.ip_address(host_match.group(1))
+        except ValueError:
+            return False
+        if not (addr.is_loopback or addr.is_unspecified):
+            return False
+    return True
+
 
 @register
 def detect_raw_ip(content: str, file_path: str, line: int) -> "Finding | None":
-    if RAW_IP.search(content):
+    if RAW_IP.search(content) and not _is_local_endpoint(content):
         return Finding(
             rule_id="AS-005",
             severity=Severity.MEDIUM,
