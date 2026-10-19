@@ -905,3 +905,58 @@ identical `(file, line, severity, evidence)` tuples 4 -> 0. Corpus buckets uncha
 `test_repeated_payload_is_reported_at_each_real_line` puts the same payload on lines 2 and 4
 and asserts the findings land on `[2, 4]` with identical evidence. It fails on the previous
 implementation and passes now.
+
+## Round 14 — AS-002 MEDIUM: a child_process call, not any `exec(`/`spawn(` (2026-10-19)
+
+### Field noise
+
+Hermes `tools/` slice: 21 AS-002 MEDIUM findings, 21 false. Three shapes:
+
+- prose and messages — `"Use spawn (default), list, steer, or stop."`,
+  `spawn (#106163)`, `# -exec (runs in each match's directory)`,
+  `spawn (OSV preflight, ...)`;
+- another object's method — `sandbox.process.exec("echo $HOME")`,
+  `_PtyProcessCls.spawn(pty_argv)`, Java `Runtime.exec()`;
+- Python's builtin — `exec(compile(request["code"], ...), GLOBALS)`;
+- the rule's own descriptions inside `skills_guard.py` (`"Java Runtime.exec()"`).
+
+`skills/` added two more: `spawn (default)` prose and a p5.js method *declaration*
+`spawn(x, y) {`.
+
+### Narrowing
+
+A MEDIUM finding now needs a real child_process call: the callee is either the
+`child_process` module member, or a bare destructured name glued to its paren
+(no receiver before it), with a command-shaped first argument (string/template
+literal or plain identifier) and a paren list that is not a definition body
+(`) {` / `) =>`). HIGH `shell: true` branch unchanged.
+
+Costs, documented: `exec (cmd)` with a space, `exec(fn())` with a nested call,
+and receiver-qualified SDK execution (`sandbox.process.exec`) are no longer
+MEDIUM. The first two are indistinguishable from prose on one line; the third
+is not child_process. Python `exec(var)` is still caught by the separate
+`eval/exec of a variable` HIGH branch — which also fires on JS `exec(var)`; that
+label mismatch is a separate defect, not fixed here.
+
+### Measurement (before -> after, same runs)
+
+| Slice | Findings | AS-002 all | AS-002 MEDIUM |
+|---|---|---|---|
+| Hermes `tools/` | 472 -> 451 | 31 -> 10 | 21 -> 0 |
+| Hermes `skills/` | 154 -> 152 | 7 -> 5 | 2 -> 0 |
+| Hermes `agent/` | 407 -> 407 | 0 -> 0 | 0 -> 0 |
+| Veyra `src/` | 138 -> 138 | 7 -> 7 | 0 -> 0 |
+
+Corpus 110 -> 112 cases: 102 DETECTED / 7 PARTIAL / 3 MISSED / 0 FP (91.1%);
+findings 127 -> 128. New pair: `v2/shell-execution/js-child-process-exec`
+(`child_process.execSync` on an env command — PARTIAL, MEDIUM ceiling) and
+`v2/benign-lookalikes/js-spawn-mention` (prose + `sandbox.process.exec`; zero
+AS-002), asserted directly because the classifier only counts HIGH/CRITICAL.
+Suite 1672 -> 1674.
+
+### Guard
+
+`test_js_exec_ignores_foreign_methods_and_prose` holds all measured noise lines,
+including the p5.js declaration; `test_js_exec_keeps_qualified_child_process`
+holds the qualified and bare forms. The fixture pair is added to
+`test_narrowed_branches_are_covered_by_fixture_pairs`.

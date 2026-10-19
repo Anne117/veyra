@@ -27,7 +27,21 @@ COMMAND_FROM_VAR = re.compile(r"(?:subprocess|os\.system|os\.popen)\([^)]*\+[^)]
 
 # --- JavaScript: child_process --------------------------------------------
 
-JS_EXEC = re.compile(r"\b(?:exec|execSync|spawn|spawnSync)\s*\(")
+# A child_process call, and nothing else. The callee is either qualified
+# (the child_process module member), or a bare destructured name glued to its
+# paren. A receiver-qualified call is some other object's method (the sandbox
+# SDK, a pty process class, Java's Runtime), and prose like "Use spawn
+# (default)" or "-exec (runs in each match's directory)" has a space and a
+# non-command argument. Both used to be reported at MEDIUM; the argument must
+# therefore look like a command: a string/template literal or a plain
+# identifier, and the paren list must not end in a definition body (`) {`),
+# which is how a same-named method is declared (p5.js `spawn(x, y) {`).
+JS_EXEC = re.compile(
+    r"(?:\bchild_process\s*\.\s*(?:exec|execSync|spawn|spawnSync)\s*\(|"
+    r"(?<![\w.])(?:exec|execSync|spawn|spawnSync)\()"
+    r"(?![^)]*\)\s*(?:=>|\{))"
+    r"\s*(?:[rubfRUBF]*[\"'`]|\w+\s*[,)])"
+)
 JS_SHELL_TRUE = re.compile(r"\b(?:exec|execSync|spawn|spawnSync)\([^)]*shell\s*:\s*true")
 
 # --- Shell: curl|bash, wget|sh, eval --------------------------------------

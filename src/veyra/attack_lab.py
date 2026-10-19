@@ -292,6 +292,15 @@ ATTACK_CASES: List[AttackCase] = [
     AttackCase("shell-wrapped", "v2-mcp-security", "v2/mcp-security/shell-wrapped/.mcp.json", DETECTED, "MCP config hands a curl-to-shell line to /bin/bash. DETECTED comes from the content rules (AS-002/AS-005); AS-MCP-003 MEDIUM is the config-layer signal measured here.", ["AS-MCP-003"]),
     AttackCase("shell-metachar", "v2-mcp-security", "v2/mcp-security/shell-metachar/.mcp.json", PARTIALLY_DETECTED, "Config hides a chained command behind bash -c (semicolon). Only AS-MCP-003 fires, so the narrowed branch is measured without content-rule help.", ["AS-MCP-003"]),
     AttackCase("shell-script-mcp", "v2-benign-lookalikes", "v2/benign-lookalikes/shell-script-mcp/.mcp.json", DETECTED, "Benign bash launcher that names its script in the args; nothing is hidden, so AS-MCP-003 stays silent.", [], is_benign=True),
+    # P-13: the AS-002 MEDIUM child_process branch was narrowed to qualified
+    # `child_process.*` calls and bare destructured calls with a command-shaped
+    # argument. The corpus had no JS fixture, so the branch could not be
+    # measured end to end. js-child-process-exec is a skill runner that hands
+    # an env-provided command to execSync (MEDIUM is the rule ceiling, so
+    # PARTIAL by design); js-spawn-mention is prose and another object's method
+    # that used to fire the same branch.
+    AttackCase("js-child-process-exec", "v2-shell-execution", "v2/shell-execution/js-child-process-exec/run.js", PARTIALLY_DETECTED, "Skill runner passes an env-provided command to child_process.execSync. AS-002 MEDIUM is the rule ceiling here, so no HIGH and no chain.", ["AS-002"]),
+    AttackCase("js-spawn-mention", "v2-benign-lookalikes", "v2/benign-lookalikes/js-spawn-mention/run.js", DETECTED, "Prose mentioning spawn (default) and sandbox.process.exec(); no child_process call, so AS-002 stays silent.", [], is_benign=True),
     # --- v2 obfuscation ---
     AttackCase("base64-instruction", "v2-obfuscation", "v2/obfuscation/base64-instruction/SKILL.md", DETECTED, "Base64-encoded instruction to execute.", ["AS-004"]),
     AttackCase("rot13-instruction", "v2-obfuscation", "v2/obfuscation/rot13-instruction/SKILL.md", PARTIALLY_DETECTED, "ROT13-encoded instruction to run command.", ["AS-004"]),

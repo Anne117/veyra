@@ -256,7 +256,7 @@ def test_benign_clean_detected():
 # intentionally PARTIAL or MISSED, that expectation is preserved here unless
 # there is a deliberate, reviewed detection improvement.
 
-EXPECTED_TOTAL = 110
+EXPECTED_TOTAL = 112
 EXPECTED_FALSE_POSITIVES = 0
 # Updated 2026-10-18 (Phase 1, Q-1):
 #   AS-MCP-007 was token-precise (per-arg) and escalated to HIGH for
@@ -288,8 +288,13 @@ EXPECTED_FALSE_POSITIVES = 0
 #   twins are correctly clean. The percentage moves 93.3% -> 91.8%
 #   because the corpus now exercises branches it did not cover, not
 #   because a detection regressed.
-EXPECTED_DETECTED = 101
-EXPECTED_PARTIALLY_DETECTED = 6
+# Updated 2026-10-19 (Phase 1, P-13):
+#   Added the AS-002 child_process pair: a JS skill runner calling
+#   child_process.execSync with an env command (PARTIAL, MEDIUM ceiling)
+#   and a prose/foreign-method twin that must stay silent. 110 -> 112
+#   cases; 102 DETECTED / 7 PARTIAL / 3 MISSED / 0 FP (91.1%).
+EXPECTED_DETECTED = 102
+EXPECTED_PARTIALLY_DETECTED = 7
 EXPECTED_MISSED = 3
 
 # Per-case expected classifications. Keyed by (category, name).
@@ -380,6 +385,8 @@ EXPECTED_CASE_RESULTS = {
     ('v2-mcp-security', 'benign'): DETECTED,
     ('v2-mcp-security', 'shell-wrapped'): DETECTED,
     ('v2-mcp-security', 'shell-metachar'): PARTIALLY_DETECTED,
+    # --- v2-shell-execution ---
+    ('v2-shell-execution', 'js-child-process-exec'): PARTIALLY_DETECTED,
     # --- v2-obfuscation ---
     ('v2-obfuscation', 'base64-instruction'): DETECTED,
     ('v2-obfuscation', 'rot13-instruction'): PARTIALLY_DETECTED,
@@ -412,6 +419,7 @@ EXPECTED_CASE_RESULTS = {
     ('v2-benign-lookalikes', 'legit-mcp'): DETECTED,
     ('v2-benign-lookalikes', 'env-vars'): DETECTED,
     ('v2-benign-lookalikes', 'http-requests'): DETECTED,
+    ('v2-benign-lookalikes', 'js-spawn-mention'): DETECTED,
     ('v2-benign-lookalikes', 'security-tutorial'): DETECTED,
     ('v2-benign-lookalikes', 'incident-response'): DETECTED,
     ('v2-benign-lookalikes', 'unrelated-exec-reference'): DETECTED,
@@ -577,7 +585,7 @@ def test_attack_lab_per_category_totals_consistent():
 
 
 def test_narrowed_branches_are_covered_by_fixture_pairs():
-    """F-1: the AS-004 demonstrative branch and AS-MCP-003 have both fixtures.
+    """F-1/P-13: the narrowed AS-004, AS-MCP-003 and AS-002 branches have both fixtures.
     The classifier only counts HIGH/CRITICAL as a detection, so a MEDIUM-only
     rule would look silent in the summary. These assertions measure the branch
     directly: the positive fixture must raise the narrowed rule at its real
@@ -591,6 +599,10 @@ def test_narrowed_branches_are_covered_by_fixture_pairs():
         "AS-MCP-003": (
             "v2/mcp-security/shell-wrapped/.mcp.json",
             "v2/benign-lookalikes/shell-script-mcp/.mcp.json",
+        ),
+        "AS-002": (
+            "v2/shell-execution/js-child-process-exec/run.js",
+            "v2/benign-lookalikes/js-spawn-mention/run.js",
         ),
     }
     for rule, (positive, benign) in pairs.items():

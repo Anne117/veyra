@@ -84,6 +84,32 @@ def test_js_exec_plain():
     assert f.severity.value == "MEDIUM"
 
 
+def test_js_exec_keeps_qualified_child_process():
+    for line, severity in (
+        ('child_process.exec("npm test")', "MEDIUM"),
+        ("child_process.spawn(cmd, args, { cwd })", "MEDIUM"),
+        ('const { execSync } = require("child_process"); execSync("make")', "MEDIUM"),
+    ):
+        f = detect_js_exec(line, "x.js", 1)
+        assert f is not None, line
+        assert f.severity.value == severity, line
+
+
+def test_js_exec_ignores_foreign_methods_and_prose():
+    # Field noise (Hermes tools/): every MEDIUM hit was prose, another
+    # object's method, or Python's builtin exec. None is a child_process call.
+    for line in (
+        'return tool_error("Use spawn (default), list, steer, or stop.")',
+        "# -exec (runs in each match's directory).",
+        'home = self._sandbox.process.exec("echo $HOME")',
+        "pty_proc = _PtyProcessCls.spawn(pty_argv)",
+        'exec(compile(request["code"], "<cell>", "exec"), GLOBALS)',
+        'description="Java Runtime.exec() \u2014 shell execution"',
+        "  spawn(x, y) {",
+    ):
+        assert detect_js_exec(line, "x.py", 1) is None, line
+
+
 def test_ordinary_curl_not_shell():
     f = detect_curl_pipe_shell("curl -o data.json https://example.com/data.json", "x.sh", 1)
     assert f is None
