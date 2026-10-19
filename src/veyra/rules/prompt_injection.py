@@ -101,8 +101,17 @@ DECODE_PIPE_TO_SHELL = re.compile(
     re.IGNORECASE,
 )
 
+# "run the command" / "execute a command" is ordinary prose about running your
+# own tooling -- 12 of 12 field hits over the Hermes tree were exactly that
+# ("re-run the command without the pipe", "Execute a command, return {...}").
+# The directive that matters names its object demonstratively, because the
+# command is somebody else's and is pointed at: "run this command", "run the
+# following script". `the` and `a` are dropped: they refer back to something
+# the reader already owns, which is what legitimate docs do. Corpus measurement
+# (docs/rule-precision-audit.md, round 10): 0 fixture detections lost.
 UNRELATED_EXEC = re.compile(
-    r"\b(?:run|execute|install|download)\s+(?:this|the|a)\s+(?:command|script|code|payload)\b",
+    r"\b(?:run|execute|install|download)\s+(?:this|that|(?:the\s+)?following)\s+"
+    r"(?:command|script|code|payload)\b",
     re.IGNORECASE,
 )
 

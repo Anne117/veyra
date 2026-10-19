@@ -574,3 +574,55 @@ and one syntactic shape that legitimate text uses far more often than attacks do
 `AS-004` "Instruction to execute code" (`UNRELATED_EXEC`, "run this command/script") — 12 hits in
 the slice, and the same question applies: prose about running a script versus an instruction to run
 one. Then `AS-003`, which is the loudest at MEDIUM but was already rejected with measurement.
+
+## Round 10 — `UNRELATED_EXEC` and the demonstrative object
+
+`detect_unrelated_exec` fired 12 times at MEDIUM over the same field slice. Every hit was ordinary
+prose about running the reader's own tooling:
+
+| Line | Where |
+|---|---|
+| `re-run the command WITHOUT the pipe to get its real exit code` | `tools/terminal_hints.py` |
+| `or run the command without sudo` | `tools/terminal_tool_sudo.py` |
+| `Execute a command, return {"output": str, "returncode": int}` | `tools/environments/base.py` |
+| `Read the diff and run the code or tests where feasible` | `agent/review_engine.py` |
+| `Run the code normally. You land at the breakpoint() line` | `skills/.../python-debugpy/SKILL.md` |
+
+The rule is `verb + (this|the|a) + (command|script|code|payload)`. The verb set is fine; the article
+set was the problem. `the` and `a` refer back to something the reader already owns -- that is what
+legitimate documentation says. A directive that matters points at somebody else's payload, and
+English marks that demonstratively: `run this command`, `run the following script`.
+
+Fix: the object must be `this`, `that`, or `the? following`. Severity (MEDIUM), rule id, evidence and
+the rest of AS-004 are untouched.
+
+### Delta (same runs, before -> after)
+
+| Metric | Before | After |
+|---|---|---|
+| `UNRELATED_EXEC` findings, field slice (`agent/ tools/ acp_adapter/ skills/`) | 12 | 0 |
+| AS-004 findings of all sub-detectors, field slice | 22 | 10 |
+| corpus detected / partial / missed / FP | 98 / 4 / 3 / 0 | 98 / 4 / 3 / 0 |
+| corpus detection percentage | 93.3% | 93.3% |
+| corpus cases with a `UNRELATED_EXEC` hit | 0 | 0 |
+
+Honest reading of that last row: the sub-detector **never fired on any of the 105 fixtures**, before
+or after. So this round removed measurable field noise with **no measured detection loss**, and it
+cannot claim more than that -- the corpus contains no fixture of the shape the rule was written for,
+which is why it drifted into noise unnoticed. A test asserts the shape still fires
+(`Run this command`, `Execute the following script`, `Download this payload`), so the guard is not
+silently dead; what is missing is corpus coverage, not code.
+
+### Trade-off
+
+`run a script`, `execute a command`, `install the package's helper` are no longer MEDIUM. Those read
+as instructions to run code in a skill's own workflow, which is what skills legitimately do; when the
+same sentence carries an unrelated source (URL, download), the download/exec chain rules already
+compose the path, and `AS-005` covers the execution sink.
+
+### Next
+
+Two things, in order: (1) a corpus fixture for the shape `UNRELATED_EXEC` was written for, so the
+next narrowing of it is measurable -- without it the rule can only lose coverage, never prove it;
+(2) `AS-003` MEDIUM noise (791 hits) remains the loudest by count but was rejected on measurement in
+P-3, so it stays unless the fixture set changes.
