@@ -150,5 +150,29 @@ def test_trailing_comment_does_not_hide_a_real_pipeline():
     assert f is not None
 
 
+# P-18: a row of a signature table names a call shape; it does not make the
+# call. skills_guard.py carries its own pattern list, so the label field
+# "os.system() -- unguarded shell execution" matched AS-002's HIGH branch.
+def test_signature_table_row_is_not_execution():
+    for line in (
+        '    (r\'os\\.system\\s*\\(\', "python_os_system", "high", "execution", "os.system() \u2014 unguarded shell execution"),',
+        '    (r\'os\\.popen\\s*\\(\', "python_os_popen", "high", "execution", "os.popen() \u2014 shell pipe execution"),',
+    ):
+        assert detect_os_system(line, "skills_guard.py", 248) is None, line
+
+
+def test_table_row_does_not_hide_a_real_call():
+    # A real call keeps the call text outside the quotes, even on a tuple row,
+    # and a two-field row stays reportable: the shape test is not a blanket
+    # "starts with (" escape hatch.
+    for line in (
+        '("x", os.system(cmd), "y"),',
+        '(r\'os\\.system\\(\', "os.system()"),',
+        'os.system("whoami")',
+    ):
+        f = detect_os_system(line, "x.py", 1)
+        assert f is not None and f.severity.value == "HIGH", line
+
+
 def test_heading_naming_pipeline_is_not_execution():
     assert detect_curl_pipe_shell("## Why `curl | bash` is dangerous", "SKILL.md", 1) is None

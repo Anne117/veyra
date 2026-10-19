@@ -26,6 +26,30 @@ def _is_comment_line(content: str) -> bool:
     return bool(_COMMENT_LINE.match(content))
 
 
+# --- Signature tables -----------------------------------------------------
+# A pattern table *names* a call shape; it does not make the call. In the field
+# slice (`agent/ tools/ acp_adapter/ skills/`) 2 of 10 remaining AS-002 hits
+# were rows of skills_guard.py's own signature list:
+#     (r'os\.system\s*\(', "python_os_system", "high", "execution",
+#      "os.system() -- unguarded shell execution"),
+# The call text appears twice -- once as a regex literal, once as a label --
+# and the match lands inside the label. Shape test: the match lies inside a
+# quoted literal, the line is a tuple row (`(` ... `),`) and the row carries at
+# least three quoted fields. A real call keeps `os.system(` *outside* the
+# quotes, so `("x", os.system(cmd), "y"),` still fires (pinned by a test).
+_QUOTED_SPAN = re.compile(r"'[^'\\]*(?:\\.[^'\\]*)*'|\"[^\"\\]*(?:\\.[^\"\\]*)*\"")
+
+
+def _is_table_row_mention(content: str, start: int, end: int) -> bool:
+    stripped = content.strip()
+    if not (stripped.startswith("(") and stripped.endswith("),")):
+        return False
+    spans = list(_QUOTED_SPAN.finditer(content))
+    if len(spans) < 3:
+        return False
+    return any(s.start() <= start and end <= s.end() for s in spans)
+
+
 # --- Python: dangerous execution ------------------------------------------
 
 # subprocess with shell=True
@@ -92,7 +116,8 @@ def detect_subprocess_shell(content: str, file_path: str, line: int) -> "Finding
 def detect_os_system(content: str, file_path: str, line: int) -> "Finding | None":
     if _is_comment_line(content):
         return None
-    if OS_SYSTEM.search(content):
+    m = OS_SYSTEM.search(content)
+    if m and not _is_table_row_mention(content, m.start(), m.end()):
         return Finding(
             rule_id="AS-002",
             severity=Severity.HIGH,
