@@ -100,6 +100,48 @@ def _is_runtime_reference(value: str) -> bool:
     return value.lower() in REFERENCE_ROOTS
 
 
+
+# Setup docs render keys as filler runs (``ghp_xxxxxxxx``, ``HF_TOKEN=hf_xxxx``)
+# and as instructions (``your-webhook-secret-here``, ``pat_your_token_here``).
+# Neither carries secret material: a real key does not repeat one character to
+# fill its length, and a value spelled as an English instruction is a template.
+# Field measurement (docs/rule-precision-audit.md, round 16): 11 of 11 AS-001
+# hits in the Hermes slice were this class.
+_PLACEHOLDER_FRAGMENTS = (
+    "your",
+    "here",
+    "example",
+    "sample",
+    "dummy",
+    "placeholder",
+    "random",
+    "fake",
+    "notreal",
+)
+
+
+def _is_filler_padding(value: str) -> bool:
+    """True when everything after the prefix is one repeated character.
+
+    ``ghp_xxxxxxxxxxxxxxxxxxxx`` satisfies the 20-character shape of a GitHub
+    token without containing a single byte of entropy; ``ghp_`` plus twenty
+    copies of ``x`` is how setup docs write "put your token here".
+    """
+    body = value.split("_", 1)[1] if "_" in value else value
+    return len(body) >= 8 and len(set(body.lower())) == 1
+
+
+def _is_placeholder_literal(value: str) -> bool:
+    """True when the value is spelled as an instruction, not generated."""
+    lowered = value.lower()
+    return any(fragment in lowered for fragment in _PLACEHOLDER_FRAGMENTS)
+
+
+def _followed_by_call(content: str, end: int) -> bool:
+    """True when the captured value is the callee of a call (``re.compile(``)."""
+    return end < len(content) and content[end] == "("
+
+
 # --- Patterns --------------------------------------------------------------
 
 # OpenAI-style keys: sk-... (sk-proj-, sk-svcacct-, sk-)
@@ -168,6 +210,8 @@ def detect_github_token(content: str, file_path: str, line: int) -> "Finding | N
     m = GITHUB_TOKEN.search(content)
     if not m:
         return None
+    if _is_filler_padding(m.group(1)):
+        return None
     return Finding(
         rule_id="AS-001",
         severity=Severity.CRITICAL,
@@ -208,6 +252,12 @@ def detect_generic_key(content: str, file_path: str, line: int) -> "Finding | No
     if _is_mask_placeholder(value) or _followed_by_mask(content, m.end(2)):
         return None
     if _is_runtime_reference(value):
+        return None
+    if _is_filler_padding(value):
+        return None
+    if _is_placeholder_literal(value):
+        return None
+    if _followed_by_call(content, m.end(2)):
         return None
     return Finding(
         rule_id="AS-001",

@@ -960,3 +960,58 @@ Suite 1672 -> 1674.
 including the p5.js declaration; `test_js_exec_keeps_qualified_child_process`
 holds the qualified and bare forms. The fixture pair is added to
 `test_narrowed_branches_are_covered_by_fixture_pairs`.
+
+## Round 16 — AS-001: filler padding, placeholder wording, and a call are not credentials (2026-10-19)
+
+Queue after P-13 was judgment-led. A fresh slice scan (`agent/ tools/ acp_adapter/
+skills/`, the same slice as P-8) ranked the remaining noise: AS-003 MEDIUM 920
+(rejected in P-3, not re-litigated), AS-006 HIGH 36 (P-8 residual, structural),
+AS-003 HIGH 8 / AS-005 8 (real install instructions and detector pattern tables),
+and **AS-001 11 findings across 9 lines** — the smallest count but the only bucket
+that was 100% false in the field.
+
+### What the field run actually showed
+
+| Line | Captured value | Why it fired |
+|---|---|---|
+| `skills/.../native-mcp.md:266,301` | `ghp_` + 20 × `x` | GITHUB_TOKEN shape is satisfied, entropy is zero — 2 lines, 4 findings (CRITICAL from the provider rule, HIGH from `GENERIC_KEY`) |
+| `agent/trace_upload.py:33` | `hf_` + 20 × `x` | same filler, generic name `HF_TOKEN` |
+| `agent/redact.py:711` | `abc123randomstring` | a prose placeholder inside a comment |
+| `skills/.../webhooks.md:39` | `your-webhook-secret-here` | setup instruction |
+| `skills/productivity/airtable/SKILL.md:31` | `pat_your_token_here` | setup instruction |
+| `skills/productivity/notion/SKILL.md:31` | `ntn_your_key_here` | setup instruction |
+| `skills/media/gif-search/SKILL.md:29` | `your_key_here` | setup instruction |
+| `agent/vault_login_classifier.py:52` | `re.compile` | `_RE_EXCLUDED_PASSWORD = re.compile(...)` — the value is a call, not a literal |
+
+Every one is a documentation artefact. The credential-shaped string is real
+(`ghp_` + twenty characters does satisfy the token shape), but nobody's key is
+twenty copies of one character, and nobody's key is spelled as an instruction.
+
+### Refinement applied
+
+`src/veyra/rules/secrets.py` — rule id, severity, title, description, evidence
+strings untouched. Three predicates, one theme ("a value that is not literal
+secret material is not a secret"):
+
+- `_is_filler_padding`: everything after the first `_` is one repeated character
+  (length ≥ 8). Applied to `detect_github_token` and `detect_generic_key`.
+- `_is_placeholder_literal`: the value contains a template fragment (`your`,
+  `here`, `example`, `sample`, `dummy`, `placeholder`, `random`, `fake`,
+  `notreal`). Generic rule only.
+- `_followed_by_call`: the captured value is immediately followed by `(`, i.e.
+  it is a callee (`re.compile(`), not a literal. Generic rule only.
+
+### Measured delta (same runs, before → after)
+
+- Field slice: findings **1018 → 1007**, AS-001 **11 → 0**; no other rule moved.
+- Corpus: **112 cases, 102 DETECTED / 7 PARTIAL / 3 MISSED / 0 FP — unchanged**,
+  so no corpus detection paid for the narrowing. Suite **1674 → 1678** (+4).
+- Residual cost: a real key that literally contains `here`/`your`/`random` as a
+  substring is now exempt (probability ~1e-6 for random alphanumerics, recorded
+  rather than ignored); a value followed by `(` is never reported by the generic
+  rule, which is how the `re.compile` hit was removed.
+
+Counted separately, not fixed here: the two `native-mcp.md` lines each produce
+**two** AS-001 findings (CRITICAL provider + HIGH generic) for one credential.
+That is the same double-report shape as AS-005 had before `c617d12`, and it is a
+counting defect, not a precision one — it stays a separate round.

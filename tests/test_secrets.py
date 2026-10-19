@@ -131,3 +131,37 @@ def test_mask_exemption_does_not_hide_real_keys():
 def test_masked_password_is_not_a_hardcoded_secret():
     assert detect_password('password = "********"', "x.py", 1) is None
     assert detect_password('password = "hunter2secret"', "x.py", 1) is not None
+
+
+def test_filler_padding_keys_are_not_hardcoded_secrets():
+    # Setup docs write the prefix plus twenty `x`: the shape is a token, the
+    # value is filler, so neither the provider rule nor the generic rule should fire.
+    line = 'GITHUB_TOKEN: "ghp_' + "x" * 20 + '"'
+    assert detect_github_token(line, "native-mcp.md", 1) is None
+    assert detect_generic_key(line, "native-mcp.md", 1) is None
+    assert detect_generic_key('"     HF_TOKEN=hf_' + "x" * 20 + '\\n"', "trace_upload.py", 33) is None
+
+
+def test_placeholder_wording_is_not_a_hardcoded_secret():
+    for line in (
+        "WEBHOOK_SECRET=your-webhook-secret-here",
+        "AIRTABLE_API_KEY=pat_your_token_here",
+        "NOTION_API_KEY=ntn_your_key_here",
+        "TENOR_API_KEY=your_key_here",
+        "MY_SERVICE_TOKEN=abc123randomstring",
+    ):
+        assert detect_generic_key(line, "setup.md", 1) is None, line
+
+
+def test_call_expression_is_not_a_hardcoded_secret():
+    # `_RE_EXCLUDED_PASSWORD = re.compile(...)` names a regex, not a credential.
+    line = '_RE_EXCLUDED_PASSWORD = re.compile(r"\\bpassword\\b")'
+    assert detect_generic_key(line, "vault_login_classifier.py", 52) is None
+
+
+def test_placeholder_exemptions_do_not_hide_real_keys():
+    # Same shapes with real entropy: the narrowing must not become a cover.
+    real = "a8f5f167f44f4964e6c998dee827110c"
+    assert detect_github_token('TOKEN: "ghp_' + real + '"', "x.py", 1) is not None
+    assert detect_generic_key("API_KEY=" + real, "x.py", 1) is not None
+    assert detect_generic_key("TOKEN=ghe9x2kvq1mz8pt4n6r0sw", "x.py", 1) is not None
