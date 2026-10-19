@@ -71,16 +71,11 @@ def test_malformed_octets_are_not_treated_as_local():
     assert f is not None
 
 
-def test_both_raw_ip_modules_agree_on_local_endpoints():
-    # AS-005 raw-IP exists twice (network + suspicious_urls); they must not diverge.
-    from veyra.rules.suspicious_urls import detect_raw_ip as detect_raw_ip_alt
+def test_raw_ip_detector_is_registered_once():
+    # AS-005 raw-IP lives in suspicious_urls.py; network.py only re-exports it.
+    # A second @register in network.py made every hit appear twice in scans.
+    from veyra.rules import suspicious_urls
+    from veyra.rules.network import detect_raw_ip_url
 
-    for line in (
-        'curl -s http://127.0.0.1:9229/json/list',
-        'bind = "http://0.0.0.0:8000/health"',
-        'url = "http://203.0.113.9/payload"',
-        'url = "http://192.168.1.1:8080/api"',
-    ):
-        primary = detect_raw_ip_url(line, "x", 1)
-        secondary = detect_raw_ip_alt(line, "x", 1)
-        assert (primary is None) == (secondary is None), line
+    assert detect_raw_ip_url is suspicious_urls.detect_raw_ip
+    assert detect_shortener is suspicious_urls.detect_shortener

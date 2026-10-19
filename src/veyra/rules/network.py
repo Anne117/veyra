@@ -2,15 +2,30 @@
 
 Flags external downloads and network calls. Higher severity for
 download-and-execute patterns and suspicious external domains.
+
+``AS-005`` (raw-IP URLs and URL shorteners) is implemented in
+``suspicious_urls.py``. This module re-exports those detectors under their
+historical names so existing imports keep working; it must not register a
+second copy, or every hit is emitted twice in scan results.
 """
 
 from __future__ import annotations
 
-import ipaddress
 import re
 
 from veyra.models import Finding, Severity
 from veyra.rules import register
+from veyra.rules.suspicious_urls import (  # noqa: F401  (public re-export)
+    detect_raw_ip as detect_raw_ip_url,
+    detect_shortener,
+)
+
+__all__ = [
+    "detect_http_client",
+    "detect_download_execute",
+    "detect_raw_ip_url",
+    "detect_shortener",
+]
 
 # --- HTTP client usage -----------------------------------------------------
 
@@ -22,39 +37,6 @@ HTTP_CLIENT = re.compile(
 
 DOWNLOAD_EXECUTE = re.compile(
     r"(?:curl|wget|Invoke-WebRequest|requests\.get|urllib\.request|fetch|axios)\b[^\n]*(?:\|\s*(?:ba)?sh|\.exec|os\.system|subprocess)"
-)
-
-# --- Raw IP in URL ---------------------------------------------------------
-
-RAW_IP_URL = re.compile(r"https?://\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?[/\s'\"]")
-
-# --- Local endpoints -------------------------------------------------------
-
-RAW_IP_HOST = re.compile(r"https?://(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?")
-
-
-def _is_local_endpoint(content: str) -> bool:
-    """True when every raw-IP URL on the line is loopback or unspecified."""
-    matches = list(RAW_IP_URL.finditer(content))
-    if not matches:
-        return False
-    for match in matches:
-        host_match = RAW_IP_HOST.match(match.group(0))
-        if host_match is None:
-            return False
-        try:
-            addr = ipaddress.ip_address(host_match.group(1))
-        except ValueError:
-            return False
-        if not (addr.is_loopback or addr.is_unspecified):
-            return False
-    return True
-
-# --- URL shorteners --------------------------------------------------------
-
-SHORTENERS = re.compile(
-    r"https?://(?:bit\.ly|t\.co|tinyurl\.com|is\.gd|buff\.ly|goo\.gl|ow\.ly|rb\.gy|shorturl\.at|s\.link)\b",
-    re.IGNORECASE,
 )
 
 
@@ -86,37 +68,5 @@ def detect_download_execute(content: str, file_path: str, line: int) -> "Finding
             line=line,
             evidence="Download-and-execute pattern",
             remediation="Do not download and execute remote content.",
-        )
-    return None
-
-
-@register
-def detect_raw_ip_url(content: str, file_path: str, line: int) -> "Finding | None":
-    if RAW_IP_URL.search(content) and not _is_local_endpoint(content):
-        return Finding(
-            rule_id="AS-005",
-            severity=Severity.MEDIUM,
-            title="Suspicious URL",
-            description="URL uses a raw IP address instead of a domain name.",
-            file=file_path,
-            line=line,
-            evidence="Raw IP address in URL",
-            remediation="Use a named domain and verify the endpoint is legitimate.",
-        )
-    return None
-
-
-@register
-def detect_shortener(content: str, file_path: str, line: int) -> "Finding | None":
-    if SHORTENERS.search(content):
-        return Finding(
-            rule_id="AS-005",
-            severity=Severity.LOW,
-            title="Suspicious URL",
-            description="URL shortener detected; the final destination is hidden.",
-            file=file_path,
-            line=line,
-            evidence="URL shortener detected",
-            remediation="Expand the shortener and verify the destination.",
         )
     return None

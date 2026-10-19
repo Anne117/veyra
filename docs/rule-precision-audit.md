@@ -805,3 +805,59 @@ The remaining AS-002 noise in `tools/` is the `Command execution` MEDIUM branch
 even prose `spawn (default)`, plus the `os.system` rule matching its own description text
 inside `skills_guard.py`. That branch and the child_process evidence string are the next
 precision round.
+
+## Round 14 -- AS-005 double registration removed at the source
+
+Round 12 (reverted in `5ef0fc2`) fixed the doubled counts by filtering identical findings
+inside `scan_path()`. That masked the defect instead of removing it and applied to every rule.
+This round removes the duplicate registration itself.
+
+### Defect
+
+`network.py` registered `detect_raw_ip_url` and `detect_shortener`; `suspicious_urls.py`
+registered the same two behaviours a second time. Both modules are loaded by `load_rules()`,
+so each hit was emitted twice. A scan-level filter cannot fix the cause: the second copy is
+still executed for every line of every file, and any other duplicated rule would be silently
+absorbed the same way.
+
+### Change
+
+`AS-005` raw-IP and shortener detectors now live only in `suspicious_urls.py`.
+`network.py` keeps its historical public names as plain aliases
+(`detect_raw_ip_url`, `detect_shortener`) with no decorator, so existing imports -- including
+`tests/test_network.py` -- keep working. `network.py` keeps only its `AS-003` line rules. No
+severity, message, evidence string or regex changed.
+
+Independent `AS-005` signals are untouched: `Executable/download URL` and
+`URL piped into shell` were never duplicated and still fire on their own grounds.
+
+### Measurement (same command, same tree)
+
+```
+.venv/bin/veyra scan /home/ubuntu/veyra --format json
+```
+
+| Signal | Before | After |
+|---|---|---|
+| total findings in tree | 710 | 692 |
+| `AS-005` "Raw IP address in URL" | 24 | 12 |
+| `AS-005` "URL shortener detected" | 12 | 6 |
+| `AS-005` "URL piped into shell" (never duplicated) | 18 | 18 |
+| `AS-005` total | 54 | 36 |
+
+Only the duplicated signals halved; the independent one did not move. Attack corpus: 110
+cases, 101 D / 6 P / 3 M / 0 FP -- every bucket unchanged. Suite: 1667 -> 1671.
+
+### Guard
+
+`tests/test_url_signal_registration.py` asserts on the full `scan_path()` result, not on a
+detector call: one raw-IP URL -> exactly one finding; loopback and `0.0.0.0` -> none; RFC1918
+and public IPs -> one each; shortener, executable URL and pipe-shell each -> one; shortener
+plus pipe-shell on one line -> two findings; and no identical duplicate findings anywhere in
+a mixed scan. `tests/test_network.py` asserts the `network.py` names are aliases of the
+canonical detectors.
+
+### Still open
+
+`AS-007` remains double-registered in `network`-adjacent modules the same way; it is outside
+this round's scope and needs its own measurement and commit.
