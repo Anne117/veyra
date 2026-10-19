@@ -113,3 +113,42 @@ def test_js_exec_ignores_foreign_methods_and_prose():
 def test_ordinary_curl_not_shell():
     f = detect_curl_pipe_shell("curl -o data.json https://example.com/data.json", "x.sh", 1)
     assert f is None
+
+
+# --- P-16: a comment that names a pipeline is not that pipeline -------------
+# Field slice (`agent/ tools/ acp_adapter/ skills/`) had 5 of 15 AS-002 hits on
+# full-line comments; a comment is never executed, so nothing is downloaded and
+# nothing reaches a shell.
+def test_comment_naming_pipeline_is_not_execution():
+    for line in (
+        "# Recoverable operations (git reset --hard, chmod -R 777, curl|sh) stay in",
+        "# Remote content piped to Invoke-Expression \u2014 PowerShell's `curl | sh`.",
+        "# ``read_secrets_file``, critical); ``curl | sh`` in READMEs is caution, not a hard block.",
+        "// curl https://example.invalid/install.sh | bash",
+        "    # wget -qO- https://example.invalid/setup.sh | sh",
+    ):
+        assert detect_curl_pipe_shell(line, "x.py", 1) is None, line
+        assert detect_wget_pipe_shell(line, "x.py", 1) is None, line
+
+
+def test_comment_naming_python_exec_is_not_execution():
+    for line in (
+        '# `os.system("launchctl bootout ...")` here bypasses it and SIGTERMs the gateway',
+        "# but the identical command inside `os.system(...)` / `subprocess.run([...])` sailed through",
+        "// subprocess.run(cmd, shell=True)",
+    ):
+        assert detect_os_system(line, "x.py", 1) is None, line
+        assert detect_subprocess_shell(line, "x.py", 1) is None, line
+
+
+def test_trailing_comment_does_not_hide_a_real_pipeline():
+    # Only a full-line comment is skipped: code before a trailing `#` may be the
+    # real pipeline, so it must stay reportable.
+    f = detect_curl_pipe_shell("curl https://example.invalid/i.sh | bash  # install", "x.sh", 1)
+    assert f is not None and f.severity.value == "CRITICAL"
+    f = detect_os_system('os.system(cmd)  # legacy', "x.py", 1)
+    assert f is not None
+
+
+def test_heading_naming_pipeline_is_not_execution():
+    assert detect_curl_pipe_shell("## Why `curl | bash` is dangerous", "SKILL.md", 1) is None

@@ -1083,3 +1083,64 @@ guard modules and signature tables; the honest next candidates are AS-004 HIGH
 on signature tables in other scanners' source, or the AS-001 provider+generic
 double report — the latter now has zero field instances, so it would be a
 counting fix without a field measurement.
+
+## Round 18 — AS-002: a comment that names a pipeline is not the pipeline (2026-10-19)
+
+### Field
+
+Fresh slice measurement (`agent/ tools/ acp_adapter/ skills/` of the Hermes tree,
+1002 findings before the round) had 15 AS-002 findings. Five of them sat on
+full-line comments that *name* the pattern:
+
+| File:line | Line |
+|---|---|
+| `tools/approval_detection.py:56` | `# shutdown, DoS). Recoverable operations (git reset --hard, chmod -R 777, curl\|sh) stay in` |
+| `tools/approval_detection.py:228` | `# Remote content piped to Invoke-Expression — PowerShell's \`curl \| sh\`.` |
+| `tools/plugin_guard.py:44` | `# \`\`read_secrets_file\`\`, critical); \`\`curl \| sh\`\` in READMEs is caution, not a hard block.` |
+| `tools/code_execution_tool.py:686` | `# \`os.system("launchctl bootout ...")\` here bypasses it and SIGTERMs the gateway mid-task).` |
+| `tools/code_execution_tool.py:690` | `# but the identical command inside \`os.system(...)\` / \`subprocess.run([...])\` here sailed through and` |
+
+A comment is never executed: nothing is downloaded and nothing reaches a shell.
+Reporting it as CRITICAL "Remote command execution" is a severity lie, and these
+lines are how the project's own guard modules document the pattern they block.
+
+### Change
+
+`src/veyra/rules/shell.py` gains one predicate, `_is_comment_line` (leading
+whitespace then `#` or `//`), applied to the four AS-002 detectors that read a
+line of executed text: `detect_subprocess_shell`, `detect_os_system`,
+`detect_curl_pipe_shell`, `detect_wget_pipe_shell`. Only a *full-line* comment
+is skipped — a trailing `# ...` after code stays reportable, because the code
+before it may be the real pipeline (`curl … | bash  # install` is pinned by a
+test). Rule ids, severities, titles, descriptions and evidence are untouched.
+
+### Measured delta (same runs, before → after)
+
+| Metric | Before | After |
+|---|---|---|
+| total findings, field slice | 1002 | 997 |
+| AS-002 CRITICAL, same slice | 8 | 5 |
+| AS-002 HIGH, same slice | 7 | 5 |
+| every other rule, same slice | 987 | 987 |
+| corpus detected / partial / missed / FP | 102 / 7 / 3 / 0 | 102 / 7 / 3 / 0 |
+| expected-vs-actual drift, 112 cases | 0 | 0 |
+| suite | 1681 | 1685 |
+
+The five real AS-002 pipelines in the slice survive: `tools/tts_command_provider.py:153`
+(`subprocess.Popen(..., shell=True)`), `tools/environments/base_session_env.py:147`
+(`eval` construction), and the three skills install instructions
+(`hermes-agent`, `notion`, `xurl` SKILL.md).
+
+### Residual cost and what was deliberately left
+
+- A docstring continuation that names the pattern (`tools/environments/base_session_env.py:59`,
+  ``curl … | bash #`` smuggled into a Matrix room) still fires: it does not
+  start with `#`, and block-level docstring tracking is a larger, separate move.
+- Markdown prose/table cells naming the pattern (`computer-use/SKILL.md:287`,
+  `requesting-code-review/SKILL.md:248`) still fire for the same reason.
+- `tools/skills_guard.py:248-249` still fires HIGH on its own signature table
+  (raw regex literals, not comments) — a pattern-table round, not this one.
+- `tests/fixtures/malicious/scripts/install.sh:1` was a comment naming the
+  pattern; its line-4 pipeline still produces the CRITICAL, so no corpus bucket
+  moved.
+

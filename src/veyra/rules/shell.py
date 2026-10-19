@@ -11,6 +11,21 @@ import re
 from veyra.models import Finding, Severity
 from veyra.rules import register
 
+# --- Comments -------------------------------------------------------------
+# A line that *names* a shell pipeline is not that pipeline. In the field
+# slice (`agent/ tools/ acp_adapter/ skills/`) 5 of 15 AS-002 hits were comment
+# lines: "Recoverable operations (... curl|sh) stay in", "PowerShell's
+# `curl | sh`", "``curl | sh`` in READMEs is caution, not a hard block". A
+# comment is never executed: nothing is downloaded and nothing reaches a
+# shell. Only a *full-line* comment counts -- a trailing `# ...` after code
+# stays reportable, because the code before it may be the real pipeline.
+_COMMENT_LINE = re.compile(r"^\s*(?:#|//)")
+
+
+def _is_comment_line(content: str) -> bool:
+    return bool(_COMMENT_LINE.match(content))
+
+
 # --- Python: dangerous execution ------------------------------------------
 
 # subprocess with shell=True
@@ -57,6 +72,8 @@ SHELL_EXEC = re.compile(r"\b(?:exec|source)\s+[^#\n]+")
 
 @register
 def detect_subprocess_shell(content: str, file_path: str, line: int) -> "Finding | None":
+    if _is_comment_line(content):
+        return None
     if SUBPROCESS_SHELL.search(content):
         return Finding(
             rule_id="AS-002",
@@ -73,6 +90,8 @@ def detect_subprocess_shell(content: str, file_path: str, line: int) -> "Finding
 
 @register
 def detect_os_system(content: str, file_path: str, line: int) -> "Finding | None":
+    if _is_comment_line(content):
+        return None
     if OS_SYSTEM.search(content):
         return Finding(
             rule_id="AS-002",
@@ -148,6 +167,8 @@ def detect_js_exec(content: str, file_path: str, line: int) -> "Finding | None":
 
 @register
 def detect_curl_pipe_shell(content: str, file_path: str, line: int) -> "Finding | None":
+    if _is_comment_line(content):
+        return None
     if CURL_PIPE_SHELL.search(content):
         return Finding(
             rule_id="AS-002",
@@ -164,6 +185,8 @@ def detect_curl_pipe_shell(content: str, file_path: str, line: int) -> "Finding 
 
 @register
 def detect_wget_pipe_shell(content: str, file_path: str, line: int) -> "Finding | None":
+    if _is_comment_line(content):
+        return None
     if WGET_PIPE_SHELL.search(content):
         return Finding(
             rule_id="AS-002",
