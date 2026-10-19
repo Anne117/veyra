@@ -1015,3 +1015,71 @@ Counted separately, not fixed here: the two `native-mcp.md` lines each produce
 **two** AS-001 findings (CRITICAL provider + HIGH generic) for one credential.
 That is the same double-report shape as AS-005 had before `c617d12`, and it is a
 counting defect, not a precision one — it stays a separate round.
+
+## Round 17 — AS-005 executable download: the extension is in the path, not the host (2026-10-19)
+
+Taken next because round 16 left no measurable candidate: after the filler fix,
+AS-001 in the slice is **0**, so the provider+generic double-report has no field
+instance left to measure. The fresh slice count instead pointed at AS-005 MEDIUM.
+
+### What the field run actually showed
+
+Five AS-005 MEDIUM hits in the slice, all the same benign class: the *hostname's
+TLD* is `.sh`, and the slash that follows the host reads as the terminator of a
+script filename.
+
+| Line | Why the rule fired |
+|---|---|
+| `CATALOG_URL = "https://browse.sh/api/skills"` | `.sh` TLD + `/` |
+| `SKILL_DETAIL_URL = "https://browse.sh/api/skills/{slug}"` | same |
+| `SITEMAP_INDEX_URL = "https://www.skills.sh/sitemap.xml"` | same |
+| `"...$schema: https://skills.sh/schemas/skills.sh.schema.json"` | same |
+| `"(https://docs.astral.sh/uv/) and run \`uv tool install browser-use\`."` | same |
+
+The rule's own description is "URL points to an executable or script download",
+and none of these URLs downloads anything. `https://skills.sh/api/skills` is a
+JSON API; `.sh` there is the top-level domain.
+
+### Refinement applied
+
+`src/veyra/rules/suspicious_urls.py` only (rule id, severity, title,
+description and evidence strings untouched):
+
+- The *boundary* regex `EXECUTABLE_DOWNLOAD` is unchanged, so a `.sh` in the
+  middle of a sentence still does not count (that behaviour was already
+  measured and is pinned by the existing pipe-shell test).
+- A candidate URL now has to carry the extension in `urlsplit(url).path`, not
+  anywhere in the string. Trailing `/` is stripped first, so
+  `.../tool.ps1/` keeps firing.
+- A URL without a path (`https://skills.sh`) cannot match at all.
+- Hostnames that merely *contain* the extension list do not match:
+  `https://skills.sh:8443/api/skills` was and stays silent.
+
+### Measured delta (same runs, before → after)
+
+| Metric | Before | After |
+|---|---|---|
+| AS-005 MEDIUM, field slice (`agent/ tools/ acp_adapter/ skills/`) | 5 findings / 5 lines | 0 / 0 |
+| AS-005 CRITICAL (pipe-to-shell), same slice | 3 | 3 |
+| total findings, same slice | 1007 | 1002 |
+| corpus detected / partial / missed / FP | 102 / 7 / 3 / 0 | 102 / 7 / 3 / 0 |
+| suite | 1678 | 1681 |
+
+No other rule moved in the slice, and no corpus case changed bucket: the corpus
+fixtures that must keep firing (`urls/config.py` `setup.exe` in a path,
+`run.sh | bash` as pipe-to-shell) still do.
+
+### Residual cost
+
+A path-extension check cannot see a download whose filename has no extension
+(`/install?platform=linux`) — unchanged from before, recorded not ignored. The
+whole-tree scan was not repeated this round: it exceeds the 180 s foreground
+budget, so the slice is the measurement of record.
+
+### Next
+
+AS-002 HIGH/CRITICAL (15 in the slice) are real shell-execution lines inside
+guard modules and signature tables; the honest next candidates are AS-004 HIGH
+on signature tables in other scanners' source, or the AS-001 provider+generic
+double report — the latter now has zero field instances, so it would be a
+counting fix without a field measurement.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from urllib.parse import urlsplit
 
 from veyra.models import Finding, Severity
 from veyra.rules import register
@@ -26,8 +27,21 @@ SHORTENERS = re.compile(
     re.IGNORECASE,
 )
 
+# The same extension list, but anchored at the end of the URL *path*. A regex
+# over the whole URL cannot tell a script file from a hostname whose TLD
+# happens to be `.sh` (`https://skills.sh/api/skills`,
+# `https://docs.astral.sh/uv/`): the slash after the TLD reads as the
+# terminator of a filename. The boundary regex below is unchanged, so a `.sh`
+# in the middle of a sentence still does not count; only host-vs-path moves.
+# Field measurement (docs/rule-precision-audit.md, round 17): all five AS-005
+# MEDIUM hits in the Hermes slice were the host-TLD shape.
 EXECUTABLE_DOWNLOAD = re.compile(
     r"https?://[^\s'\"<>]+\.(?:exe|msi|sh|bat|ps1|dmg|pkg|apk|jar|bin)(?:[?/]|$)",
+    re.IGNORECASE,
+)
+
+EXECUTABLE_PATH_EXT = re.compile(
+    r"\.(?:exe|msi|sh|bat|ps1|dmg|pkg|apk|jar|bin)$",
     re.IGNORECASE,
 )
 
@@ -91,9 +105,15 @@ def detect_shortener(content: str, file_path: str, line: int) -> "Finding | None
     return None
 
 
+def _downloads_executable(url: str) -> bool:
+    """True when the matched URL ends with a script file *in its path*."""
+    path = urlsplit(url).path.rstrip("/")
+    return bool(EXECUTABLE_PATH_EXT.search(path))
+
+
 @register
 def detect_executable_download(content: str, file_path: str, line: int) -> "Finding | None":
-    if EXECUTABLE_DOWNLOAD.search(content):
+    if any(_downloads_executable(m.group(0)) for m in EXECUTABLE_DOWNLOAD.finditer(content)):
         return Finding(
             rule_id="AS-005",
             severity=Severity.MEDIUM,

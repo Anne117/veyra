@@ -74,3 +74,36 @@ def test_scanner_emits_no_identical_duplicate_findings(tmp_path):
     )
     duplicates = {k: n for k, n in keys.items() if n > 1}
     assert duplicates == {}
+
+
+# --- AS-005 executable download reads the path, not the host ----------------
+# Round 17: a `.sh` TLD plus the slash that follows it reads as a `.sh` file
+# name if the regex runs over the whole URL. All five AS-005 MEDIUM hits in
+# the Hermes slice were that shape (skills.sh, astral.sh).
+
+
+def test_shell_tld_host_is_not_a_script_download(tmp_path):
+    for line in [
+        "See https://skills.sh/api/skills",
+        "See https://www.skills.sh/sitemap.xml",
+        "Schema https://skills.sh/schemas/skills.sh.schema.json",
+        "Docs https://docs.astral.sh/uv/",
+        "Port https://skills.sh:8443/api/skills",
+    ]:
+        assert _as005(_scan_one(tmp_path, line)) == [], line
+
+
+def test_script_extension_in_the_path_is_still_flagged(tmp_path):
+    for line in [
+        "Get https://cdn.example.com/tool.sh?raw=1",
+        "Download https://example.com/download/setup.exe",
+        "Fetch https://example.com/a/b.jar/",
+        "Run https://cdn.example.com/tool.ps1/ now",
+    ]:
+        findings = _as005(_scan_one(tmp_path, line))
+        assert [f.severity.value for f in findings] == ["MEDIUM"], line
+
+
+def test_real_download_is_found_next_to_a_lookalike_host(tmp_path):
+    findings = _as005(_scan_one(tmp_path, "skills.sh docs: https://cdn.example.com/tool.bat"))
+    assert [f.severity.value for f in findings] == ["MEDIUM"]
