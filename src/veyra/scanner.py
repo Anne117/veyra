@@ -136,6 +136,13 @@ def scan_path(
     else:
         raise FileNotFoundError(f"Path not found: {target}")
 
+    # Two rule modules describe the same signal (AS-005 raw IP and URL
+    # shorteners are registered in both network.py and suspicious_urls.py).
+    # Identical findings are collapsed before correlation so that every
+    # reported finding counts one piece of evidence exactly once. Findings
+    # that differ in any identifying field are all preserved.
+    findings = _deduplicate(findings)
+
     # Run the contextual correlation layer over all findings.
     # Correlation findings are added separately; original findings are preserved.
     correlated = correlate(findings)
@@ -376,6 +383,31 @@ def _confidence_for(f: Finding) -> Confidence:
         return Confidence.MEDIUM
     # Prompt injection / network / URL / shell regex findings are medium.
     return Confidence.MEDIUM
+
+
+def _deduplicate(findings: List[Finding]) -> List[Finding]:
+    """Collapse findings identical in rule, location, severity and evidence.
+
+    Order-preserving: the first occurrence wins, so the output stays in scan
+    order. Only byte-identical descriptions are merged; a rule that reports
+    two different pieces of evidence on one line keeps both findings.
+    """
+    seen = set()
+    unique: List[Finding] = []
+    for finding in findings:
+        key = (
+            finding.rule_id,
+            finding.file,
+            finding.line,
+            finding.severity,
+            finding.evidence,
+            finding.description,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(finding)
+    return unique
 
 
 def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
