@@ -36,7 +36,7 @@ import io
 import re
 import tokenize
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from veyra.models import Finding, Severity
 
@@ -422,10 +422,15 @@ def _detect_source_sink(actions: List[Action]) -> Optional[Finding]:
     return None
 
 
-def analyze_file(text: str, file_path: str) -> List[Finding]:
-    """Analyze a single file's text for ordered multi-stage attack sequences.
+def analyze_file_chains(
+    text: str, file_path: str
+) -> List[Tuple[Finding, int, int]]:
+    """Analyze one file and return each chain with the lines that prove it.
 
-    Returns a list of AS-CHAIN findings (0, 1, or 2). Never executes code.
+    Returns ``(finding, first_line, last_line)`` triples: the finding plus the
+    first and last line of the matched step sequence (``0, 0`` when the chain
+    carries no line, as AS-CHAIN-004 does). ``analyze_file`` is the
+    findings-only view of the same analysis. Never executes code.
     """
     # Classify each line into step categories. A single line may contain
     # multiple logical actions separated by deterministic separators
@@ -448,7 +453,7 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
             if action is not None:
                 actions.append(action)
 
-    findings: List[Finding] = []
+    chains: List[Tuple[Finding, int, int]] = []
 
     # Chain 1: SOURCE -> SENSITIVE -> NETWORK (secret exfiltration).
     exfil_idx = _find_sequence(
@@ -458,7 +463,7 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
         max_span=CHAIN_MAX_LINE_SPAN,
     )
     if exfil_idx:
-        findings.append(
+        chains.append((
             Finding(
                 rule_id="AS-CHAIN-001",
                 severity=Severity.CRITICAL,
@@ -470,10 +475,13 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
                     "may be instructed to read a secret and send it to an external destination."
                 ),
                 file=file_path,
+                line=step_lines[exfil_idx[0]],
                 evidence=f"Sequence: {_evidence_for(steps, exfil_idx)}",
                 remediation="Review the ordered steps; remove any that read secrets and send them externally.",
-            )
-        )
+            ),
+            step_lines[exfil_idx[0]],
+            step_lines[exfil_idx[-1]],
+        ))
 
     # Chain 2: DOWNLOAD -> EXECUTION (download-and-execute).
     dl_idx = _find_sequence(
@@ -483,7 +491,7 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
         max_span=CHAIN_MAX_LINE_SPAN,
     )
     if dl_idx:
-        findings.append(
+        chains.append((
             Finding(
                 rule_id="AS-CHAIN-002",
                 severity=Severity.CRITICAL,
@@ -494,15 +502,26 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
                     "remote content is fetched and then run, a supply-chain risk."
                 ),
                 file=file_path,
+                line=step_lines[dl_idx[0]],
                 evidence=f"Sequence: {_evidence_for(steps, dl_idx)}",
                 remediation="Do not download and execute remote content; pin and review any fetched artifacts.",
-            )
-        )
+            ),
+            step_lines[dl_idx[0]],
+            step_lines[dl_idx[-1]],
+        ))
 
     # Chain 4: source-to-sink exfiltration (lightweight intra-file data flow).
     sink = _detect_source_sink(actions)
     if sink is not None:
         sink.file = file_path
-        findings.append(sink)
+        chains.append((sink, 0, 0))
 
-    return findings
+    return chains
+
+
+def analyze_file(text: str, file_path: str) -> List[Finding]:
+    """Analyze a single file's text for ordered multi-stage attack sequences.
+
+    Returns a list of AS-CHAIN findings (0, 1, or 2). Never executes code.
+    """
+    return [finding for finding, _, _ in analyze_file_chains(text, file_path)]

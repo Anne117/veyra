@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from veyra.correlation import correlate_detailed
 from veyra.cwe import cwe_for
@@ -28,7 +28,7 @@ from veyra.graph.context import (
 from veyra.mitre import mitre_for
 from veyra.models import Confidence, Finding, ScanResult
 from veyra.rules import load_file_rules, load_rules
-from veyra.step_sequence import analyze_file
+from veyra.step_sequence import analyze_file_chains
 
 # File extensions we inspect. Everything else is skipped.
 SCAN_EXTENSIONS = {
@@ -143,19 +143,25 @@ def scan_path(
 
     # Run intra-file step-sequence analysis. This fills the gap when individual
     # steps are too benign to generate standalone findings. Deduplicate against
-    # the (rule_id, file) pairs correlation ALREADY covers: correlation chains
-    # are aggregated under "<correlated>", so a per-rule-id check dropped every
-    # intra-file chain in the tree as soon as one correlation chain of the same
-    # rule fired anywhere. Coverage is per artifact instead, taken from the
-    # findings each chain was built from.
-    covered = {
-        (chain.rule_id, contributor.file)
-        for chain, contributors in correlated
-        for contributor in contributors
-    }
+    # what correlation ALREADY reports: correlation chains are aggregated under
+    # "<correlated>", so a per-rule-id check dropped every intra-file chain in
+    # the tree as soon as one correlation chain of the same rule fired anywhere.
+    # Coverage is per artifact AND per line, taken from the findings each chain
+    # was built from: a chain is skipped only when a contributing finding of
+    # the same rule in the same file sits inside the chain's own line span,
+    # i.e. when both describe the same lines. A second, distinct chain in a
+    # file that correlation also touches elsewhere is a different fact and is
+    # reported. A contributor without a line covers the whole file.
+    covered: Dict[Tuple[str, str], List[Optional[int]]] = {}
+    for chain, contributors in correlated:
+        for contributor in contributors:
+            covered.setdefault((chain.rule_id, contributor.file), []).append(
+                contributor.line
+            )
     for text, path in file_texts:
-        for chain in analyze_file(text, path):
-            if (chain.rule_id, path) in covered:
+        for chain, first, last in analyze_file_chains(text, path):
+            lines = covered.get((chain.rule_id, path))
+            if lines and any(line is None or first <= line <= last for line in lines):
                 continue
             findings.append(chain)
 
