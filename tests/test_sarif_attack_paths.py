@@ -368,3 +368,45 @@ def test_sarif_scan_src_every_result_has_location():
         )
         loc = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
         assert loc, "attack-path location uri must be a non-empty string"
+
+
+def test_chain_finding_is_marked_superseded_by_a_proven_path():
+    """A chain finding and a path for the same artifact are one incident.
+
+    The chain result must remain in the document (evidence is never deleted),
+    but it carries a SARIF suppression and the path id, so a consumer counting
+    results does not count the incident twice.
+    """
+    from veyra.scanner import scan_path
+
+    result = scan_path("tests/fixtures/attacks/multi-stage/exfiltration-flow")
+    assert len(result.attack_paths) == 1
+
+    doc = json.loads(render_sarif(result))
+    results = doc["runs"][0]["results"]
+    chain = [r for r in results if r["ruleId"] == "AS-CHAIN-004"]
+    paths = [r for r in results if r["ruleId"].startswith("ATTACK-PATH-")]
+    assert len(chain) == 1 and len(paths) == 1
+
+    path_id = result.attack_paths[0].path_id
+    assert chain[0]["properties"]["result_kind"] == "finding"
+    assert chain[0]["properties"]["superseded_by_path"] == path_id
+    justifications = [s["justification"] for s in chain[0]["suppressions"]]
+    assert any(path_id in j and "DATA_EXFILTRATION" in j for j in justifications)
+
+    assert paths[0]["properties"]["result_kind"] == "attack_path"
+    assert "suppressions" not in paths[0]
+
+
+def test_chain_without_a_path_is_not_suppressed():
+    from veyra.scanner import scan_path
+
+    result = scan_path("tests/fixtures/attacks/v2/secret-exfiltration/different-network-api")
+    assert result.attack_paths == []
+
+    doc = json.loads(render_sarif(result))
+    chains = [r for r in doc["runs"][0]["results"] if r["ruleId"].startswith("AS-CHAIN-")]
+    assert chains
+    for r in chains:
+        assert "suppressions" not in r
+        assert "superseded_by_path" not in r["properties"]

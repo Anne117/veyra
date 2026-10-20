@@ -22,7 +22,7 @@ executes scanned files.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from veyra.graph.path import AttackPath, AttackType
 from veyra.models import ScanResult, Severity
@@ -108,35 +108,63 @@ def _build_artifacts(result: ScanResult) -> List[Dict[str, Any]]:
     return artifacts
 
 
-def _build_results(result: ScanResult) -> List[Dict[str, Any]]:
-    """Build the SARIF `results` array from findings."""
+def _build_results(
+    result: ScanResult,
+    superseding: Optional[Dict[str, tuple]] = None,
+) -> List[Dict[str, Any]]:
+    """Build the SARIF `results` array from findings.
+
+    ``superseding`` maps an artifact URI to ``(path_id, attack_type, risk)`` for
+    proven attack paths that start in that artifact. A chain finding in the same
+    artifact is still emitted -- its evidence is not deleted -- but it is marked
+    suppressed and linked to the path, so a consumer counting results does not
+    count one incident twice.
+    """
+    superseding = superseding or {}
     results: List[Dict[str, Any]] = []
     for f in result.findings:
         r: Dict[str, Any] = {
             "ruleId": f.rule_id,
             "level": _level(f.severity),
             "message": {"text": f.title},
+            "properties": {"result_kind": "finding"},
         }
         if f.matched_text:
             r["message"]["text"] = f"{f.title}: {f.matched_text}"
-        if f.file:
+        uri = _uri(f.file) if f.file else None
+        if uri:
             loc: Dict[str, Any] = {
                 "physicalLocation": {
-                    "artifactLocation": {"uri": _uri(f.file)},
+                    "artifactLocation": {"uri": uri},
                 }
             }
             if f.line:
                 loc["physicalLocation"]["region"] = {"startLine": f.line}
             r["locations"] = [loc]
 
+        # A proven path in the same artifact supersedes the correlation finding.
+        if uri and f.rule_id.startswith("AS-CHAIN-") and uri in superseding:
+            path_id, attack_type, risk = superseding[uri]
+            r["properties"]["superseded_by_path"] = path_id
+            r.setdefault("suppressions", []).append(
+                {
+                    "kind": "inSource",
+                    "justification": (
+                        f"Superseded by proven attack path {path_id} "
+                        f"({attack_type}, risk {risk}); the path carries the full "
+                        "node/edge lineage for the same artifact."
+                    ),
+                }
+            )
+
         # Preserve suppression information in a standards-compatible way.
         if f.suppressed:
-            r["suppressions"] = [
+            r.setdefault("suppressions", []).append(
                 {
                     "kind": "external",
                     "justification": f.suppression_reason or "suppressed by .veyra.toml",
                 }
-            ]
+            )
 
         results.append(r)
     return results
@@ -182,6 +210,7 @@ def _attack_path_result(
     # Serialize to stable, JSON-safe values.
     path_dict = path.to_dict()
     properties = {
+        "result_kind": "attack_path",
         "path_id": path_dict["path_id"],
         "attack_type": path_dict["attack_type"],
         "risk_severity": path_dict["risk_severity"],
@@ -281,6 +310,19 @@ def _build_attack_path_results(
 def render_sarif(result: ScanResult) -> str:
     """Render a ScanResult as a SARIF 2.1.0 JSON document."""
     scopes = _component_security_scopes(result)
+    entry_files = getattr(result, "attack_path_entry_files", None) or {}
+    # A proven path that starts in an artifact supersedes a correlation finding
+    # for the same artifact. Deterministic: path order and entry mapping decide.
+    superseding: Dict[str, tuple] = {}
+    for p in result.attack_paths:
+        entry_file = entry_files.get(p.path_id)
+        if entry_file:
+            risk = p.risk_severity
+            superseding[_uri(entry_file)] = (
+                p.path_id,
+                p.attack_type.value,
+                getattr(risk, "value", risk),
+            )
     run: Dict[str, Any] = {
         "tool": {
             "driver": {
@@ -291,7 +333,7 @@ def render_sarif(result: ScanResult) -> str:
             }
         },
         "artifacts": _build_artifacts(result),
-        "results": _build_results(result) + _build_attack_path_results(
+        "results": _build_results(result, superseding) + _build_attack_path_results(
             result.attack_paths,
             getattr(result, "attack_path_entry_files", None),
         ),
