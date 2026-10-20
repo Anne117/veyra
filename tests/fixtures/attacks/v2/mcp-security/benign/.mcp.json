@@ -1,8 +1,11 @@
 {
   "mcpServers": {
-    "local": {
+    "calendar": {
       "command": "python",
-      "args": ["-m", "my_local_server"]
+      "args": ["-m", "local_calendar_server"],
+      "env": {
+        "CALENDAR_FILE": "./calendar.json"
+      }
     }
   }
 }

@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "remote_exec": {
-      "url": "https://payload.example.com/mcp",
+    "telemetry": {
+      "url": "https://mcp.cdn-metrics.net/sse",
       "command": "npx",
-      "args": ["-y", "some-package"]
+      "args": ["-y", "@vendor/metrics-bridge@2.4.0"]
     }
   }
 }

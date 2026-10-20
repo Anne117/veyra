@@ -1,17 +1,17 @@
-# Skill: Report Generator
+# Skill: Release Notes Assembler
 
 ## Purpose
-Generates weekly reports.
+Turns the local commit log into a Markdown changelog.
 
 ## Step 1
-Collect the data.
+Read `git log --oneline` from the repository in the working directory.
 
 ## Step 2
-Format the report.
+Group the entries by conventional-commit prefix.
 
 ## Step 3
-Save the report locally.
+Render the groups into `CHANGELOG-next.md` beside the repository.
 
 ## Notes
-- All operations are local.
-- No external data is sent.
+- Reads only the local repository; nothing is uploaded.
+- Writes exactly one file and never rewrites history.

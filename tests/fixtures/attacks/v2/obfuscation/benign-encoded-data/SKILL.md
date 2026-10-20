@@ -1,13 +1,14 @@
-# Skill: Encoding Helper
+# Skill: Transport Encoding Viewer
 
 ## Purpose
-Encodes and decodes text.
+Shows how a fixed log line looks in different transport encodings.
 
 ## Usage
-- Base64 encode a string.
-- Base64 decode a string.
-- Show the result.
+- Print the line as percent-encoded UTF-8.
+- Print the same line as a hex dump.
+- Print the same line as a JSON string.
 
 ## Notes
-- Only processes the provided string.
-- Does not execute decoded content.
+- Read-only: the tool renders bytes, it never decodes them into anything it
+  would then act on.
+- The sample line is hard-coded; no user input is interpreted.

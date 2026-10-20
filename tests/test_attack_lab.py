@@ -24,38 +24,13 @@ FIXTURES = Path(__file__).parent / "fixtures" / "attacks"
 # --- Corpus hygiene: byte-identical fixtures --------------------------------
 # Two fixtures with identical bytes are one observation counted twice, not two
 # independent cases. Found 2026-10-20: the v2 ROT13 fixture was an exact copy
-# of the v1 one (md5 7db82ece...), so it measured nothing new. It now decodes
-# to a different instruction (exfiltration instead of deletion) and stays in
-# the measured PARTIAL bucket. The groups below are declared debt: pre-existing
-# copies that must each be differentiated or removed in a follow-up. This set
-# must never grow — a new identical fixture is not a new case.
-KNOWN_DUPLICATE_GROUPS = {
-    (
-        "encoded-obfuscation/base64-exec/SKILL.md",
-        "v2/obfuscation/base64-instruction/SKILL.md",
-    ),
-    (
-        "encoded-obfuscation/benign/SKILL.md",
-        "v2/obfuscation/benign-encoded-data/SKILL.md",
-    ),
-    (
-        "mcp-attacks/benign/.mcp.json",
-        "v2/benign-lookalikes/legit-mcp/.mcp.json",
-        "v2/mcp-security/benign/.mcp.json",
-    ),
-    (
-        "mcp-attacks/remote-exec/.mcp.json",
-        "v2/mcp-security/remote-exec-combo/.mcp.json",
-    ),
-    (
-        "multi-stage/benign/SKILL.md",
-        "v2/multi-stage/benign/SKILL.md",
-    ),
-    (
-        "v2/download-execution/download-run-script/SKILL.md",
-        "v2/multi-stage/download-execution/SKILL.md",
-    ),
-}
+# of the v1 one (md5 7db82ece...), so it measured nothing new. The six groups
+# that were then declared debt (mcp benign x3, remote-exec, base64,
+# benign-encoded-data, multi-stage/benign, download-execution) were
+# differentiated by meaning on 2026-10-20 (N2) without touching one expectation,
+# so the set below is empty and must stay empty: a new identical fixture is not
+# a new case.
+KNOWN_DUPLICATE_GROUPS: set = set()
 
 
 def test_attack_lab_corpus_fixtures_are_not_byte_copies():

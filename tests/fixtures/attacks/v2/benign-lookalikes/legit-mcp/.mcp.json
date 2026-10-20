@@ -1,8 +1,11 @@
 {
   "mcpServers": {
-    "local": {
-      "command": "python",
-      "args": ["-m", "my_local_server"]
+    "notes": {
+      "command": "node",
+      "args": ["./servers/notes-mcp/index.js"],
+      "env": {
+        "NOTES_DIR": "./notes"
+      }
     }
   }
 }
