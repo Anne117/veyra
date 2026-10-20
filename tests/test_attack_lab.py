@@ -307,7 +307,7 @@ def test_benign_clean_detected():
 # intentionally PARTIAL or MISSED, that expectation is preserved here unless
 # there is a deliberate, reviewed detection improvement.
 
-EXPECTED_TOTAL = 112
+EXPECTED_TOTAL = 113
 EXPECTED_FALSE_POSITIVES = 0
 # Updated 2026-10-18 (Phase 1, Q-1):
 #   AS-MCP-007 was token-precise (per-arg) and escalated to HIGH for
@@ -344,9 +344,16 @@ EXPECTED_FALSE_POSITIVES = 0
 #   child_process.execSync with an env command (PARTIAL, MEDIUM ceiling)
 #   and a prose/foreign-method twin that must stay silent. 110 -> 112
 #   cases; 102 DETECTED / 7 PARTIAL / 3 MISSED / 0 FP (91.1%).
+# Updated 2026-10-20 (Phase 1, N1):
+#   Added `v2-rot13-nl/decoded-real-shell-command`: ROT13 over a literal
+#   destructive shell command (rm + flags, directory tree) with the framing
+#   telling the reader to run it. Measured MISSED — it is a probe of AS-007's
+#   phrase tokenisation only (payload vocabulary and execution context are
+#   both present). 112 -> 113 cases; 102 DETECTED / 7 PARTIAL / 4 MISSED /
+#   0 FP (90.3%): the drop is one harder case, no detection regressed.
 EXPECTED_DETECTED = 102
 EXPECTED_PARTIALLY_DETECTED = 7
-EXPECTED_MISSED = 3
+EXPECTED_MISSED = 4
 
 # Per-case expected classifications. Keyed by (category, name).
 # These are the current verified classifications; update deliberately when a
@@ -452,6 +459,7 @@ EXPECTED_CASE_RESULTS = {
     ('v2-rot13-nl', 'decoded-delete-prod-tree'): MISSED,
     ('v2-rot13-nl', 'decoded-exfil-private-keys'): MISSED,
     ('v2-rot13-nl', 'decoded-remote-installer-root'): MISSED,
+    ('v2-rot13-nl', 'decoded-real-shell-command'): MISSED,
     ('v2-rot13-nl', 'decoded-cipher-primer'): DETECTED,
     ('v2-rot13-nl', 'decoded-release-note'): DETECTED,
     ('v2-rot13-nl', 'decoded-meeting-note'): DETECTED,

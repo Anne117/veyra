@@ -183,9 +183,10 @@ explicit indicator are not decoded). All 10 benign-lookalikes remain clean.
 
 ## Measured: ROT13 natural-language instructions (E-3a / E-3b)
 
-`tests/fixtures/attacks/v2/rot13-nl/` holds six fixtures added specifically
-to measure this boundary: three attacks whose decoded text is a concrete
-dangerous action in plain English, three benign notes. Locked by
+`tests/fixtures/attacks/v2/rot13-nl/` held six fixtures when this boundary was
+measured: three attacks whose decoded text is a concrete dangerous action in
+plain English, three benign notes. (A seventh, literal-command probe was added
+later — see N1 below.) Locked by
 `tests/test_rot13_nl_adversarial.py`; no rule was changed to produce these
 numbers.
 
@@ -212,9 +213,47 @@ discriminating power, so counting it as detection would inflate the metric.
 
 1. **Tokenisation.** The branch iterates `[A-Za-z0-9+/]{16,}` tokens. A ROT13
    sentence is separated by spaces, so no token ever contains more than one
-   word; the payload never reaches the decoder whole.
+   word; the payload never reaches the decoder whole. This is not a property
+   of prose — see N1 below, where a literal command fails for the same reason.
 2. **Vocabulary.** Even after decoding, `DANGEROUS_COMMAND` matches shell
    syntax only. Natural-language dangerous actions never match.
+
+### N1 (measured 2026-10-20): a literal command is missed by gap (1) alone
+
+The set above cannot separate the two gaps, because its payloads are prose. One
+fixture was added to pin gap (1) on its own:
+`tests/fixtures/attacks/v2/rot13-nl/decoded-real-shell-command`. Its payload is
+ROT13 (computed in Python, not written into these docs) over a literal `rm`
+invocation with flags against a data-directory tree, and the framing says to
+apply ROT13 and run the resulting command.
+
+| probe | result |
+| --- | --- |
+| `ROT13_INDICATOR` on the file | matches |
+| `EXECUTION_CONTEXT` on the file | matches ("run") |
+| whole quoted phrase decoded, tested against `DANGEROUS_COMMAND` | matches |
+| findings produced by `scan_path` | **0** |
+| only `BASE64_TOKEN` match in the file | the path component, which decodes to a bare path |
+
+So the payload vocabulary is shell syntax, the execution context is explicit,
+and the whole phrase would be caught if it reached the decoder — and the case is
+still MISSED. The cause is exactly gap (1): the two-word command prefix is split
+by a space into fragments below the 16-character floor, so only the long
+slash-containing path token survives tokenisation and it decodes to a path, not
+a command.
+
+Consequence for future work: decoding the *quoted phrase* and then testing it
+against the existing `DANGEROUS_COMMAND` / `EXECUTION_CONTEXT` pair is a
+deterministic pre-step — no vocabulary change, no LLM, no new dependency — and
+it would make this fixture DETECTED. It is **not** shipped here: it is a rule
+change, its false-positive surface has to be measured over the whole corpus and
+the field slice first, and the natural-language members of this family would
+stay MISSED afterwards anyway (gap (2)). Recorded as the next candidate for
+AS-007, not applied.
+
+Corpus after the fixture: **113 cases — 102 DETECTED / 7 PARTIALLY_DETECTED /
+4 MISSED / 0 FP (90.3%)**. `expected` was not adjusted anywhere: the case was
+labelled by measurement.
 
 Gap (1) is deterministic and, by itself, adds no FP surface. Gap (2) is where
 the risk lives — it is the same problem recorded for

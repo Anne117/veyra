@@ -2,8 +2,9 @@
 
 Purpose: a measurable, honest baseline for instructions that are hidden as
 ROT13-encoded NATURAL LANGUAGE rather than shell syntax. Each attack fixture
-must decode to a real, concrete dangerous action (not vague prose); each
-benign fixture must decode to harmless text. The expected classifications are
+must decode to a real, concrete dangerous action — a literal shell command or
+a specific prose instruction, never vague text; each benign fixture must
+decode to harmless text. The expected classifications are
 measurements of the current detector, not targets:
 
     attacks  -> MISSED      (no rule fires: after the P-1 precision audit
@@ -30,6 +31,7 @@ ATTACKS = {
     "decoded-delete-prod-tree",
     "decoded-exfil-private-keys",
     "decoded-remote-installer-root",
+    "decoded-real-shell-command",
 }
 BENIGN = {
     "decoded-cipher-primer",
@@ -44,7 +46,11 @@ BENIGN = {
 DANGEROUS_ACTION = re.compile(
     r"(?:delete\s+every\s+file\s+under\s+/|wipe\s+the\s+database\s+backups"
     r"|send\s+the\s+private\s+SSH\s+keys.*https?://"
-    r"|download\s+the\s+installer\s+from\s+https?://.*run\s+it\s+as\s+root)",
+    r"|download\s+the\s+installer\s+from\s+https?://.*run\s+it\s+as\s+root"
+    # N1: the same family also carries a LITERAL command, not prose. A command
+    # that deletes a directory tree with flags is dangerous on its face, so the
+    # fixture must spell the flags and the target out.
+    r"|\brm\s+-[a-z]*[rf][a-z]*\s+(?:--[a-z-]+\s+)*/\S+)",
     re.IGNORECASE,
 )
 
@@ -63,7 +69,7 @@ def _payload(name):
     return codecs.decode(quoted[0], "rot13")
 
 
-def test_all_six_fixtures_present():
+def test_all_fixtures_present():
     for name in ATTACKS | BENIGN:
         assert (FIXTURES / name / "SKILL.md").exists(), f"missing fixture: {name}"
 
