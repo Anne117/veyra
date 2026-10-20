@@ -67,6 +67,46 @@ HTTP_CLIENT = re.compile(
     r"|\burllib\.request\b|\burlopen\b"
 )
 
+# A request issued through a client *object* is invisible to the branches
+# above, because they all name a library: ``async with session.post(url)`` and
+# ``resp = await self._http_client.post(webhook, json=payload)`` name neither
+# ``requests`` nor ``httpx``. The object form can only be recognised by naming
+# convention, so it is restricted to receivers that declare a transport -- a
+# name containing ``http`` (``http``, ``https``, ``_http_client``, ``_httpx``,
+# ``http_session``) or a plain ``session`` / ``_session`` / ``self._session``.
+# ``draftsBySession.delete(key)`` is a Map keyed by session id, not a request,
+# so a bare ``session`` tail is not enough.
+#
+# Verbs are HTTP-only. ``get`` is deliberately absent: ``_HTTP_CALL_ERRORS.get(
+# code, ...)`` and ``session.get("cwd")`` are dictionary reads -- 691
+# ``<name>.get(`` lines in the field probe, and a verb alone does not separate
+# a lookup from a request. The cost is that ``session.get(url)`` stays
+# unreported (field probe 2026-10-20: 44 ``session.*`` call lines, of which 1
+# is a JSON-RPC session over stdio -- ``session.post(method, params, cb)`` in
+# ``ui-tui/scripts/profile-tui.mjs`` -- recorded as residual, not fixed here).
+HTTP_OBJECT_CALL = re.compile(
+    r"(?i)\b\w*https?\w*\.(?:post|put|patch|delete|head|options|request)\s*\("
+    r"|\b(?:[A-Za-z_]\w*\.)?_?session\.(?:post|put|patch|delete|head|options|request)\s*\("
+)
+
+
+def _is_mention(line: str, start: int) -> bool:
+    """True when ``line[start]`` sits inside a quoted or backticked mention.
+
+    A docstring that describes the call (``await self._http_session.post(...)``)
+    and a test that asserts on source text are talking *about* a request, not
+    making one. Double-backtick RST spans are handled by treating anything
+    between the first and last backtick of a line as a mention.
+    """
+    backticks = [m.start() for m in re.finditer(r"`", line)]
+    if len(backticks) >= 2 and backticks[0] < start < backticks[-1]:
+        return True
+    for span in re.finditer(r'"[^"]*"', line):
+        if span.start() <= start < span.end():
+            return True
+    return False
+
+
 # --- Download-and-execute --------------------------------------------------
 
 DOWNLOAD_EXECUTE = re.compile(
@@ -76,7 +116,15 @@ DOWNLOAD_EXECUTE = re.compile(
 
 @register
 def detect_http_client(content: str, file_path: str, line: int) -> "Finding | None":
-    if HTTP_CLIENT.search(content):
+    matched = HTTP_CLIENT.search(content)
+    if matched is None:
+        candidate = HTTP_OBJECT_CALL.search(content)
+        matched = (
+            candidate
+            if candidate is not None and not _is_mention(content, candidate.start())
+            else None
+        )
+    if matched is not None:
         return Finding(
             rule_id="AS-003",
             severity=Severity.MEDIUM,

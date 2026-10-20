@@ -173,3 +173,43 @@ def test_raw_ip_detector_is_registered_once():
 
     assert detect_raw_ip_url is suspicious_urls.detect_raw_ip
     assert detect_shortener is suspicious_urls.detect_shortener
+
+
+def test_request_through_a_client_object_is_network_access():
+    """The library name need not be spelled: the object carries the transport."""
+    for line in (
+        "async with session.post(url, headers=headers, json=payload) as resp:",
+        "resp = await self._session.put(url, data=form)",
+        "resp = await self._http_client.post(session_webhook, json=payload)",
+        "response = self._httpx.post(endpoint + path)",
+        "const req = https.request(url, {method}, res => {})",
+        "req = client_options.http.request(opts)",
+        "await session.delete(upload_url)",
+        "return session.request(method, url, params=params)",
+    ):
+        assert detect_http_client(line, "x.py", 1) is not None, line
+
+
+def test_object_form_keeps_prose_and_non_http_receivers_quiet():
+    """A mention, a mapping read, and a queue are not requests.
+
+    ``session.get('cwd')`` and ``_HTTP_CALL_ERRORS.get(code, ...)`` are
+    dictionary lookups (691 ``<name>.get(`` lines in the field probe), and
+    ``draftsBySession`` is a Map keyed by session id even though its name ends
+    in ``session``.
+    """
+    for line in (
+        "    # ``await session.post(...)`` leaves the response until GC",
+        '    assert "await self._http_session.post(" not in src',
+        'msg = _HTTP_CALL_ERRORS.get(e.code, "failed")',
+        "draftsBySession.delete(key)",
+        "session.get('cwd') or \"\"",
+        "self._pending_input.put(msg)",
+        "buf.delete()",
+        "index.delete(ids=[\"vec1\"])",
+        # ``get`` is not an HTTP-only verb, so this read stays unreported on
+        # purpose (README, AS-003 residual cost); the file's import still
+        # carries the capability claim.
+        "response = self._httpx.get(endpoint + path)",
+    ):
+        assert detect_http_client(line, "x.py", 1) is None, line
