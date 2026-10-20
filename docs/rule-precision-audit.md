@@ -1,6 +1,6 @@
 # Rule precision audit (P-1)
 
-Scope: every rule fired over the full fixture corpus — the 105 `attack_lab`
+Scope: every rule fired over the full fixture corpus — the 112 `attack_lab`
 cases (`tests/fixtures/attacks`, benign members included) plus the standalone
 benign fixtures (`tests/fixtures/benign`, `tests/fixtures/clean`,
 `tests/fixtures/false_positives`). Measurement, not estimation: findings were
@@ -10,6 +10,13 @@ Reproduce: run `scan_path` over `ATTACK_CASES` paths, split by `is_benign`, and
 count distinct cases per rule. Aggregate numbers alone are misleading: `AS-004`
 is a composite of six detectors that all report the same `rule_id`, so the
 breakdown by `evidence` is the part that matters.
+
+Current baseline (2026-10-20): 112 cases — 102 DETECTED, 7 PARTIALLY_DETECTED,
+3 MISSED, 0 false positives (91.1%). Reproduce:
+`.venv/bin/python -c "from veyra.attack_lab import run_attack_lab; print(run_attack_lab().summary())"`.
+The per-round tables below quote the denominator that existed when each round
+was measured (105 until the F-1 fixtures landed); they are measurement records
+and are not restated.
 
 ## Per-rule firing table (before P-1)
 
