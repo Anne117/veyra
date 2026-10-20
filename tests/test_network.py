@@ -45,6 +45,33 @@ def test_http_client_code_forms():
         assert detect_http_client(line, "x.py", 1) is not None, line
 
 
+def test_fetch_definition_method_call_and_prose_are_not_network_access():
+    """``fetch`` is a network call only as the bare JS global.
+
+    A Python definition, a method call on a local source object, and prose in
+    a docstring/comment name no global request function.
+    """
+    for line in (
+        "    def fetch(self, cfg: dict, home_path: Path) -> FetchResult:",
+        "    return source.fetch(cfg, home_path)",
+        '        """Run source.fetch() under a wall-clock budget; never raises."""',
+        "    # ``fetch()``, precedence (mapped beats bulk; within a shape",
+        "    async def fetch(url):",
+        "    export function fetch(input: RequestInfo) {",
+    ):
+        assert detect_http_client(line, "x.py", 1) is None, line
+
+
+def test_bare_fetch_call_still_counts_as_network_access():
+    """The JS global (including ``window.fetch``) is still a call."""
+    for line in (
+        "const r = await fetch(url)",
+        "window.fetch(url)",
+        "return fetch(url, {method: 'POST'})",
+    ):
+        assert detect_http_client(line, "x.js", 1) is not None, line
+
+
 def test_client_symbol_reference_is_not_network_access():
     """Naming a client symbol makes no request; only a call does."""
     for line in (

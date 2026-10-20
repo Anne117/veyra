@@ -53,7 +53,14 @@ HTTP_CLIENT = re.compile(
     # Bare call forms. No space before "(" here: "fetch (see below)" is prose,
     # and a bare "got (" is ordinary English.
     r"|\baxios\s*(?:\.[A-Za-z_]*\s*)?\("
-    r"|\b(?:fetch|node-fetch)\("
+    # ``fetch`` is the *global* in JS/undici only. A definition (``def`` or
+    # ``function`` before the name), a method call (``source.fetch``), and
+    # prose in backticks name no global request function; the global spelled
+    # out on ``window`` still counts. Field probe 2026-10-20: 9 of the 86
+    # AS-003 MEDIUM in ``agent/`` were bare-name collisions of this kind.
+    r"|(?<![.\w`])(?<!def )(?<!function )fetch\("
+    r"|\bwindow\.fetch\("
+    r"|\bnode-fetch\("
     r"|\bgot\.[A-Za-z_]+\s*\("
     r"|\bimport\s+got\s+from\b"
     # urllib: ``urllib.parse`` / ``urllib.error`` make no requests.
