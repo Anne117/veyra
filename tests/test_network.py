@@ -260,6 +260,77 @@ def test_object_form_keeps_prose_and_non_http_receivers_quiet():
         assert detect_http_client(line, "x.py", 1) is None, line
 
 
+def test_a_session_get_is_a_request_when_the_file_proves_the_receiver(tmp_path):
+    """``client.get(url)`` is a request if this file built ``client`` as a session.
+
+    The import claim is superseded: the request line is the claim that names
+    something the file actually does. The construction keeps its own claim --
+    collapsing those is a separate question, and the field count below shows
+    why it is not decided here.
+    """
+    (tmp_path / "models.py").write_text(
+        "import httpx\n"
+        "\n"
+        "\n"
+        "def fetch_models(url: str) -> dict:\n"
+        "    with httpx.Client(timeout=5) as client:\n"
+        "        return client.get(url).json()\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [5, 6]
+
+
+def test_a_session_get_inside_a_multiline_construction_is_a_request(tmp_path):
+    (tmp_path / "probe.py").write_text(
+        "import httpx\n"
+        "with httpx.Client(\n"
+        "    timeout=httpx.Timeout(15.0),\n"
+        "    headers={\"Accept\": \"application/json\"},\n"
+        ") as client:\n"
+        "    resp = client.get(probe_url)\n"
+    )
+    assert 6 in [f.line for f in _http_medium(str(tmp_path))]
+
+
+def test_a_get_on_a_receiver_no_session_bound_stays_quiet(tmp_path):
+    """The whole point: a mapping read and a foreign receiver are not requests.
+
+    691 ``<name>.get(`` lines in the field probe are lookups; ``draftsBySession``
+    is a Map keyed by session id; ``self._httpx.get(...)`` is a real request the
+    file never proves a receiver for, so it stays residual rather than guessed.
+    """
+    (tmp_path / "dicts.py").write_text(
+        "def read(session, draftsBySession, errors, self_httpx):\n"
+        "    first = session.get('cwd')\n"
+        "    draftsBySession.delete('draft-1')\n"
+        "    other = self_httpx.get(endpoint)\n"
+        "    return errors.get('code', 'failed'), first, other\n"
+    )
+    found = [(f.line, f.matched_text) for f in _http_medium(str(tmp_path))]
+    assert found == []
+
+
+def test_a_quoted_session_get_is_a_mention(tmp_path):
+    (tmp_path / "noted.py").write_text(
+        "import httpx\n"
+        "client = httpx.Client()\n"
+        "# ``client.get(url)`` is how the probe fetches the list\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [2]
+
+
+def test_a_session_bound_in_a_sibling_file_proves_nothing(tmp_path):
+    """The proof is per file: ``a.py`` building a client says nothing about ``b.py``."""
+    (tmp_path / "a.py").write_text("import httpx\nclient = httpx.Client()\n")
+    (tmp_path / "b.py").write_text("def go(client, url):\n    return client.get(url)\n")
+    found = {(f.file.rsplit("/", 1)[-1], f.line) for f in _http_medium(str(tmp_path))}
+    assert found == {("a.py", 2)}
+
+
+def test_the_line_rule_still_cannot_see_a_receiver():
+    """``detect_http_client`` stays line-scoped; only the file rule can prove one."""
+    assert detect_http_client("client.get(url)", "x.py", 1) is None
+
+
 def _http_medium(target):
     return [
         f for f in scan_path(target).findings

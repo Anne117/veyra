@@ -12,9 +12,10 @@ second copy, or every hit is emitted twice in scan results.
 from __future__ import annotations
 
 import re
+from typing import List
 
 from veyra.models import Finding, Severity
-from veyra.rules import register
+from veyra.rules import register, register_file_rule
 from veyra.rules.suspicious_urls import (  # noqa: F401  (public re-export)
     detect_raw_ip as detect_raw_ip_url,
     detect_shortener,
@@ -97,6 +98,44 @@ HTTP_OBJECT_CALL = re.compile(
     r"|\b(?:[A-Za-z_]\w*\.)?_?session\.(?:post|put|patch|delete|head|options|request)\s*\("
 )
 
+# ``get`` is not HTTP-only, so ``X.get(...)`` is a request only when the file
+# *proves* what ``X`` is: a name assigned from ``requests.Session()`` or
+# ``httpx.Client()`` in the same file, either as ``X = <ctor>(...)`` (annotation
+# allowed) or bound by ``with <ctor>(...) as X:`` -- including a construction
+# whose arguments span lines. A name that no such statement binds stays quiet,
+# which is what keeps ``_HTTP_CALL_ERRORS.get(code, ...)``,
+# ``session.get("cwd")`` and ``draftsBySession.delete(key)`` unreported: none of
+# them can be a session this file created. Being file-scoped, this cannot leak
+# across files (a sibling's ``client = httpx.Client()`` proves nothing here).
+SESSION_CTOR = r"(?:requests\.Session|httpx\.Client)"
+SESSION_ASSIGN = re.compile(
+    rf"(?m)^[ \t]*(?P<name>(?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)"
+    rf"[ \t]*(?::[^=\n]+)?=[ \t]*{SESSION_CTOR}[ \t]*\("
+)
+SESSION_WITH_AS = re.compile(
+    rf"\bwith\b[^\n:]*?{SESSION_CTOR}[ \t]*\((?:[^()]|\([^()]*\))*\)"
+    rf"[ \t]*as[ \t]+(?P<name>[A-Za-z_]\w*)",
+    re.S,
+)
+# Any ``<receiver>.get(`` on a line. Only a *proven* receiver ever becomes a
+# finding, so inside a finding this says "this line issued a request".
+SESSION_GET = re.compile(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.get[ \t]*\(")
+
+
+def session_client_names(text: str) -> List[str]:
+    """Names this file bound to a ``requests.Session`` / ``httpx.Client``.
+
+    Sorted and de-duplicated so iteration (and therefore finding order) is
+    deterministic.
+    """
+    names = {m.group("name") for m in SESSION_ASSIGN.finditer(text)}
+    names |= {m.group("name") for m in SESSION_WITH_AS.finditer(text)}
+    return sorted(names)
+
+
+def _line_at(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
 
 def _is_mention(line: str, start: int) -> bool:
     """True when ``line[start]`` sits inside a quoted or backticked mention.
@@ -151,7 +190,12 @@ def collapse_http_claims(findings):
     def _calls(f):
         # A quoted call is a mention, not use: it supersedes nothing, so the
         # import keeps its claim (same guard as the detector).
-        return _live_match(HTTP_CALL, f.matched_text or "") is not None
+        text = f.matched_text or ""
+        if _live_match(HTTP_CALL, text) is not None:
+            return True
+        # A proven session ``get`` (see ``SESSION_ASSIGN``) is a call as well:
+        # it names the request line, so the file's import is the duplicate.
+        return _live_match(SESSION_GET, text) is not None
 
     def _declares_only(f):
         text = f.matched_text or ""
@@ -188,6 +232,46 @@ def detect_http_client(content: str, file_path: str, line: int) -> "Finding | No
             remediation="Ensure network access is intentional and the target is trusted.",
         )
     return None
+
+
+@register_file_rule
+def detect_session_get(text: str, file_path: str) -> List[Finding]:
+    """``X.get(...)`` where ``X`` is a session this file created.
+
+    The line rule cannot decide this: a bare ``session.get("cwd")`` is a
+    dictionary read. The file can, because the assignment is in it. The
+    finding is attached to the request line rather than to the construction,
+    so a chain or a graph edge points at the statement that makes the request.
+    """
+    findings: List[Finding] = []
+    for name in session_client_names(text):
+        pattern = re.compile(rf"\b{re.escape(name)}\.get[ \t]*\(")
+        for m in pattern.finditer(text):
+            line_start = text.rfind("\n", 0, m.start()) + 1
+            line_end = text.find("\n", m.end())
+            if line_end == -1:
+                line_end = len(text)
+            line = text[line_start:line_end]
+            if _is_mention(line, m.start() - line_start):
+                continue
+            findings.append(
+                Finding(
+                    rule_id="AS-003",
+                    severity=Severity.MEDIUM,
+                    title="External network access",
+                    description=(
+                        "HTTP client usage detected; the skill may make network requests."
+                    ),
+                    file=file_path,
+                    line=_line_at(text, m.start()),
+                    evidence="HTTP client call",
+                    remediation=(
+                        "Ensure network access is intentional and the target is trusted."
+                    ),
+                    matched_text=line.strip(),
+                )
+            )
+    return findings
 
 
 @register

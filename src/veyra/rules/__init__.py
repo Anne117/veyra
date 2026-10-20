@@ -64,6 +64,6 @@ def load_rules() -> List[Rule]:
 def load_file_rules() -> List[FileRule]:
     """Import all file-rule modules so their @register_file_rule decorators run."""
     from veyra import rules as _rules  # noqa: F401
-    from veyra.rules import mcp, obfuscation  # noqa: F401
+    from veyra.rules import mcp, network, obfuscation  # noqa: F401
 
     return ALL_FILE_RULES
