@@ -1192,3 +1192,41 @@ still fires.
 docstring handling is the separate round already noted above), and a genuine injection
 written as a third quoted item on a table-looking line would be missed. Both are recorded,
 not silenced.
+
+## Round 18 — AS-006: a printed message is not a read
+
+The comment/docstring filter (round 8 follow-up) left 48 AS-006 HIGH on the field slice
+(`agent/ tools/ skills/ hermes_cli/`). Classifying those 48 by what the line is:
+
+| class | count | example |
+|---|---|---|
+| output call, path only in the message | 26 | `print(f"  Secrets: {home / '.env'}")` |
+| attribute / subscript access (`.key`, `self.env`, `auth.env`) | 7 | `values.get(field.key)` |
+| regex literal (the guard patterns that hunt for `cat .env`) | 5 | `(r'cat\\s+[^\\n]*(\\.env|credentials|…)', "read_secrets")` |
+| other prose / config keys | 10 | `"deny": ["Read(.env)"]` |
+
+The largest class is the message: a `print`/`console.print`/`logger.*` call whose
+arguments are only literals. The path lives inside the literal, the code touches no
+file. **Rule (scanner filter, `.py` only):** when the code part of the line (string
+literals blanked) is nothing but an output call, the finding is prose. The call itself
+must carry no code (`print(open(".env").read())` keeps its finding), and a read call
+anywhere on the raw line defeats the filter, because Python 3.11 tokenises an f-string
+as one literal and would otherwise hide `print(f"{open('.env').read()}")`.
+
+| measurement | before | after |
+|---|---|---|
+| AS-006 HIGH, field slice | 48 | 23 |
+| total findings, same slice | 426 | 401 |
+| every other rule, same slice | 378 | 378 |
+| corpus (113 cases) | 102 D / 7 P / 4 M / 0 FP | unchanged, 0 drift |
+| suite | 1749 | 1751 |
+| wall clock, 4 directories | 92.4 s | 93.4 s (run-to-run noise; the filter costs one regex per AS-006 finding) |
+
+**Residual cost, measured:** 25 of 26 output-call hits are gone; the one kept is
+`print(color(f"… .env …"))`, a call with code in it. Still firing: 5 regex literals
+(tools that hunt for credential reads), 7 attribute/`.key` reads, 10 prose/config
+keys (`display += "… .env …"`, `arg("--access-token", help="… stored in .env")`,
+`@router.get("/api/credentials/pool")`). An f-string expression that reads through a
+helper whose name is not in the read-call list (`print(f"{load_text('.env')}")`) is
+dropped: the guard is a small allowlist of reading constructs, not a parser, and that
+is the honest limit of a line rule.

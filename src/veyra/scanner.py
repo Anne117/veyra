@@ -7,6 +7,7 @@ requests.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -394,6 +395,20 @@ def _confidence_for(f: Finding) -> Confidence:
     return Confidence.MEDIUM
 
 
+# AS-006: a printed message is not a read. When the code on a Python line
+# (string literals blanked) is nothing but an output call, the sensitive path
+# can only live inside the message literal: `print(f"... {home}/.env")`
+# renders text, it never opens the file. The line is still kept when the call
+# itself contains code (`print(open(".env").read())`) and when a read call can
+# hide inside an f-string expression, which Python 3.11 tokenises as a single
+# STRING token and therefore blanks entirely.
+_AS006_OUTPUT_CALL = re.compile(
+    r"^\s*(?:print|sys\.(?:stdout|stderr)\.write|console\.print"
+    r"|log(?:ger)?\.\w+)\s*\([\s\w,%+\-)]*$"
+)
+_AS006_READ_CALL = re.compile(r"\b(?:open|read|read_text|read_bytes|Path)\s*\(")
+
+
 def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
     if not _should_scan(path):
         return []
@@ -467,7 +482,16 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
         from veyra.step_sequence import _code_only_lines
 
         code_lines = _code_only_lines(text)
+        raw_lines = text.splitlines()
         if code_lines is not None:
+            def _as006_prose(lineno: int) -> bool:
+                code = code_lines[lineno - 1]
+                if not code.strip():
+                    return True
+                if not _AS006_OUTPUT_CALL.match(code):
+                    return False
+                return not _AS006_READ_CALL.search(raw_lines[lineno - 1])
+
             findings = [
                 f
                 for f in findings
@@ -475,7 +499,7 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
                     f.rule_id == "AS-006"
                     and f.line
                     and 0 < f.line <= len(code_lines)
-                    and not code_lines[f.line - 1].strip()
+                    and _as006_prose(f.line)
                 )
             ]
 

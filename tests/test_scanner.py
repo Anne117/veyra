@@ -208,3 +208,40 @@ def test_sensitive_path_prose_is_not_an_access(tmp_path):
     result = scan_path(str(target))
     lines = [f.line for f in result.findings if f.rule_id == "AS-006"]
     assert lines == [3]
+
+
+def test_printed_message_about_env_is_not_an_access(tmp_path):
+    """A print family call whose arguments are only text is a message.
+
+    The sensitive path lives inside the literal, not in code, so the line
+    reports to the user and never touches the file. The same call with code
+    inside it (``open(".env")``) stays a finding.
+    """
+    target = tmp_path / "cli.py"
+    target.write_text(
+        'print("Saved the API key to .env")\n'
+        'logger.debug("could not load credential file mounts: %s", e)\n'
+        'console.print(f"Skipped (set {name} in {home}/.env later)")\n'
+        'open(".env").read()\n',
+        encoding="utf-8",
+    )
+    result = scan_path(str(target))
+    lines = [f.line for f in result.findings if f.rule_id == "AS-006"]
+    assert lines == [4]
+
+
+def test_print_of_a_read_is_still_an_access(tmp_path):
+    """Code inside the call keeps the finding, including an f-string call.
+
+    Python 3.11 tokenises an f-string as one literal, so the expression is
+    blanked; a read call there would otherwise hide behind the filter.
+    """
+    target = tmp_path / "cli.py"
+    target.write_text(
+        'print(open(".env").read())\n'
+        'print(f"{open(\'.env\').read()}")\n',
+        encoding="utf-8",
+    )
+    result = scan_path(str(target))
+    lines = [f.line for f in result.findings if f.rule_id == "AS-006"]
+    assert lines == [1, 2]
