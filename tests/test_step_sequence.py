@@ -1,6 +1,16 @@
 """Tests for the intra-file step-sequence analyzer."""
 
-from veyra.step_sequence import analyze_file
+from pathlib import Path
+
+from veyra.step_sequence import (
+    CHAIN_MAX_LINE_SPAN,
+    _EXECUTION_SINK,
+    _code_only_lines,
+    _extract_action,
+    _is_derived_from_produced,
+    _split_actions,
+    analyze_file,
+)
 
 
 def _ids(text):
@@ -501,3 +511,83 @@ def test_analyze_file_chains_returns_the_matched_step_span():
     ((finding, first, last),) = analyze_file_chains(text, "install.sh")
     assert finding.rule_id == "AS-CHAIN-002"
     assert (first, last) == (1, 3)
+
+
+# --- AS-CHAIN-004: measured locality of genuine pairs ----------------------
+#
+# AS-CHAIN-004 is the only intra-file chain with no line-span bound: it fires
+# on object identity (the same object flowing from a source to a sink), not on
+# proximity. Measured before bounding anything (field slice = the hermes-agent
+# tree, agent/ tools/ acp_adapter/ skills/ hermes_cli/ ..., 15_039 files after
+# skipping vendor/website/dist): 6 files contain both a SOURCE/SENSITIVE action
+# and a NETWORK sink, and NONE of them shares an object between a source and a
+# later sink. So distance is nowhere the binding constraint in the field — a
+# cap would be a change with no observed noise behind it. In this corpus every
+# genuine pair sits within 6 lines.
+#
+# These tests pin that measurement. If a genuine pair ever spans more than
+# CHAIN_MAX_LINE_SPAN, the noise condition is real: add the same bound that
+# AS-CHAIN-001/002 already carry and update `..._has_no_span_bound_by_design`.
+# Reproduce the field measurement with the same helper over any tree.
+
+_FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def _chain004_pair_spans(text, file_path="SKILL.md"):
+    """Line distance from each source to the sink that closes AS-CHAIN-004."""
+    acts = []
+    code_lines = _code_only_lines(text) if file_path.lower().endswith(".py") else None
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        scrubbed = line
+        if code_lines is not None and lineno - 1 < len(code_lines):
+            if not _EXECUTION_SINK.search(line):
+                scrubbed = code_lines[lineno - 1]
+        for segment in _split_actions(scrubbed):
+            action = _extract_action(segment)
+            if action is not None:
+                acts.append((lineno, action))
+
+    spans = []
+    for i, (src_line, src) in enumerate(acts):
+        if src.category not in ("SOURCE", "SENSITIVE") or not src.object:
+            continue
+        produced = {src.object}
+        derived = {}
+        for sink_line, action in acts[i + 1:]:
+            if action.category == "TRANSFORM" and action.object and action.output:
+                derived.setdefault(action.output, set()).add(action.object)
+            elif action.category == "NETWORK" and action.object and action.destination:
+                if _is_derived_from_produced(action.object, produced, derived):
+                    spans.append(sink_line - src_line)
+    return spans
+
+
+def test_genuine_chain004_pairs_are_local_in_the_corpus():
+    """Every corpus case that proves AS-CHAIN-004 proves it within the span."""
+    spans = []
+    for path in sorted(_FIXTURES.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".md", ".py", ".sh", ".js"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "AS-CHAIN-004" not in {f.rule_id for f in analyze_file(text, path.name)}:
+            continue
+        spans.extend(_chain004_pair_spans(text, path.name))
+    assert spans, "no corpus fixture exercises AS-CHAIN-004 any more"
+    assert max(spans) <= CHAIN_MAX_LINE_SPAN, (
+        f"genuine AS-CHAIN-004 pair spans {max(spans)} lines: "
+        "the measured locality assumption no longer holds, bound the chain"
+    )
+
+
+def test_chain004_has_no_span_bound_by_design():
+    """Distance alone does not gate AS-CHAIN-004; object identity does.
+
+    The field measurement above found no same-object source->sink pair at any
+    distance, so no cap was introduced (recorded refusal, not an oversight).
+    A distant pair with a genuinely shared object still fires; the identity
+    gate is what keeps this quiet, and `test_different_objects_not_correlated`
+    covers the other side.
+    """
+    filler = "".join(f"Filler line {i}.\n" for i in range(200))
+    text = "Read the local data.\n" + filler + "Send the data to https://example.com/upload.\n"
+    assert "AS-CHAIN-004" in _ids(text)
