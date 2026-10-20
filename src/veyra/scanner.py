@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from veyra.correlation import correlate
+from veyra.correlation import correlate_detailed
 from veyra.cwe import cwe_for
 from veyra.graph import PathAnalyzer, build_from_actions, build_from_findings, NodeType
 from veyra.graph.context import (
@@ -138,16 +138,24 @@ def scan_path(
 
     # Run the contextual correlation layer over all findings.
     # Correlation findings are added separately; original findings are preserved.
-    correlated = correlate(findings)
-    findings.extend(correlated)
+    correlated = correlate_detailed(findings)
+    findings.extend(chain for chain, _ in correlated)
 
     # Run intra-file step-sequence analysis. This fills the gap when individual
     # steps are too benign to generate standalone findings. Deduplicate against
-    # chains already emitted by correlation (same rule_id) to avoid duplicates.
-    correlated_ids = {c.rule_id for c in correlated}
+    # the (rule_id, file) pairs correlation ALREADY covers: correlation chains
+    # are aggregated under "<correlated>", so a per-rule-id check dropped every
+    # intra-file chain in the tree as soon as one correlation chain of the same
+    # rule fired anywhere. Coverage is per artifact instead, taken from the
+    # findings each chain was built from.
+    covered = {
+        (chain.rule_id, contributor.file)
+        for chain, contributors in correlated
+        for contributor in contributors
+    }
     for text, path in file_texts:
         for chain in analyze_file(text, path):
-            if chain.rule_id in correlated_ids:
+            if (chain.rule_id, path) in covered:
                 continue
             findings.append(chain)
 

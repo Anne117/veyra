@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from veyra.correlation import correlate
+from veyra.correlation import correlate, correlate_detailed
 from veyra.models import Finding, Severity
 from veyra.scanner import scan_path
 
@@ -284,3 +284,20 @@ def test_sarif_includes_correlation():
     results = doc["runs"][0]["results"]
     chain_ids = [r["ruleId"] for r in results if r["ruleId"].startswith("AS-CHAIN")]
     assert chain_ids  # correlation findings present in SARIF
+
+
+def test_correlate_detailed_reports_the_contributing_findings():
+    """Each chain carries the findings it was built from (no evidence parsing)."""
+    findings = [
+        _f("AS-003", Severity.HIGH, "install.sh", 1),
+        _f("AS-002", Severity.CRITICAL, "install.sh", 1),
+        _f("AS-003", Severity.MEDIUM, "docs/other.md", 9),
+    ]
+    detailed = correlate_detailed(findings)
+    pairs = [(chain, contrib) for chain, contrib in detailed if chain.rule_id == "AS-CHAIN-002"]
+    assert len(pairs) == 1
+    chain, contributors = pairs[0]
+    assert {c.file for c in contributors} == {"install.sh"}
+    assert chain.file == "<correlated>"
+    # Public correlate() keeps returning findings only.
+    assert [c.rule_id for c in correlate(findings)] == [c.rule_id for c, _ in detailed]

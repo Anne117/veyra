@@ -137,7 +137,9 @@ def _chain_key(chain_id: str, findings: List[Finding]) -> str:
 
 # --- Chain 1: Secret exfiltration ------------------------------------------
 
-def _chain_secret_exfiltration(findings: List[Finding]) -> Optional[Finding]:
+def _chain_secret_exfiltration(
+    findings: List[Finding],
+) -> Optional[Tuple[Finding, List[Finding]]]:
     """AS-CHAIN-001: prompt injection + secret access + network exfiltration.
 
     Locality requirement: all three signals must come from the SAME artifact and
@@ -167,7 +169,7 @@ def _chain_secret_exfiltration(findings: List[Finding]) -> Optional[Finding]:
 
     # Only the artifacts that actually carry all three signals contribute.
     contributing = _unique(contributing)
-    return Finding(
+    finding = Finding(
         rule_id="AS-CHAIN-001",
         severity=Severity.CRITICAL,
         title="Potential secret exfiltration chain",
@@ -182,11 +184,14 @@ def _chain_secret_exfiltration(findings: List[Finding]) -> Optional[Finding]:
         evidence=f"Signals: prompt-injection + secret-access + network. Contributing: {_locations(contributing)}",
         remediation="Review the correlated instructions and network destinations; remove any that request secret disclosure or exfiltration.",
     )
+    return finding, contributing
 
 
 # --- Chain 2: Download -> execute ------------------------------------------
 
-def _chain_download_execute(findings: List[Finding]) -> Optional[Finding]:
+def _chain_download_execute(
+    findings: List[Finding],
+) -> Optional[Tuple[Finding, List[Finding]]]:
     """AS-CHAIN-002: remote download/network + shell/command execution.
 
     Locality requirement: the download signal and the execution signal must come
@@ -220,7 +225,7 @@ def _chain_download_execute(findings: List[Finding]) -> Optional[Finding]:
     severity = Severity.CRITICAL if strong else Severity.HIGH
 
     contrib = downloads + executions
-    return Finding(
+    finding = Finding(
         rule_id="AS-CHAIN-002",
         severity=severity,
         title="Remote download followed by execution",
@@ -233,11 +238,14 @@ def _chain_download_execute(findings: List[Finding]) -> Optional[Finding]:
         evidence=f"Signals: remote-download + command-execution. Contributing: {_locations(contrib)}",
         remediation="Do not download and execute remote content; pin and review any fetched artifacts.",
     )
+    return finding, contrib
 
 
 # --- Chain 3: Remote MCP execution -----------------------------------------
 
-def _chain_remote_mcp_execution(findings: List[Finding]) -> Optional[Finding]:
+def _chain_remote_mcp_execution(
+    findings: List[Finding],
+) -> Optional[Tuple[Finding, List[Finding]]]:
     """AS-CHAIN-003: remote MCP endpoint + dynamic package execution (+ secrets/fs)."""
     has_remote = _has_rule(findings, MCP_REMOTE_RULES)
     has_dynamic = _has_rule(findings, MCP_DYNAMIC_EXEC_RULES)
@@ -260,7 +268,7 @@ def _chain_remote_mcp_execution(findings: List[Finding]) -> Optional[Finding]:
         + _contributing(findings, MCP_SECRETS_RULES)
         + _contributing(findings, MCP_FS_RULES)
     )
-    return Finding(
+    finding = Finding(
         rule_id="AS-CHAIN-003",
         severity=severity,
         title="High-risk remote MCP execution chain",
@@ -273,18 +281,25 @@ def _chain_remote_mcp_execution(findings: List[Finding]) -> Optional[Finding]:
         evidence=f"Signals: remote-mcp + dynamic-exec. Contributing: {_locations(contrib)}",
         remediation="Verify the remote MCP endpoint and package provenance; avoid passing secrets or granting broad filesystem access.",
     )
+    return finding, contrib
 
 
 # --- Public API ------------------------------------------------------------
 
-def correlate(findings: List[Finding]) -> List[Finding]:
-    """Run all correlation chains over the findings.
+def correlate_detailed(
+    findings: List[Finding],
+) -> List[Tuple[Finding, List[Finding]]]:
+    """Run all correlation chains and keep the findings that produced each one.
 
-    Returns a list of NEW correlation findings (AS-CHAIN-*). Original findings
-    are preserved and not modified. Deduplicated by chain id + contributing
-    rules so the same chain is not emitted twice.
+    Returns ``(chain_finding, contributing_findings)`` pairs. The contributing
+    findings are the already-existing per-file findings the chain was built
+    from; callers that need per-artifact provenance (e.g. to know which files a
+    chain already covers) can read them without parsing the chain's evidence
+    string. Original findings are preserved and not modified. Chains are
+    deduplicated by chain id + contributing rules so the same chain is not
+    emitted twice.
     """
-    chains: List[Finding] = []
+    chains: List[Tuple[Finding, List[Finding]]] = []
     seen: Set[str] = set()
 
     candidates = [
@@ -293,13 +308,24 @@ def correlate(findings: List[Finding]) -> List[Finding]:
         _chain_remote_mcp_execution(findings),
     ]
 
-    for chain in candidates:
-        if chain is None:
+    for candidate in candidates:
+        if candidate is None:
             continue
+        chain, contributing = candidate
         key = _chain_key(chain.rule_id, findings)
         if key in seen:
             continue
         seen.add(key)
-        chains.append(chain)
+        chains.append((chain, contributing))
 
     return chains
+
+
+def correlate(findings: List[Finding]) -> List[Finding]:
+    """Run all correlation chains over the findings.
+
+    Returns a list of NEW correlation findings (AS-CHAIN-*). Original findings
+    are preserved and not modified. Deduplicated by chain id + contributing
+    rules so the same chain is not emitted twice.
+    """
+    return [chain for chain, _ in correlate_detailed(findings)]
