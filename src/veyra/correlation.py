@@ -20,6 +20,7 @@ import re
 from typing import Dict, List, Optional, Set, Tuple
 
 from veyra.models import Finding, Severity
+from veyra.step_sequence import CHAIN_MAX_LINE_SPAN
 
 # --- Signal classification -------------------------------------------------
 # Map rule IDs to the semantic signals they represent.
@@ -57,6 +58,18 @@ def _has_strong_rule(findings: List[Finding], rules: Set[str]) -> bool:
     return any(f.rule_id in rules and f.severity in STRONG_SEVERITIES for f in findings)
 
 
+def _unique(findings: List[Finding]) -> List[Finding]:
+    """Drop repeated objects while preserving order (Finding is not hashable)."""
+    seen: Set[int] = set()
+    out: List[Finding] = []
+    for f in findings:
+        if id(f) in seen:
+            continue
+        seen.add(id(f))
+        out.append(f)
+    return out
+
+
 def _contributing(findings: List[Finding], rules: Set[str]) -> List[Finding]:
     return [f for f in findings if f.rule_id in rules]
 
@@ -70,6 +83,20 @@ def _locations(findings: List[Finding]) -> str:
             loc += f":{f.line}"
         locs.add(loc)
     return ", ".join(sorted(locs))
+
+
+def _same_artifact(a: Finding, b: Finding) -> bool:
+    """True when two findings can plausibly describe one download-and-execute.
+
+    Requires the same file and line proximity. A download in one file and an
+    execution in another file are unrelated facts, not a sequence. When a line
+    number is unavailable the distance is unknown, so only the file must match.
+    """
+    if a.file != b.file:
+        return False
+    if a.line is None or b.line is None:
+        return True
+    return abs(a.line - b.line) <= CHAIN_MAX_LINE_SPAN
 
 
 def _chain_key(chain_id: str, findings: List[Finding]) -> str:
@@ -114,18 +141,39 @@ def _chain_secret_exfiltration(findings: List[Finding]) -> Optional[Finding]:
 # --- Chain 2: Download -> execute ------------------------------------------
 
 def _chain_download_execute(findings: List[Finding]) -> Optional[Finding]:
-    """AS-CHAIN-002: remote download/network + shell/command execution."""
-    has_download = _has_rule(findings, DOWNLOAD_RULES)
-    has_exec = _has_rule(findings, SHELL_EXEC_RULES)
+    """AS-CHAIN-002: remote download/network + shell/command execution.
 
-    if not (has_download and has_exec):
+    Locality requirement: the download signal and the execution signal must come
+    from the SAME artifact. A download reported in one file and an execution
+    reported in an unrelated file are two unrelated facts — pairing them across a
+    tree asserts a sequence that no evidence supports (on a large tree it fires on
+    almost any directory that holds a URL and a `curl | sh`). Only findings from
+    files that carry BOTH signals contribute to the chain and to its evidence.
+    """
+    downloads = _contributing(findings, DOWNLOAD_RULES)
+    executions = _contributing(findings, SHELL_EXEC_RULES)
+
+    pairs = [
+        (d, e)
+        for d in downloads
+        for e in executions
+        if _same_artifact(d, e)
+    ]
+    if not pairs:
         return None
 
-    # Strong evidence: both signals present at HIGH/CRITICAL.
-    strong = _has_strong_rule(findings, DOWNLOAD_RULES) and _has_strong_rule(findings, SHELL_EXEC_RULES)
+    # Keep the evidence deduplicated but ordered; each finding appears once.
+    downloads = _unique([d for d, _ in pairs])
+    executions = _unique([e for _, e in pairs])
+
+    # Strong evidence: both signals present at HIGH/CRITICAL in the same artifact.
+    strong = (
+        any(f.severity in STRONG_SEVERITIES for f in downloads)
+        and any(f.severity in STRONG_SEVERITIES for f in executions)
+    )
     severity = Severity.CRITICAL if strong else Severity.HIGH
 
-    contrib = _contributing(findings, DOWNLOAD_RULES) + _contributing(findings, SHELL_EXEC_RULES)
+    contrib = downloads + executions
     return Finding(
         rule_id="AS-CHAIN-002",
         severity=severity,

@@ -88,6 +88,50 @@ def test_harmless_download_no_chain():
     assert not any(c.rule_id == "AS-CHAIN-002" for c in chains)
 
 
+def test_download_and_execute_in_different_files_no_chain():
+    """A download in one artifact and an execution in another are not a chain."""
+    findings = [
+        _f("AS-003", Severity.HIGH, "docs/install.md", 4),   # download
+        _f("AS-002", Severity.CRITICAL, "tools/runner.py", 88),  # unrelated exec
+    ]
+    chains = correlate(findings)
+    assert not any(c.rule_id == "AS-CHAIN-002" for c in chains)
+
+
+def test_download_execute_chain_evidence_limited_to_the_shared_file():
+    """Only findings from the file that carries both signals are cited."""
+    findings = [
+        _f("AS-003", Severity.HIGH, "install.sh", 1),
+        _f("AS-002", Severity.CRITICAL, "install.sh", 1),
+        _f("AS-003", Severity.MEDIUM, "docs/other.md", 7),
+        _f("AS-002", Severity.HIGH, "tools/other.py", 9),
+    ]
+    chains = correlate(findings)
+    chain = [c for c in chains if c.rule_id == "AS-CHAIN-002"][0]
+    assert "install.sh:1" in chain.evidence
+    assert "docs/other.md" not in chain.evidence
+    assert "tools/other.py" not in chain.evidence
+
+
+def test_same_file_but_far_apart_lines_no_chain():
+    """Same artifact is not enough: the signals must be near each other in it."""
+    findings = [
+        _f("AS-003", Severity.HIGH, "prompt.txt", 12),    # download
+        _f("AS-002", Severity.CRITICAL, "prompt.txt", 400),  # execution, unrelated
+    ]
+    chains = correlate(findings)
+    assert not any(c.rule_id == "AS-CHAIN-002" for c in chains)
+
+
+def test_same_file_near_lines_still_chains():
+    findings = [
+        _f("AS-003", Severity.HIGH, "install.sh", 3),
+        _f("AS-002", Severity.CRITICAL, "install.sh", 9),
+    ]
+    chains = correlate(findings)
+    assert any(c.rule_id == "AS-CHAIN-002" for c in chains)
+
+
 # --- Chain 3: remote MCP execution -----------------------------------------
 
 def test_remote_mcp_dynamic_exec_detected():

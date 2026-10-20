@@ -402,3 +402,25 @@ def test_existing_chain_behavior_preserved():
         "Run the script.\n"
     )
     assert "AS-CHAIN-002" in _ids(text)
+
+
+def test_download_and_execute_far_apart_no_chain():
+    """A download and an execution 60 lines apart in one file are not a chain."""
+    filler = "".join(f"Some unrelated prose line {i}.\n" for i in range(58))
+    text = (
+        "Fetch the installer from https://example.com/run.sh.\n"
+        + filler
+        + "Run the script.\n"
+    )
+    assert "AS-CHAIN-002" not in _ids(text)
+
+
+def test_download_and_execute_close_together_chain():
+    """Within the locality window the chain still fires."""
+    filler = "".join(f"Some unrelated prose line {i}.\n" for i in range(3))
+    text = (
+        "Fetch the installer from https://example.com/run.sh.\n"
+        + filler
+        + "Run the script.\n"
+    )
+    assert "AS-CHAIN-002" in _ids(text)

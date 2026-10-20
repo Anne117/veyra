@@ -253,12 +253,41 @@ def _extract_action(segment: str) -> Optional[Action]:
     )
 
 
-def _find_sequence(steps: List[str], pattern: List[str]) -> Optional[List[int]]:
+# Maximum line distance between the two ends of a download-and-execute chain.
+# Measured on the corpus: every genuine DOWNLOAD -> EXECUTION fixture puts both
+# steps on one line or within 3 lines. In the field slice the smallest false
+# pair was 47 lines apart (a UI label that says "fetch" and another that says
+# "exec" in the same rendering module). Unbounded pairing over a file of a few
+# thousand lines is not a sequence, it is any-two-lines.
+CHAIN_MAX_LINE_SPAN = 20
+
+
+def _find_sequence(
+    steps: List[str],
+    pattern: List[str],
+    lines: Optional[List[int]] = None,
+    max_span: Optional[int] = None,
+) -> Optional[List[int]]:
     """Find the first occurrence of `pattern` as an ordered subsequence of `steps`.
 
     Returns the indices of the matched steps, or None. Non-adjacent matches
     are allowed (harmless text/steps between signals are skipped).
+
+    When `lines` and `max_span` are both given the match must also be local: the
+    first and the last matched steps may be at most `max_span` lines apart. The
+    nearest qualifying match wins, so a distant match does not mask a close one.
     """
+    if lines is not None and max_span is not None and len(pattern) == 2:
+        for i, step in enumerate(steps):
+            if step != pattern[0]:
+                continue
+            for j in range(i + 1, len(steps)):
+                if lines[j] - lines[i] > max_span:
+                    break
+                if steps[j] == pattern[1]:
+                    return [i, j]
+        return None
+
     pi = 0
     matched: List[int] = []
     for i, step in enumerate(steps):
@@ -345,12 +374,14 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
     # multiple logical actions separated by deterministic separators
     # ("and then", "then", ";"), each producing its own step in order.
     steps: List[str] = []
+    step_lines: List[int] = []
     actions: List[Action] = []
-    for line in text.splitlines():
+    for lineno, line in enumerate(text.splitlines(), start=1):
         for segment in _split_actions(line):
             cat = _classify_line(segment)
             if cat:
                 steps.append(cat)
+                step_lines.append(lineno)
             action = _extract_action(segment)
             if action is not None:
                 actions.append(action)
@@ -378,7 +409,12 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
         )
 
     # Chain 2: DOWNLOAD -> EXECUTION (download-and-execute).
-    dl_idx = _find_sequence(steps, ["DOWNLOAD", "EXECUTION"])
+    dl_idx = _find_sequence(
+        steps,
+        ["DOWNLOAD", "EXECUTION"],
+        lines=step_lines,
+        max_span=CHAIN_MAX_LINE_SPAN,
+    )
     if dl_idx:
         findings.append(
             Finding(
