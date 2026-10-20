@@ -42,16 +42,19 @@ __all__ = [
 # already carried by its ``import`` line, so the per-line repeat is noise
 # (field probe 2026-10-20: 33 of 119 AS-003 MEDIUM in ``agent/`` were
 # annotation/exception/prose references, no request possible on the line).
-HTTP_CLIENT = re.compile(
-    # Client used as code: a call or a construction, i.e. the symbol chain is
-    # followed by an argument list.
-    r"\b(?:requests|httpx|aiohttp)(?:\.[A-Za-z_]\w*)*\s*\("
-    # Dependency declaration.
+# Client used as code: a call or a construction, i.e. the symbol chain is
+# followed by an argument list.
+_HTTP_CALL_HEAD = r"\b(?:requests|httpx|aiohttp)(?:\.[A-Za-z_]\w*)*\s*\("
+# Dependency declaration: the symbol is available to the file, nothing more.
+_HTTP_DECLARATION = (
     r"|\b(?:import|from)\s+(?:requests|httpx|aiohttp|node-fetch)\b"
     r"|\bfrom\s+urllib\s+import\s+request\b"
     r"|\brequire\s*\(\s*['\"](?:axios|node-fetch|got)['\"]"
-    # Bare call forms. No space before "(" here: "fetch (see below)" is prose,
-    # and a bare "got (" is ordinary English.
+    r"|\bimport\s+got\s+from\b"
+)
+# Remaining call forms. No space before "(" here: "fetch (see below)" is prose,
+# and a bare "got (" is ordinary English.
+_HTTP_CALL_TAIL = (
     r"|\baxios\s*(?:\.[A-Za-z_]*\s*)?\("
     # ``fetch`` is the *global* in JS/undici only. A definition (``def`` or
     # ``function`` before the name), a method call (``source.fetch``), and
@@ -62,10 +65,15 @@ HTTP_CLIENT = re.compile(
     r"|\bwindow\.fetch\("
     r"|\bnode-fetch\("
     r"|\bgot\.[A-Za-z_]+\s*\("
-    r"|\bimport\s+got\s+from\b"
     # urllib: ``urllib.parse`` / ``urllib.error`` make no requests.
     r"|\burllib\.request\b|\burlopen\b"
 )
+HTTP_CLIENT = re.compile(_HTTP_CALL_HEAD + _HTTP_DECLARATION + _HTTP_CALL_TAIL)
+# The same branches, partitioned: a line that only *declares* a client states
+# availability, a line that *calls* one states use. ``collapse_http_claims``
+# needs the distinction; the detector itself still matches either.
+HTTP_CALL = re.compile(_HTTP_CALL_HEAD + _HTTP_CALL_TAIL)
+HTTP_DECLARATION = re.compile(_HTTP_DECLARATION.lstrip("|"))
 
 # A request issued through a client *object* is invisible to the branches
 # above, because they all name a library: ``async with session.post(url)`` and
@@ -105,6 +113,37 @@ def _is_mention(line: str, start: int) -> bool:
         if span.start() <= start < span.end():
             return True
     return False
+
+
+def collapse_http_claims(findings):
+    """Drop an import-line claim when the same file also calls the client.
+
+    A client *import* states that the client is available; a ``requests.get``
+    on a URL states that it is used. Both fire AS-003 MEDIUM, so a file that does both
+    reported one fact twice -- once on a line that cannot make a request. The
+    call names the request line, so it is the claim that survives; the import is
+    dropped only for a file that has a call claim, and an import-only file keeps
+    its finding because nothing supersedes it.
+
+    Field probe 2026-10-20 on the agent tree: 218 files import AND call, which
+    was 357 of 2001 AS-003 MEDIUM -- every one a per-file duplicate. Files that
+    only import (87) are untouched.
+    """
+    def _is_http_medium(f):
+        return f.rule_id == "AS-003" and f.severity is Severity.MEDIUM
+
+    def _calls(f):
+        return bool(HTTP_CALL.search(f.matched_text or ""))
+
+    def _declares_only(f):
+        text = f.matched_text or ""
+        return bool(HTTP_DECLARATION.search(text)) and not _calls(f)
+
+    calling = {f.file for f in findings if _is_http_medium(f) and _calls(f)}
+    if not calling:
+        return findings
+    return [f for f in findings
+            if not (_is_http_medium(f) and f.file in calling and _declares_only(f))]
 
 
 # --- Download-and-execute --------------------------------------------------

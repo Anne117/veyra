@@ -6,6 +6,7 @@ from veyra.rules.network import (
     detect_raw_ip_url,
     detect_shortener,
 )
+from veyra.scanner import scan_path
 
 
 def test_http_client():
@@ -213,3 +214,40 @@ def test_object_form_keeps_prose_and_non_http_receivers_quiet():
         "response = self._httpx.get(endpoint + path)",
     ):
         assert detect_http_client(line, "x.py", 1) is None, line
+
+
+def _http_medium(target):
+    return [
+        f for f in scan_path(target).findings
+        if f.rule_id == "AS-003" and f.severity.value == "MEDIUM"
+    ]
+
+
+def test_import_claim_is_collapsed_when_the_same_file_calls_the_client(tmp_path):
+    """``import requests`` + ``requests.get(url)`` is one fact, not two."""
+    (tmp_path / "client.py").write_text(
+        "import requests\n\n\ndef go(url):\n    return requests.get(url)\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [5]
+
+
+def test_import_only_file_keeps_its_claim(tmp_path):
+    """Nothing supersedes the import: the capability claim still stands."""
+    (tmp_path / "uses.py").write_text(
+        "import httpx\n\n\ndef send(r: httpx.Response) -> None:\n    return None\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]
+
+
+def test_a_call_in_another_file_does_not_suppress_the_import(tmp_path):
+    """The collapse is per file: a sibling's call says nothing about this file."""
+    (tmp_path / "a.py").write_text("import requests\n")
+    (tmp_path / "b.py").write_text("import requests\nrequests.get('https://x.example')\n")
+    found = {(f.file.rsplit("/", 1)[-1], f.line) for f in _http_medium(str(tmp_path))}
+    assert found == {("a.py", 1), ("b.py", 2)}
+
+
+def test_a_call_is_never_collapsed_even_on_the_import_line(tmp_path):
+    """A line that declares and calls in one statement is still a call."""
+    (tmp_path / "both.py").write_text("import requests; requests.get('https://x.example')\n")
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]

@@ -28,6 +28,7 @@ from veyra.graph.context import (
 from veyra.mitre import mitre_for
 from veyra.models import Confidence, Finding, ScanResult
 from veyra.rules import load_file_rules, load_rules
+from veyra.rules.network import collapse_http_claims
 from veyra.step_sequence import analyze_file_chains
 
 # File extensions we inspect. Everything else is skipped.
@@ -450,4 +451,7 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
         except Exception:
             continue
 
-    return findings
+    # One claim per file for AS-003 MEDIUM: an import that a call in the same
+    # file supersedes is the same fact on a line that cannot make a request
+    # (see ``collapse_http_claims``). Import-only files keep their finding.
+    return collapse_http_claims(findings)
