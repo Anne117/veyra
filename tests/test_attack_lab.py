@@ -6,6 +6,7 @@ explicit and record misses/false-positives honestly — they do NOT modify
 Veyra rules to force passes.
 """
 
+import hashlib
 from pathlib import Path
 
 from veyra.attack_lab import (
@@ -19,6 +20,56 @@ from veyra.attack_lab import (
 from veyra.scanner import scan_path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "attacks"
+
+# --- Corpus hygiene: byte-identical fixtures --------------------------------
+# Two fixtures with identical bytes are one observation counted twice, not two
+# independent cases. Found 2026-10-20: the v2 ROT13 fixture was an exact copy
+# of the v1 one (md5 7db82ece...), so it measured nothing new. It now decodes
+# to a different instruction (exfiltration instead of deletion) and stays in
+# the measured PARTIAL bucket. The groups below are declared debt: pre-existing
+# copies that must each be differentiated or removed in a follow-up. This set
+# must never grow — a new identical fixture is not a new case.
+KNOWN_DUPLICATE_GROUPS = {
+    (
+        "encoded-obfuscation/base64-exec/SKILL.md",
+        "v2/obfuscation/base64-instruction/SKILL.md",
+    ),
+    (
+        "encoded-obfuscation/benign/SKILL.md",
+        "v2/obfuscation/benign-encoded-data/SKILL.md",
+    ),
+    (
+        "mcp-attacks/benign/.mcp.json",
+        "v2/benign-lookalikes/legit-mcp/.mcp.json",
+        "v2/mcp-security/benign/.mcp.json",
+    ),
+    (
+        "mcp-attacks/remote-exec/.mcp.json",
+        "v2/mcp-security/remote-exec-combo/.mcp.json",
+    ),
+    (
+        "multi-stage/benign/SKILL.md",
+        "v2/multi-stage/benign/SKILL.md",
+    ),
+    (
+        "v2/download-execution/download-run-script/SKILL.md",
+        "v2/multi-stage/download-execution/SKILL.md",
+    ),
+}
+
+
+def test_attack_lab_corpus_fixtures_are_not_byte_copies():
+    """A byte-identical copy of an existing fixture is not a new case."""
+    by_digest = {}
+    for path in sorted(FIXTURES.rglob("*")):
+        if path.is_file():
+            digest = hashlib.md5(path.read_bytes()).hexdigest()
+            by_digest.setdefault(digest, []).append(path.relative_to(FIXTURES).as_posix())
+    found = {tuple(sorted(paths)) for paths in by_digest.values() if len(paths) > 1}
+    assert found == KNOWN_DUPLICATE_GROUPS, (
+        f"duplicate fixture groups changed; new={sorted(found - KNOWN_DUPLICATE_GROUPS)} "
+        f"gone={sorted(KNOWN_DUPLICATE_GROUPS - found)}"
+    )
 
 
 def test_all_fixtures_exist():

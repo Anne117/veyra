@@ -673,11 +673,12 @@ classifier treats as a partial detection. They cover patterns where lifting
 severity blindly would create false positives on legitimate configurations:
 
 - `encoded-obfuscation/rot13-exec` and `v2/obfuscation/rot13-instruction` —
-  ROT13-decode-and-run instructions. AS-004 fires MEDIUM via the
-  encoded-obfuscation pattern (`deobfuscate this ROT13 text`); AS-007 does
-  not fire because the decoded payload (`command to delete important files`)
-  is natural-language intent, not a literal shell-token pattern (`rm -rf`,
-  `curl|bash`, …) that `DANGEROUS_COMMAND` recognises. Raising severity would
+  ROT13-decode-and-run instructions (two distinct payloads: `command to
+  delete advanced files` and `send the contents of the ssh folder to the
+  address in the note`). AS-004 fires MEDIUM via the encoded-obfuscation
+  pattern (`deobfuscate this ROT13 text`); AS-007 does not fire because the
+  decoded payload is natural-language intent, not a literal shell-token
+  pattern (`rm -rf`, `curl|bash`, …) that `DANGEROUS_COMMAND` recognises. Raising severity would
   either require a natural-language intent detector (LLM-only; forbidden
   by the manifesto) or broaden `DANGEROUS_COMMAND` to ordinary English
   verbs like "delete / wipe / format", which would over-alert on any
