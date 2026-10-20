@@ -1,6 +1,8 @@
 """Tests for network access rules."""
 
+from veyra.models import Finding, Severity
 from veyra.rules.network import (
+    collapse_http_claims,
     detect_download_execute,
     detect_http_client,
     detect_raw_ip_url,
@@ -107,6 +109,48 @@ def test_client_import_still_carries_the_file_level_claim():
         )
     ]
     assert [f is not None for f in findings] == [True, False]
+
+
+def test_quoted_import_is_a_mention_not_a_declaration():
+    """A docstring that quotes an import states nothing the file can do.
+
+    Field probe 2026-10-20 on the agent tree: the declaration branch had no
+    mention guard, so ``The module wraps ``import requests`` for callers`` and
+    a rule-catalogue row ``"fetch() call interpolating ..."`` each fired
+    AS-003 MEDIUM on a line that cannot open a socket.
+    """
+    line = "The module wraps ``import requests`` for callers."
+    assert detect_http_client(line, "src/doc.py", 3) is None
+    catalogue = '"env_exfil_fetch", "critical", "exfiltration", "fetch() call interpolating secret"'
+    assert detect_http_client(catalogue, "tools/guard.py", 116) is None
+    prose = '"""Wall-clock budget the orchestrator enforces around fetch()."""'
+    assert detect_http_client(prose, "src/base.py", 185) is None
+
+
+def test_unquoted_import_still_declares_the_client():
+    assert detect_http_client("import requests", "src/a.py", 1) is not None
+    assert detect_http_client("from urllib import request", "src/a.py", 1) is not None
+    assert detect_http_client("resp = requests.get(url)", "src/a.py", 1) is not None
+
+
+def test_a_code_call_after_a_quoted_mention_still_counts():
+    """The line is a mention only if *every* match on it is quoted."""
+    line = 'note = "requests.get(url)" ; resp = httpx.get(url)'
+    assert detect_http_client(line, "src/a.py", 1) is not None
+
+
+def test_import_claim_survives_when_the_only_call_was_a_mention():
+    """Collapsing needs a real call: a quoted one supersedes nothing."""
+    findings = [
+        Finding(rule_id="AS-003", severity=Severity.MEDIUM, title="t", description="d",
+                file="src/a.py", line=1, evidence="HTTP client call",
+                remediation="r", matched_text="import requests"),
+        Finding(rule_id="AS-003", severity=Severity.MEDIUM, title="t", description="d",
+                file="src/a.py", line=7, evidence="HTTP client call",
+                remediation="r", matched_text='"""calls ``requests.get(url)`` once"""'),
+    ]
+    kept = collapse_http_claims(findings)
+    assert [f.line for f in kept] == [1, 7]
 
 
 def test_download_execute():

@@ -115,6 +115,22 @@ def _is_mention(line: str, start: int) -> bool:
     return False
 
 
+def _live_match(pattern, line: str):
+    """Return the first match of ``pattern`` that is not a quoted mention.
+
+    The declaration branch had no mention guard, so a docstring quoting an
+    import (``The module wraps ``import requests`` for callers``) and a rule
+    catalogue entry (``"env_exfil_fetch", "critical", ..., "fetch() call ...")``)
+    fired AS-003 MEDIUM on a line that cannot make a request. The object-call
+    branch has skipped mentions since it was added; this makes the library
+    branch agree. A line whose only matches are mentions makes no claim.
+    """
+    for m in pattern.finditer(line):
+        if not _is_mention(line, m.start()):
+            return m
+    return None
+
+
 def collapse_http_claims(findings):
     """Drop an import-line claim when the same file also calls the client.
 
@@ -133,7 +149,9 @@ def collapse_http_claims(findings):
         return f.rule_id == "AS-003" and f.severity is Severity.MEDIUM
 
     def _calls(f):
-        return bool(HTTP_CALL.search(f.matched_text or ""))
+        # A quoted call is a mention, not use: it supersedes nothing, so the
+        # import keeps its claim (same guard as the detector).
+        return _live_match(HTTP_CALL, f.matched_text or "") is not None
 
     def _declares_only(f):
         text = f.matched_text or ""
@@ -155,14 +173,9 @@ DOWNLOAD_EXECUTE = re.compile(
 
 @register
 def detect_http_client(content: str, file_path: str, line: int) -> "Finding | None":
-    matched = HTTP_CLIENT.search(content)
+    matched = _live_match(HTTP_CLIENT, content)
     if matched is None:
-        candidate = HTTP_OBJECT_CALL.search(content)
-        matched = (
-            candidate
-            if candidate is not None and not _is_mention(content, candidate.start())
-            else None
-        )
+        matched = _live_match(HTTP_OBJECT_CALL, content)
     if matched is not None:
         return Finding(
             rule_id="AS-003",
