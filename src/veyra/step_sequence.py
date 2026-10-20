@@ -22,12 +22,19 @@ Chains detected (order matters):
                  same object flows to an external sink, optionally through a
                  TRANSFORM)
 
+In Python source a line is a step only when the action is in code: comments and
+string literals are data (pattern tables, finding messages, docstrings). The one
+exception is a string literal handed to an execution sink, which is the command
+being run.
+
 The analyzer never executes code and never makes network requests.
 """
 
 from __future__ import annotations
 
+import io
 import re
+import tokenize
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
@@ -99,6 +106,44 @@ def _classify_line(line: str) -> Optional[str]:
     if TRANSFORM.search(line):
         return "TRANSFORM"
     return None
+
+
+# A Python line is an action only when it is code. String literals in Python
+# source are data — a regex pattern table, a finding message, a docstring — and
+# reading them as steps made the analyzer report its own pattern tables as
+# chains (field: two AS-CHAIN-002 from pure regex tuples). Comments are never
+# executed at all. The one exception is a literal handed to an execution sink,
+# where the literal IS the command being run: there the raw line is classified.
+_EXECUTION_SINK = re.compile(
+    r"(?:\b(?:subprocess\.(?:run|call|check_call|check_output|Popen)|os\.(?:system|popen)"
+    r"|exec|eval)\s*\()|shell\s*=\s*True"
+)
+
+
+def _code_only_lines(text: str) -> Optional[List[str]]:
+    """Blank comments and string literals in Python source, line by line.
+
+    Returns None when the text does not tokenize; the caller then keeps the raw
+    text, i.e. the previous behaviour.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return None
+    rows = [list(line) for line in text.splitlines()]
+    for tok in tokens:
+        if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+            continue
+        (sr, sc), (er, ec) = tok.start, tok.end
+        for row in range(sr, er + 1):
+            if row - 1 >= len(rows):
+                break
+            buf = rows[row - 1]
+            start = sc if row == sr else 0
+            end = ec if row == er else len(buf)
+            if start < end:
+                buf[start:end] = " " * (end - start)
+    return ["".join(row) for row in rows]
 
 
 # Deterministic action separators. Deliberately narrow — no general NLP.
@@ -388,8 +433,13 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
     steps: List[str] = []
     step_lines: List[int] = []
     actions: List[Action] = []
+    code_lines = _code_only_lines(text) if file_path.lower().endswith(".py") else None
     for lineno, line in enumerate(text.splitlines(), start=1):
-        for segment in _split_actions(line):
+        scrubbed = line
+        if code_lines is not None and lineno - 1 < len(code_lines):
+            if not _EXECUTION_SINK.search(line):
+                scrubbed = code_lines[lineno - 1]
+        for segment in _split_actions(scrubbed):
             cat = _classify_line(segment)
             if cat:
                 steps.append(cat)
