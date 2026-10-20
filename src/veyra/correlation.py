@@ -85,6 +85,36 @@ def _locations(findings: List[Finding]) -> str:
     return ", ".join(sorted(locs))
 
 
+def _local_evidence(group: List[Finding]) -> List[Finding]:
+    """Return the findings that form one local three-signal group, else [].
+
+    All three signal types must be present in the same file within
+    CHAIN_MAX_LINE_SPAN lines. When a line number is unavailable the distance is
+    unknown, so only the file must match (same rule as ``_same_artifact``).
+    """
+    injections = [f for f in group if f.rule_id in PROMPT_INJECTION_RULES]
+    secrets = [f for f in group if f.rule_id in SECRET_ACCESS_RULES]
+    networks = [f for f in group if f.rule_id in NETWORK_RULES]
+    if not (injections and secrets and networks):
+        return []
+
+    # Prefer three distinct findings; AS-004 belongs to two signal sets, so a
+    # single finding must not silently stand in for two steps of the chain.
+    for require_distinct in (True, False):
+        for a in injections:
+            for b in secrets:
+                for c in networks:
+                    triple = [a, b, c]
+                    if require_distinct and len({id(f) for f in triple}) < 3:
+                        continue
+                    lines = [f.line for f in triple if f.line is not None]
+                    if len(lines) < len(triple):
+                        return triple
+                    if max(lines) - min(lines) <= CHAIN_MAX_LINE_SPAN:
+                        return triple
+    return []
+
+
 def _same_artifact(a: Finding, b: Finding) -> bool:
     """True when two findings can plausibly describe one download-and-execute.
 
@@ -108,19 +138,35 @@ def _chain_key(chain_id: str, findings: List[Finding]) -> str:
 # --- Chain 1: Secret exfiltration ------------------------------------------
 
 def _chain_secret_exfiltration(findings: List[Finding]) -> Optional[Finding]:
-    """AS-CHAIN-001: prompt injection + secret access + network exfiltration."""
-    has_injection = _has_rule(findings, PROMPT_INJECTION_RULES)
-    has_secret = _has_rule(findings, SECRET_ACCESS_RULES)
-    has_network = _has_rule(findings, NETWORK_RULES)
+    """AS-CHAIN-001: prompt injection + secret access + network exfiltration.
 
-    if not (has_injection and has_secret and has_network):
+    Locality requirement: all three signals must come from the SAME artifact and
+    sit within CHAIN_MAX_LINE_SPAN lines of each other. A prompt-injection note in
+    one module, a secret constant in a second and an HTTP call in a third are
+    three unrelated facts about a codebase, not an ordered exfiltration chain.
+    Without this the chain fires on any large tree that contains an HTTP client,
+    a token field and one prompt-injection phrase somewhere, and its evidence
+    degenerates into hundreds of unrelated locations.
+    """
+    candidates = _contributing(
+        findings, PROMPT_INJECTION_RULES | SECRET_ACCESS_RULES | NETWORK_RULES
+    )
+
+    by_file: Dict[str, List[Finding]] = {}
+    for f in candidates:
+        by_file.setdefault(f.file, []).append(f)
+
+    contributing: List[Finding] = []
+    for group in by_file.values():
+        local = _local_evidence(group)
+        if local:
+            contributing.extend(local)
+
+    if not contributing:
         return None
 
-    contrib = (
-        _contributing(findings, PROMPT_INJECTION_RULES)
-        + _contributing(findings, SECRET_ACCESS_RULES)
-        + _contributing(findings, NETWORK_RULES)
-    )
+    # Only the artifacts that actually carry all three signals contribute.
+    contributing = _unique(contributing)
     return Finding(
         rule_id="AS-CHAIN-001",
         severity=Severity.CRITICAL,
@@ -133,7 +179,7 @@ def _chain_secret_exfiltration(findings: List[Finding]) -> Optional[Finding]:
             "may be manipulated into sending secrets to an external destination."
         ),
         file="<correlated>",
-        evidence=f"Signals: prompt-injection + secret-access + network. Contributing: {_locations(contrib)}",
+        evidence=f"Signals: prompt-injection + secret-access + network. Contributing: {_locations(contributing)}",
         remediation="Review the correlated instructions and network destinations; remove any that request secret disclosure or exfiltration.",
     )
 

@@ -253,12 +253,15 @@ def _extract_action(segment: str) -> Optional[Action]:
     )
 
 
-# Maximum line distance between the two ends of a download-and-execute chain.
+# Maximum line distance between the first and the last step of a chain.
 # Measured on the corpus: every genuine DOWNLOAD -> EXECUTION fixture puts both
-# steps on one line or within 3 lines. In the field slice the smallest false
-# pair was 47 lines apart (a UI label that says "fetch" and another that says
-# "exec" in the same rendering module). Unbounded pairing over a file of a few
-# thousand lines is not a sequence, it is any-two-lines.
+# steps on one line or within 3 lines; every genuine SOURCE -> SENSITIVE ->
+# NETWORK fixture puts the three steps within 15 lines (the fixture that
+# deliberately pads with unrelated text) and 6 lines otherwise. In the field
+# slice the smallest false pair was 47 lines apart (a UI label that says "fetch"
+# and another that says "exec" in the same rendering module), and a documented
+# API skill matched SOURCE..NETWORK across 191 lines. Unbounded pairing over a
+# file of a few thousand lines is not a sequence, it is any-two-lines.
 CHAIN_MAX_LINE_SPAN = 20
 
 
@@ -273,19 +276,28 @@ def _find_sequence(
     Returns the indices of the matched steps, or None. Non-adjacent matches
     are allowed (harmless text/steps between signals are skipped).
 
-    When `lines` and `max_span` are both given the match must also be local: the
-    first and the last matched steps may be at most `max_span` lines apart. The
-    nearest qualifying match wins, so a distant match does not mask a close one.
+    When `lines` and `max_span` are both given the match must also be local: each
+    matched step must lie at most `max_span` lines after the first matched step.
+    The nearest qualifying match wins, so a distant match does not mask a close one.
     """
-    if lines is not None and max_span is not None and len(pattern) == 2:
+    if lines is not None and max_span is not None:
+        # Locality applies to the whole sequence: every matched step must lie
+        # within `max_span` lines of the FIRST one. For a two-step chain this is
+        # exactly the old behaviour; for a longer chain it stops a SOURCE in one
+        # part of a file from pairing with a NETWORK sink hundreds of lines away.
         for i, step in enumerate(steps):
             if step != pattern[0]:
                 continue
+            matched = [i]
+            pi = 1
             for j in range(i + 1, len(steps)):
                 if lines[j] - lines[i] > max_span:
                     break
-                if steps[j] == pattern[1]:
-                    return [i, j]
+                if steps[j] == pattern[pi]:
+                    matched.append(j)
+                    pi += 1
+                    if pi == len(pattern):
+                        return matched
         return None
 
     pi = 0
@@ -389,7 +401,12 @@ def analyze_file(text: str, file_path: str) -> List[Finding]:
     findings: List[Finding] = []
 
     # Chain 1: SOURCE -> SENSITIVE -> NETWORK (secret exfiltration).
-    exfil_idx = _find_sequence(steps, ["SOURCE", "SENSITIVE", "NETWORK"])
+    exfil_idx = _find_sequence(
+        steps,
+        ["SOURCE", "SENSITIVE", "NETWORK"],
+        lines=step_lines,
+        max_span=CHAIN_MAX_LINE_SPAN,
+    )
     if exfil_idx:
         findings.append(
             Finding(

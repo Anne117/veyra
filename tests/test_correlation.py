@@ -27,17 +27,55 @@ def _f(rule_id, severity=Severity.HIGH, file="x", line=1, evidence="e"):
 
 def test_secret_exfiltration_chain_detected():
     findings = [
-        _f("AS-004", Severity.HIGH, "SKILL.md", 1),  # prompt injection
-        _f("AS-001", Severity.CRITICAL, "config.py", 5),  # secret access
-        _f("AS-003", Severity.MEDIUM, "main.py", 9),  # network
+        _f("AS-004", Severity.HIGH, "SKILL.md", 4),  # prompt injection
+        _f("AS-001", Severity.CRITICAL, "SKILL.md", 9),  # secret access
+        _f("AS-003", Severity.MEDIUM, "SKILL.md", 14),  # network
     ]
     chains = correlate(findings)
     assert any(c.rule_id == "AS-CHAIN-001" for c in chains)
     chain = [c for c in chains if c.rule_id == "AS-CHAIN-001"][0]
     assert chain.severity == Severity.CRITICAL
-    assert "SKILL.md:1" in chain.evidence
-    assert "config.py:5" in chain.evidence
-    assert "main.py:9" in chain.evidence
+    assert "SKILL.md:4" in chain.evidence
+    assert "SKILL.md:9" in chain.evidence
+    assert "SKILL.md:14" in chain.evidence
+
+
+def test_secret_exfiltration_across_files_no_chain():
+    """A chain must be one artifact: signals in three files are three facts."""
+    findings = [
+        _f("AS-004", Severity.HIGH, "SKILL.md", 1),  # prompt injection
+        _f("AS-001", Severity.CRITICAL, "config.py", 5),  # secret access
+        _f("AS-003", Severity.MEDIUM, "main.py", 9),  # network
+    ]
+    chains = correlate(findings)
+    assert not any(c.rule_id == "AS-CHAIN-001" for c in chains)
+
+
+def test_secret_exfiltration_distant_lines_in_same_file_no_chain():
+    """Same file but ~190 lines apart is co-occurrence, not a sequence."""
+    findings = [
+        _f("AS-004", Severity.HIGH, "SKILL.md", 19),
+        _f("AS-001", Severity.CRITICAL, "SKILL.md", 40),
+        _f("AS-003", Severity.MEDIUM, "SKILL.md", 210),
+    ]
+    chains = correlate(findings)
+    assert not any(c.rule_id == "AS-CHAIN-001" for c in chains)
+
+
+def test_secret_exfiltration_evidence_is_local_only():
+    """Noise from unrelated artifacts must not be cited as evidence."""
+    findings = [
+        _f("AS-004", Severity.HIGH, "SKILL.md", 4),
+        _f("AS-001", Severity.CRITICAL, "SKILL.md", 9),
+        _f("AS-003", Severity.MEDIUM, "SKILL.md", 14),
+        _f("AS-004", Severity.HIGH, "far/away.py", 1),
+        _f("AS-001", Severity.CRITICAL, "far/away.py", 300),
+        _f("AS-003", Severity.MEDIUM, "far/away.py", 800),
+    ]
+    chains = correlate(findings)
+    chain = [c for c in chains if c.rule_id == "AS-CHAIN-001"][0]
+    assert "SKILL.md:4" in chain.evidence
+    assert "far/away.py" not in chain.evidence
 
 
 def test_prompt_injection_alone_no_chain():
