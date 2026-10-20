@@ -201,11 +201,12 @@ def scan_path(
         file_path = (node.label or "").strip()
         if not file_path:
             continue
-        # Trust the builder's normalization only for files that actually
-        # produced findings; this avoids any chance of a synthetic node
-        # sneaking in. A file that did not produce a finding cannot have
-        # produced an attack path in the first place.
-        if file_path not in {_component_id_for_file(f.file) for f in findings if f.file}:
+        # Trust the builder's normalization only for files this scan actually
+        # read. This keeps synthetic nodes out without tying path locations to
+        # whether a file happened to produce a finding: a file can produce a
+        # proven path through a correlation node while its own line rules are
+        # silent.
+        if file_path not in {p for _, p in file_texts}:
             continue
         entry_files[ap.ensure_path_id()] = file_path
     result.attack_path_entry_files = entry_files
@@ -454,4 +455,28 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
     # One claim per file for AS-003 MEDIUM: an import that a call in the same
     # file supersedes is the same fact on a line that cannot make a request
     # (see ``collapse_http_claims``). Import-only files keep their finding.
-    return collapse_http_claims(findings)
+    findings = collapse_http_claims(findings)
+
+    # A line that is entirely a comment or a string literal is prose, not an
+    # access. AS-006 is a line rule, so a docstring sentence such as
+    # "read ~/.hermes/.env to load keys" was reported as a HIGH credential
+    # access on a line that cannot touch the filesystem. Blank comments and
+    # string literals before deciding; lines that still contain code (for
+    # example `open(".env")`) are kept.
+    if path.suffix == ".py":
+        from veyra.step_sequence import _code_only_lines
+
+        code_lines = _code_only_lines(text)
+        if code_lines is not None:
+            findings = [
+                f
+                for f in findings
+                if not (
+                    f.rule_id == "AS-006"
+                    and f.line
+                    and 0 < f.line <= len(code_lines)
+                    and not code_lines[f.line - 1].strip()
+                )
+            ]
+
+    return findings

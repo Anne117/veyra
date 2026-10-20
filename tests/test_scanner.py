@@ -190,3 +190,21 @@ def test_correlation_covered_file_is_not_reported_twice(tmp_path):
     chains = [f for f in result.findings if f.rule_id == "AS-CHAIN-002"]
     assert len(chains) == 1
     assert chains[0].file == "<correlated>"
+
+
+def test_sensitive_path_prose_is_not_an_access(tmp_path):
+    """AS-006 is a line rule; a line that is only comment/string is prose.
+
+    A docstring that describes reading ``~/.hermes/.env`` and a comment that
+    mentions it cannot touch the filesystem. The same line written as code can,
+    so it must stay.
+    """
+    target = tmp_path / "sample.py"
+    target.write_text(
+        '"""Read ~/.hermes/.env to load keys."""\n'
+        "# read the .env file before starting\n"
+        'open(".env").read()\n'
+    )
+    result = scan_path(str(target))
+    lines = [f.line for f in result.findings if f.rule_id == "AS-006"]
+    assert lines == [3]
