@@ -197,6 +197,9 @@ class Action:
     destination: Optional[str]
     category: str
     output: Optional[str] = None  # for TRANSFORM: the produced object
+    # 1-based source line the action was read from; 0 when the caller did not
+    # supply one. A chain that carries this can name the lines that prove it.
+    line: int = 0
 
 
 # Explicit component-transfer category. Only used when an action's ``destination``
@@ -257,7 +260,7 @@ def _normalize_object(obj: str) -> str:
     return " ".join(words)
 
 
-def _extract_action(segment: str) -> Optional[Action]:
+def _extract_action(segment: str, line: int = 0) -> Optional[Action]:
     """Extract a structured Action from a segment, or None if not an action."""
     cat = _classify_line(segment)
     if cat is None:
@@ -295,6 +298,7 @@ def _extract_action(segment: str) -> Optional[Action]:
         destination=dest,
         category=cat,
         output=output,
+        line=line,
     )
 
 
@@ -389,23 +393,53 @@ def _is_derived_from_produced(obj: str, produced: Set[str], derived: Dict[str, S
     return False
 
 
-def _detect_source_sink(actions: List[Action]) -> Optional[Finding]:
+def _producing_line(
+    obj: str, produced: Dict[str, int], derived: Dict[str, Set[str]]
+) -> int:
+    """Line of the earliest SOURCE/SENSITIVE action ``obj`` derives from.
+
+    Walks the transform map backwards to the producing action. Returns 0 when
+    the producer carries no line number (the caller did not supply one).
+    """
+    seen: Set[str] = set()
+    stack = [obj]
+    lines: List[int] = []
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        if cur in produced:
+            lines.append(produced[cur])
+        stack.extend(derived.get(cur, ()))
+    return min(lines) if lines else 0
+
+
+def _detect_source_sink(
+    actions: List[Action],
+) -> Optional[Tuple[Finding, int, int]]:
     """Detect a source-to-sink exfiltration chain within a single file.
 
     Fires when the SAME object (optionally through a TRANSFORM) flows from a
     SOURCE or SENSITIVE action to an external NETWORK sink. This is the
     lightweight intra-file data-flow layer.
+
+    Returns the finding plus the first line (the SOURCE/SENSITIVE action that
+    produced the object) and the last line (the NETWORK sink that closes the
+    chain). Those are the two lines that prove the chain; ``(0, 0)`` only when
+    the caller built Actions without line numbers.
     """
-    produced: Set[str] = set()
+    produced: Dict[str, int] = {}
     derived: Dict[str, Set[str]] = {}
 
     for a in actions:
         if a.category in ("SOURCE", "SENSITIVE") and a.object:
-            produced.add(a.object)
+            produced.setdefault(a.object, a.line)
         elif a.category == "TRANSFORM" and a.object and a.output:
             derived.setdefault(a.output, set()).add(a.object)
         elif a.category == "NETWORK" and a.object and a.destination:
             if _is_derived_from_produced(a.object, produced, derived):
+                first = _producing_line(a.object, produced, derived)
                 return Finding(
                     rule_id="AS-CHAIN-004",
                     severity=Severity.CRITICAL,
@@ -416,9 +450,10 @@ def _detect_source_sink(actions: List[Action]) -> Optional[Finding]:
                         "source to sink, indicating possible data exfiltration."
                     ),
                     file="<step-sequence>",
+                    line=first,
                     evidence=f"Source-to-sink: {a.object} -> external destination",
                     remediation="Review the ordered steps; remove any that read or extract data and send it externally.",
-                )
+                ), first, a.line
     return None
 
 
@@ -428,9 +463,12 @@ def analyze_file_chains(
     """Analyze one file and return each chain with the lines that prove it.
 
     Returns ``(finding, first_line, last_line)`` triples: the finding plus the
-    first and last line of the matched step sequence (``0, 0`` when the chain
-    carries no line, as AS-CHAIN-004 does). ``analyze_file`` is the
-    findings-only view of the same analysis. Never executes code.
+    first and last line of the matched step sequence. Every chain now names the
+    lines that prove it, AS-CHAIN-004 included: its first line is the
+    SOURCE/SENSITIVE action, its last line the NETWORK sink. ``(0, 0)`` only
+    appears when the caller supplied Actions without line numbers.
+    ``analyze_file`` is the findings-only view of the same analysis. Never
+    executes code.
     """
     # Classify each line into step categories. A single line may contain
     # multiple logical actions separated by deterministic separators
@@ -449,7 +487,7 @@ def analyze_file_chains(
             if cat:
                 steps.append(cat)
                 step_lines.append(lineno)
-            action = _extract_action(segment)
+            action = _extract_action(segment, lineno)
             if action is not None:
                 actions.append(action)
 
@@ -513,8 +551,9 @@ def analyze_file_chains(
     # Chain 4: source-to-sink exfiltration (lightweight intra-file data flow).
     sink = _detect_source_sink(actions)
     if sink is not None:
-        sink.file = file_path
-        chains.append((sink, 0, 0))
+        finding, first, last = sink
+        finding.file = file_path
+        chains.append((finding, first, last))
 
     return chains
 

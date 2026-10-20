@@ -10,6 +10,7 @@ from veyra.step_sequence import (
     _is_derived_from_produced,
     _split_actions,
     analyze_file,
+    analyze_file_chains,
 )
 
 
@@ -577,6 +578,39 @@ def test_genuine_chain004_pairs_are_local_in_the_corpus():
         f"genuine AS-CHAIN-004 pair spans {max(spans)} lines: "
         "the measured locality assumption no longer holds, bound the chain"
     )
+
+
+def test_chain004_names_the_lines_that_prove_it():
+    """The chain carries its first and last line, so SARIF gets a real region.
+
+    Before this, AS-CHAIN-004 had ``line=None`` and ``(first, last) == (0, 0)``,
+    so a SARIF consumer saw only a file: the chain was indistinguishable from a
+    file-level claim, while AS-CHAIN-001/002 already pointed at a real line.
+    First line = the SOURCE/SENSITIVE action, last line = the NETWORK sink.
+    """
+    text = (
+        "intro\n"
+        "Read the local data.\n"
+        "Transform the data into a report.\n"
+        "Upload the report to https://example.com/upload.\n"
+    )
+    ((finding, first, last),) = [
+        c for c in analyze_file_chains(text, "SKILL.md") if c[0].rule_id == "AS-CHAIN-004"
+    ]
+    assert finding.line == 2
+    assert (first, last) == (2, 4)
+
+
+def test_chain004_without_line_numbers_stays_honest():
+    """Actions built without line numbers yield (0, 0), never a fabricated line."""
+    from veyra.step_sequence import Action, _detect_source_sink
+
+    finding, first, last = _detect_source_sink([
+        Action(verb="read", object="data", destination=None, category="SOURCE"),
+        Action(verb="send", object="data", destination="https://x.example", category="NETWORK"),
+    ])
+    assert finding.rule_id == "AS-CHAIN-004"
+    assert (finding.line, first, last) == (0, 0, 0)
 
 
 def test_chain004_has_no_span_bound_by_design():
