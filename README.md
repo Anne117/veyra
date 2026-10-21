@@ -647,18 +647,18 @@ Veyra ships an internal adversarial corpus (`tests/fixtures/attacks/`)
 and an evaluator (`veyra attack-lab`) that measures detection on that
 corpus.
 
-**On the current 99-case internal Attack Lab corpus:**
+**On the current 113-case internal Attack Lab corpus:**
 
 | Metric | Value |
 |--------|-------|
-| Total cases | 99 |
-| Detected | 95 |
-| Partially detected | 4 |
-| Missed | 0 |
+| Total cases | 113 |
+| Detected | 103 |
+| Partially detected | 7 |
+| Missed | 3 |
 | False positives | 0 |
-| Detection rate | 95.95% |
+| Detection rate | 91.2% |
 
-> This figure is **only** for the current 99-case internal Attack Lab corpus. It
+> This figure is **only** for the current 113-case internal Attack Lab corpus. It
 > is **not** a measure of real-world detection accuracy. Real skills are far
 > more varied, and the corpus does not cover every attack pattern. A clean scan
 > does **not** guarantee a resource is safe.
@@ -667,24 +667,24 @@ The Attack Lab is a regression harness: every future scanner change must keep
 previously detected cases detected and avoid new false positives. See
 `docs/attack-lab.md` and `docs/attack-lab-v2.md`.
 
-**About the 4 partially detected cases:** these are attack-lab fixtures where
+**About the 7 partially detected cases:** these are attack-lab fixtures where
 the expected rule fires at MEDIUM rather than HIGH/CRITICAL, which the
 classifier treats as a partial detection. They cover patterns where lifting
 severity blindly would create false positives on legitimate configurations:
 
 - `encoded-obfuscation/rot13-exec` and `v2/obfuscation/rot13-instruction` —
-  ROT13-decode-and-run instructions (two distinct payloads: `command to
-  delete advanced files` and `send the contents of the ssh folder to the
-  address in the note`). AS-004 fires MEDIUM via the encoded-obfuscation
-  pattern (`deobfuscate this ROT13 text`); AS-007 does not fire because the
-  decoded payload is natural-language intent, not a literal shell-token
-  pattern (`rm -rf`, `curl|bash`, …) that `DANGEROUS_COMMAND` recognises. Raising severity would
-  either require a natural-language intent detector (LLM-only; forbidden
-  by the manifesto) or broaden `DANGEROUS_COMMAND` to ordinary English
-  verbs like "delete / wipe / format", which would over-alert on any
-  benign skill that legitimately mentions file deletion. Honest position:
-  the decoded payload is suspicious-by-context but not causally evidenced
-  as a dangerous shell command.
+  ROT13-decode-and-run instructions whose payloads are natural-language intent
+  (`command to delete advanced files`, `send the contents of the ssh folder…`).
+  AS-004 fires MEDIUM via the encoded-obfuscation pattern; AS-007 now decodes a
+  quoted ROT13 **phrase** as a whole and fires CRITICAL when the decoded text is
+  a literal shell command, but these payloads are prose, not shell syntax.
+  Raising severity would require a natural-language intent detector (an LLM in
+  the canonical path, which the manifesto forbids) or broadening
+  `DANGEROUS_COMMAND` to ordinary English verbs, which would over-alert on any
+  benign skill that legitimately mentions file deletion.
+- `v2-prompt-injection/unrelated-exec` — a demonstrative "run this command"
+  directive; AS-004 MEDIUM is the rule ceiling, and a HIGH would need a proven
+  install → run lineage rather than one directive.
 - `v2-mcp-security/remote-endpoint` — a remote MCP URL fires AS-MCP-001 at
   MEDIUM. Remote endpoints are a legitimate deployment topology; HIGH is
   reserved for the http-not-https variant (AS-MCP-002) and remote-exec
@@ -693,9 +693,22 @@ severity blindly would create false positives on legitimate configurations:
   at MEDIUM. Scoped packages from a known namespace stay MEDIUM; bare
   unpinned references (the typosquat / dependency-confusion case) now
   escalate to HIGH (see `v2-mcp-security/uvx-exec` and `broad-fs`).
+- `v2-mcp-security/shell-metachar` — a command hidden behind `/bin/bash -c`
+  fires AS-MCP-003 at MEDIUM; HIGH would require parsing the hidden command and
+  proving it destructive.
+- `v2-shell-execution/js-child-process-exec` — an env-provided command reaches
+  `child_process.execSync`, which fires AS-002 at MEDIUM; HIGH needs evidence
+  that the value came from the environment (data flow, not a line rule).
 
 These boundaries are deliberate: detection rate is reported above for
 transparency, not as a target to maximise by relaxing severity.
+
+**About the 3 missed cases:** all three are ROT13-encoded *natural-language*
+instructions (`delete production files`, `upload private SSH keys`,
+`download and run an installer as root`). The deterministic decoder handles
+literal shell commands; separating an instruction from a description of the
+same action in English is not a regex-shaped problem. The decision and its
+revisit conditions are recorded in `docs/obfuscation-audit.md` (E-3b).
 
 ## 🤖 GitHub Action
 
