@@ -32,6 +32,16 @@ BASE64_TOKEN = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
 # ROT13 is only decoded when explicitly indicated.
 ROT13_INDICATOR = re.compile(r"\brot13\b", re.IGNORECASE)
 
+# A quoted ROT13 phrase: one double-quoted run on a single line, long enough to
+# be a sentence or a command rather than a quoted word callers quote in prose.
+QUOTED_PHRASE = re.compile(r'"([^"\n]{12,})"')
+
+# The shape of a ROT13 phrase: letters, spaces and punctuation, and never a
+# digit. Digits are what separates a base64/hex blob from a rot13 sentence, so
+# the digit-bearing shapes stay with BASE64_TOKEN above and the two tokenizers
+# cannot both claim the same span.
+ROT13_PHRASE_SHAPE = re.compile(r"[A-Za-z][A-Za-z\s,.;:!?'()\[\]{}/\\=+*&^%$#@_|~-]*")
+
 # --- Dangerous decoded content ---------------------------------------------
 
 # Decoded content that is a destructive/executable shell command.
@@ -176,6 +186,31 @@ def scan_obfuscation(text: str, file_path: str) -> List[Finding]:
                         "Do not decode and execute encoded content; review the payload.",
                         text,
                         m.start(),
+                    )
+                )
+
+        # A ROT13 SENTENCE, not a token: spaces split a phrase below every
+        # BASE64_TOKEN floor, so the quoted phrase needs its own tokenizer. It
+        # is decoded as a whole and still has to become shell syntax; prose
+        # that merely describes a dangerous action is left alone (the rule does
+        # not judge natural language).
+        for m in QUOTED_PHRASE.finditer(text):
+            phrase = m.group(1)
+            if ROT13_PHRASE_SHAPE.fullmatch(phrase) is None:
+                continue  # digits or non-ASCII: a blob, not a rot13 sentence
+            decoded = _decode_rot13(phrase)
+            if DANGEROUS_COMMAND.search(decoded) and EXECUTION_CONTEXT.search(text):
+                findings.append(
+                    _mk(
+                        "AS-007",
+                        Severity.CRITICAL,
+                        "Encoded content executed",
+                        "A quoted ROT13 phrase decodes to a destructive shell command that is executed.",
+                        file_path,
+                        "Quoted ROT13 phrase decodes to a shell command (method: ROT13)",
+                        "Do not decode and execute encoded content; review the payload.",
+                        text,
+                        m.start(1),
                     )
                 )
 

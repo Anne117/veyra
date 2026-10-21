@@ -7,10 +7,12 @@ a specific prose instruction, never vague text; each benign fixture must
 decode to harmless text. The expected classifications are
 measurements of the current detector, not targets:
 
-    attacks  -> MISSED      (no rule fires: after the P-1 precision audit
-                             AS-004 no longer raises on a bare mention of
-                             "ROT13", and nothing else confirms the decoded
-                             action — see docs/rule-precision-audit.md)
+    attacks  -> MISSED for prose, DETECTED for shell syntax
+                             (after the P-1 precision audit AS-004 no longer
+                             raises on a bare mention of "ROT13"; R1 decodes a
+                             quoted ROT13 PHRASE and still only raises when the
+                             result is a destructive shell command — see
+                             docs/obfuscation-audit.md)
     benign   -> not HIGH    (correctly clean at the detection threshold)
 
 If a future rule makes an attack DETECTED, this file must be updated
@@ -27,12 +29,17 @@ from veyra.scanner import scan_path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "attacks" / "v2" / "rot13-nl"
 
-ATTACKS = {
+# Prose instructions in ROT13. The rule deliberately does not judge natural
+# language, so these stay MISSED until an NL path is designed and measured.
+NL_ATTACKS = {
     "decoded-delete-prod-tree",
     "decoded-exfil-private-keys",
     "decoded-remote-installer-root",
-    "decoded-real-shell-command",
 }
+# The one attack whose payload is a literal shell command. R1 (a quoted-phrase
+# tokenizer in AS-007) reaches the decoder and confirms the command.
+COMMAND_ATTACKS = {"decoded-real-shell-command"}
+ATTACKS = NL_ATTACKS | COMMAND_ATTACKS
 BENIGN = {
     "decoded-cipher-primer",
     "decoded-release-note",
@@ -90,15 +97,27 @@ def test_benign_payloads_decode_to_harmless_text():
         )
 
 
-def test_attacks_are_not_detected_today():
-    """Honest baseline: ROT13 natural-language attacks are MISSED."""
+def test_prose_attacks_are_not_detected_today():
+    """Declared gap: ROT13 natural-language instructions are still MISSED."""
     lab = run_attack_lab()
     got = {c["name"]: c["result"] for c in lab.cases if c["category"] == "v2-rot13-nl"}
-    for name in sorted(ATTACKS):
+    for name in sorted(NL_ATTACKS):
         assert got[name] == MISSED, (
             f"{name}: expected MISSED (unconfirmed NL action), got {got[name]}. "
             "If a rule change closed this gap, update the baseline deliberately."
         )
+
+
+def test_literal_command_attack_is_detected():
+    """R1: a quoted ROT13 phrase that decodes to shell syntax is caught."""
+    lab = run_attack_lab()
+    got = {c["name"]: c["result"] for c in lab.cases if c["category"] == "v2-rot13-nl"}
+    for name in sorted(COMMAND_ATTACKS):
+        assert got[name] == DETECTED, f"{name}: expected DETECTED after R1, got {got[name]}"
+    findings = scan_path(str(FIXTURES / "decoded-real-shell-command" / "SKILL.md")).findings
+    assert any(f.rule_id == "AS-007" and f.severity.value == "CRITICAL" for f in findings), (
+        "the literal-command fixture must be caught by AS-007 at CRITICAL"
+    )
 
 
 def test_benign_notes_are_not_high_severity():
@@ -109,8 +128,8 @@ def test_benign_notes_are_not_high_severity():
         )
 
 
-def test_no_rule_fires_on_the_family():
-    """No rule fires on either half of the family — the baseline is silence.
+def test_no_rule_fires_on_the_prose_half():
+    """The prose half of the family stays silent — silence is the baseline.
 
     Before the P-1 precision audit AS-004/MEDIUM fired on 6/6 purely because the
     fixtures mention "ROT13"; that signal was identical on benign and attack
@@ -119,7 +138,7 @@ def test_no_rule_fires_on_the_family():
     here must be justified by confirming the decoded action, not the keyword.
     """
     seen = {}
-    for name in sorted(ATTACKS | BENIGN):
+    for name in sorted(NL_ATTACKS | BENIGN):
         findings = scan_path(str(FIXTURES / name / "SKILL.md")).findings
         seen[name] = {(f.rule_id, f.severity.value) for f in findings}
 

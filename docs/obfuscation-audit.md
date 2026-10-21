@@ -245,11 +245,10 @@ a command.
 Consequence for future work: decoding the *quoted phrase* and then testing it
 against the existing `DANGEROUS_COMMAND` / `EXECUTION_CONTEXT` pair is a
 deterministic pre-step — no vocabulary change, no LLM, no new dependency — and
-it would make this fixture DETECTED. It is **not** shipped here: it is a rule
-change, its false-positive surface has to be measured over the whole corpus and
-the field slice first, and the natural-language members of this family would
-stay MISSED afterwards anyway (gap (2)). Recorded as the next candidate for
-AS-007, not applied.
+it would make this fixture DETECTED. It was **not** shipped at the time of the
+N1 measurement: it is a rule change, its false-positive surface has to be
+measured over the whole corpus and the field slice first. It was implemented
+later as R1 (below), with that measurement.
 
 Corpus after the fixture: **113 cases — 102 DETECTED / 7 PARTIALLY_DETECTED /
 4 MISSED / 0 FP (90.3%)**. `expected` was not adjusted anywhere: the case was
@@ -259,6 +258,34 @@ Gap (1) is deterministic and, by itself, adds no FP surface. Gap (2) is where
 the risk lives — it is the same problem recorded for
 `rot13-exec`/`rot13-instruction`: separating an instruction from a
 _description_ of the same action in English is not a regex-shaped problem.
+
+### R1 (implemented 2026-10-21): quoted-phrase tokenizer — gap (1) closed
+
+`AS-007` gained a second ROT13 tokenizer next to the `[A-Za-z0-9+/]{16,}` one:
+a double-quoted run on a single line (`QUOTED_PHRASE`, ≥12 chars) whose shape is
+letters, spaces and punctuation with **no digit** (`ROT13_PHRASE_SHAPE`). The
+phrase is decoded whole with `codecs.decode(..., "rot13")` and must still hit
+both `DANGEROUS_COMMAND` (shell syntax) and `EXECUTION_CONTEXT`. Digits are the
+line between a blob and a sentence, so digit-bearing shapes stay with the token
+branch and the two tokenizers cannot claim the same span.
+
+Measured, not tuned (`expected` was updated only after the measurement, and the
+three prose cases were left at their measured MISSED):
+
+| measurement | before | after |
+| --- | --- | --- |
+| `decoded-real-shell-command` | MISSED | **DETECTED** (AS-007 CRITICAL, line 9) |
+| three prose attacks | MISSED | MISSED (gap (2) unchanged) |
+| three benign ROT13 notes | clean | clean (no finding at any severity) |
+| corpus | 102 / 7 / 4 / 0 | **103 / 7 / 3 / 0** (91.2%, 0 FP) |
+| field slice `agent` + `tools` + `skills` + `hermes_cli` (2187 files) | 284 findings, AS-007 0 | 284 findings, **AS-007 0** |
+| self-scan `veyra scan src` | 0 critical / 0 high / 55 suppressed | identical |
+
+No rule vocabulary was broadened, no `expected` was fitted, no LLM and no new
+dependency joined the path. Gap (2) — prose that describes the action instead of
+spelling the command — remains open by decision (E-3b below); decoding an English
+sentence is not the same problem as decoding a command, and this rule still does
+not read `rm -rf` out of prose.
 
 ### Decision (E-3b): do not ship a rule
 

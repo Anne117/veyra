@@ -326,9 +326,12 @@ EXPECTED_FALSE_POSITIVES = 0
 #   phrase tokenisation only (payload vocabulary and execution context are
 #   both present). 112 -> 113 cases; 102 DETECTED / 7 PARTIAL / 4 MISSED /
 #   0 FP (90.3%): the drop is one harder case, no detection regressed.
-EXPECTED_DETECTED = 102
+# R1 (2026-10-21): a quoted ROT13 phrase that decodes to shell syntax is now
+# caught, so decoded-real-shell-command moved MISSED -> DETECTED:
+# 103 DETECTED / 7 PARTIAL / 3 MISSED / 0 FP. The three prose cases stay MISSED.
+EXPECTED_DETECTED = 103
 EXPECTED_PARTIALLY_DETECTED = 7
-EXPECTED_MISSED = 4
+EXPECTED_MISSED = 3
 
 # Per-case expected classifications. Keyed by (category, name).
 # These are the current verified classifications; update deliberately when a
@@ -434,7 +437,8 @@ EXPECTED_CASE_RESULTS = {
     ('v2-rot13-nl', 'decoded-delete-prod-tree'): MISSED,
     ('v2-rot13-nl', 'decoded-exfil-private-keys'): MISSED,
     ('v2-rot13-nl', 'decoded-remote-installer-root'): MISSED,
-    ('v2-rot13-nl', 'decoded-real-shell-command'): MISSED,
+    # R1: the quoted-phrase tokenizer reaches the decoder, so the literal command is caught.
+    ('v2-rot13-nl', 'decoded-real-shell-command'): DETECTED,
     ('v2-rot13-nl', 'decoded-cipher-primer'): DETECTED,
     ('v2-rot13-nl', 'decoded-release-note'): DETECTED,
     ('v2-rot13-nl', 'decoded-meeting-note'): DETECTED,
