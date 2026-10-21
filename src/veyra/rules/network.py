@@ -45,7 +45,27 @@ __all__ = [
 # annotation/exception/prose references, no request possible on the line).
 # Client used as code: a call or a construction, i.e. the symbol chain is
 # followed by an argument list.
-_HTTP_CALL_HEAD = r"\b(?:requests|httpx|aiohttp)(?:\.[A-Za-z_]\w*)*\s*\("
+#
+# A configuration object is not a client. ``httpx.Timeout``, ``httpx.Limits``,
+# ``httpx.URL``, ``httpx.Proxy``, ``httpx.Headers``, ``httpx.Cookies``,
+# ``httpx.Auth`` (and its ``BasicAuth``/``DigestAuth``/``NetRCAuth`` values)
+# and ``aiohttp.ClientTimeout`` are value objects built to be
+# passed *into* a client; none of them opens a connection, and a line whose
+# only HTTP symbol is one of these makes no request. Field probe 2026-10-21 on
+# the slice (agent/tools/skills/hermes_cli): 16 of 334 AS-003 MEDIUM were such
+# constructors alone on a line (``timeout = httpx.Timeout(...)``), and no file
+# relied on one as its only claim -- the client construction or the request
+# line in the same file still reports. A client construction on the same line
+# (``httpx.Client(timeout=httpx.Timeout(...))``) is matched at the client
+# symbol, so nothing is lost there.
+_HTTP_CONFIG_CTOR = (
+    r"(?:Timeout|Limits|URL|Proxy|Headers|Cookies|Auth|BasicAuth|DigestAuth"
+    r"|NetRCAuth|ClientTimeout)"
+)
+_HTTP_CALL_HEAD = (
+    r"\b(?:requests|httpx|aiohttp)"
+    rf"(?:\.(?!{_HTTP_CONFIG_CTOR}\b)[A-Za-z_]\w*)*\s*\("
+)
 # Dependency declaration: the symbol is available to the file, nothing more.
 _HTTP_DECLARATION = (
     r"|\b(?:import|from)\s+(?:requests|httpx|aiohttp|node-fetch)\b"

@@ -366,3 +366,31 @@ def test_a_call_is_never_collapsed_even_on_the_import_line(tmp_path):
     """A line that declares and calls in one statement is still a call."""
     (tmp_path / "both.py").write_text("import requests; requests.get('https://x.example')\n")
     assert [f.line for f in _http_medium(str(tmp_path))] == [1]
+
+
+def test_a_client_configuration_object_is_not_a_client():
+    """A ``Timeout``/``Limits``/``URL``/``Auth`` value cannot open a connection.
+
+    These are built to be passed *into* a client, and a line whose only HTTP
+    symbol is one of them makes no request (field probe 2026-10-21: 16 of 334
+    AS-003 MEDIUM on the slice were exactly this).
+    """
+    for line in (
+        "timeout = httpx.Timeout(connect=15.0, read=None, write=15.0, pool=10.0)",
+        "limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)",
+        "put_timeout = httpx.Timeout(",
+        "httpx.URL(url), strict=strict_cfg_headers, configured_header_names=names)",
+        'kwargs = {"timeout": aiohttp.ClientTimeout(total=timeout)}',
+        "auth = httpx.BasicAuth(user, password)",
+    ):
+        assert detect_http_client(line, "x.py", 1) is None, line
+
+
+def test_a_client_constructed_around_a_configuration_object_still_counts():
+    """The configuration list must not hide the client on the same line."""
+    for line in (
+        "with httpx.Client(timeout=httpx.Timeout(5.0)) as client:",
+        "async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as s:",
+        "self._http = http_client or httpx.Client(timeout=httpx.Timeout(connect=15.0))",
+    ):
+        assert detect_http_client(line, "x.py", 1) is not None, line
