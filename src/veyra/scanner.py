@@ -27,7 +27,7 @@ from veyra.graph.context import (
     serialize_component_security_scopes,
 )
 from veyra.mitre import mitre_for
-from veyra.models import Confidence, Finding, ScanResult
+from veyra.models import Confidence, Finding, ScanResult, Severity
 from veyra.rules import load_file_rules, load_rules
 from veyra.rules.network import collapse_http_claims
 from veyra.step_sequence import analyze_file_chains
@@ -467,40 +467,69 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
         except Exception:
             continue
 
-    # One claim per file for AS-003 MEDIUM: an import that a call in the same
-    # file supersedes is the same fact on a line that cannot make a request
-    # (see ``collapse_http_claims``). Import-only files keep their finding.
-    findings = collapse_http_claims(findings)
-
     # A line that is entirely a comment or a string literal is prose, not an
     # access. AS-006 is a line rule, so a docstring sentence such as
     # "read ~/.hermes/.env to load keys" was reported as a HIGH credential
     # access on a line that cannot touch the filesystem. Blank comments and
     # string literals before deciding; lines that still contain code (for
     # example `open(".env")`) are kept.
+    #
+    # AS-003 MEDIUM is the same judgement one rule over. A bare library name in
+    # prose -- "later requests (retried)", "token-endpoint requests (exchange
+    # only)" -- matches the client branch because the word is followed by a
+    # parenthesis, and a comment line opens no socket. Field probe 2026-10-21
+    # on the slice (agent/tools/skills/hermes_cli): 19 of 214 AS-003 MEDIUM sat
+    # on a line with no code left in 16 files, every one the bare
+    # ``requests (``/``httpx (``/``aiohttp (`` form; 8 of those files had no
+    # other claim, so their report was prose only. The filter runs *before*
+    # ``collapse_http_claims``: such a line counted as a call claim and dropped
+    # the file's import claim, so filtering first leaves the one fact on the
+    # import instead of nowhere.
+    code_lines = None
+    raw_lines = text.splitlines()
     if path.suffix == ".py":
         from veyra.step_sequence import _code_only_lines
 
         code_lines = _code_only_lines(text)
-        raw_lines = text.splitlines()
-        if code_lines is not None:
-            def _as006_prose(lineno: int) -> bool:
-                code = code_lines[lineno - 1]
-                if not code.strip():
-                    return True
-                if not _AS006_OUTPUT_CALL.match(code):
-                    return False
-                return not _AS006_READ_CALL.search(raw_lines[lineno - 1])
 
-            findings = [
-                f
-                for f in findings
-                if not (
-                    f.rule_id == "AS-006"
-                    and f.line
-                    and 0 < f.line <= len(code_lines)
-                    and _as006_prose(f.line)
-                )
-            ]
+    if code_lines is not None:
+        def _prose_line(lineno: int) -> bool:
+            return 0 < lineno <= len(code_lines) and not code_lines[lineno - 1].strip()
+
+        findings = [
+            f
+            for f in findings
+            if not (
+                f.rule_id == "AS-003"
+                and f.severity is Severity.MEDIUM
+                and f.line
+                and _prose_line(f.line)
+            )
+        ]
+
+    # One claim per file for AS-003 MEDIUM: an import that a call in the same
+    # file supersedes is the same fact on a line that cannot make a request
+    # (see ``collapse_http_claims``). Import-only files keep their finding.
+    findings = collapse_http_claims(findings)
+
+    if code_lines is not None:
+        def _as006_prose(lineno: int) -> bool:
+            code = code_lines[lineno - 1]
+            if not code.strip():
+                return True
+            if not _AS006_OUTPUT_CALL.match(code):
+                return False
+            return not _AS006_READ_CALL.search(raw_lines[lineno - 1])
+
+        findings = [
+            f
+            for f in findings
+            if not (
+                f.rule_id == "AS-006"
+                and f.line
+                and 0 < f.line <= len(code_lines)
+                and _as006_prose(f.line)
+            )
+        ]
 
     return findings

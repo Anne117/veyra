@@ -1385,3 +1385,49 @@ line or an import line kept the claim. Residual: `from aiohttp import web`
 (`hermes_cli/proxy/server.py:17`) is a *server* framework binding, not a client
 either, but the file's request line is `aiohttp.ClientSession(...)` at :71, which
 already supersedes both declarations, so the count there is unchanged.
+
+## Finding: a line that is entirely prose is not a request (AS-003)
+
+**Measured.** The client branch matches a bare library name followed by a
+parenthesis, and English prose does exactly that: `later requests (a torn-down
+httpx transport got reused)`, `server requests (answered first ...)`,
+`token-endpoint requests (exchange only)`, `Matrix/aiohttp (a standalone loop
+...)`. `_is_mention` only guards a *quoted* call, and the comment/docstring
+filter built in round 18 is scoped to AS-006. On the 2026-10-21 slice
+(agent/tools/skills/hermes_cli) 19 of 214 AS-003 MEDIUM sat on a line whose
+Python source is empty once comments and string literals are blanked: 8 comment
+lines, 11 inside a docstring or a module-level literal, in 16 files. Eight of
+those files had no other AS-003 claim, so their whole report was prose.
+
+**Rule (scanner filter):** before `collapse_http_claims`, an AS-003 MEDIUM
+finding is dropped when `_code_only_lines` leaves nothing on its line — the same
+tokenizer judgement round 18 applies to AS-006, extended to the network rule.
+The filter is whole-line and line-level: a line that still contains code keeps
+its finding, and a docstring that mentions a client in *prose* is not a claim
+while `open(".env").read()` on a code line still is. Running it *before* the
+collapse matters: a prose line used to count as a call claim and drop the file's
+import claim, so filtering first leaves the one fact on the import line
+(`tests/test_network.py::test_a_prose_line_does_not_supersede_the_import_claim`).
+
+| measurement | before | after |
+|---|---|---|
+| AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 214 | 195 (−19) |
+| — files carrying an AS-003 claim | 135 | 127 |
+| findings from every other rule, same slice | 67 | 67 |
+| total findings, same slice | 281 | 262 |
+| corpus (113 cases) | 103 D / 7 P / 3 M / 0 FP | unchanged, 0 drift |
+| suite | 1775 | 1780 (+5) |
+| self-scan (`src`, suppressed) | 55 | 55 |
+| wall clock, 4 directories | 93.8 s | 94.9 s (run-to-run noise) |
+
+**What the delta costs, honestly:** the removed lines were comments and
+docstrings, so 8 files stop reporting AS-003 at all (135 → 127) — each of them
+was reporting a sentence, not a capability. One of the 11 string-literal cases is
+borderline and is recorded rather than hidden: `hermes_cli/dashboard_auth/login_page.py:412`
+is a `fetch('/auth/password-login', ...)` inside a JS template the Python file
+*serves* to the browser. The Python line opens no socket, so it fits the same
+judgement, but the served page does make that request — if that file ever needs
+the claim, the answer is a rule for embedded templates, not a special case here.
+Residual (measured, not fixed): a match inside a trailing comment on a line that
+also has code is still reported (`LIMIT = 5  # see requests.get(url)`), because
+the filter is whole-line; 2 such lines exist on the slice.

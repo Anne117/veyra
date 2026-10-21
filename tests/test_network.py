@@ -629,3 +629,70 @@ def test_a_value_object_import_does_not_hide_a_request_line(tmp_path):
     )
     findings = _http_medium(str(tmp_path))
     assert [f.line for f in findings] == [4]
+
+# --- AS-003 MEDIUM: a line that is prose is not a request --------------------
+# A bare library name followed by a parenthesis matches the client branch, so
+# English prose -- "later requests (retried)", "token-endpoint requests
+# (exchange only)" -- and docstrings about ``fetch()`` fired AS-003 MEDIUM on a
+# line that opens no socket. Field probe 2026-10-21 on the slice
+# (agent/tools/skills/hermes_cli): 19 of 214 AS-003 MEDIUM were entirely
+# comment or string literal in 16 files; 8 of those files had no other claim.
+
+
+def test_a_prose_line_with_a_bare_client_name_is_not_a_request(tmp_path):
+    """A comment and a docstring naming a client make no request."""
+    (tmp_path / "helpers.py").write_text(
+        "def resolve(url):\n"
+        '    """User agent for token-endpoint requests (exchange only)."""\n'
+        "    # leaks into later requests (a torn-down transport got reused).\n"
+        "    return url\n"
+    )
+    assert _http_medium(str(tmp_path)) == []
+
+
+def test_a_prose_only_file_reports_nothing(tmp_path):
+    """The file-level claim is not carried by prose either."""
+    (tmp_path / "notes.py").write_text(
+        "# Matrix/aiohttp (a standalone loop breaks them).\n"
+        "TIMEOUT = 5\n"
+    )
+    assert _http_medium(str(tmp_path)) == []
+
+
+def test_a_prose_line_does_not_supersede_the_import_claim(tmp_path):
+    """The import keeps the one fact when the only 'call' was a comment.
+
+    The prose line used to count as a call claim and collapse the import, so
+    the file's single fact landed on a line that cannot make a request.
+    """
+    (tmp_path / "client.py").write_text(
+        "import httpx\n"
+        "# retries apply to subsequent requests (bounded, see above).\n"
+        '\n'
+        'URL = "https://example.com"\n'
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]
+
+
+def test_a_prose_line_does_not_hide_the_request_line(tmp_path):
+    """A comment above the call changes nothing; the call is still the claim."""
+    (tmp_path / "client.py").write_text(
+        "import requests\n"
+        "# all HTTP requests (GET and POST) go through the helper below.\n"
+        "\n"
+        "resp = requests.get('https://example.com/api')\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [4]
+
+
+def test_the_prose_filter_is_whole_line_only(tmp_path):
+    """A code line with a trailing comment keeps its finding.
+
+    The filter drops a line the tokenizer leaves empty; a line that still has
+    code is out of its scope, so a match inside a trailing comment is recorded
+    as residual rather than suppressed (2 such lines on the field slice).
+    """
+    (tmp_path / "limits.py").write_text(
+        "LIMIT = 5  # see requests.get(url) for the form\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]
