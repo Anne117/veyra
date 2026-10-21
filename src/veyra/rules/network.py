@@ -160,7 +160,6 @@ _HTTP_CALL_TAIL = (
     # class; the branch is removed rather than narrowed, because every name that
     # can send a byte is already spelled by another alternative.
     r"|\burlopen\b|\burlretrieve\s*\("
-    r"|\burlopen\b|\burlretrieve\s*\("
 )
 HTTP_CLIENT = re.compile(_HTTP_CALL_HEAD + _HTTP_DECLARATION + _HTTP_CALL_TAIL)
 # The same branches, partitioned: a line that only *declares* a client states

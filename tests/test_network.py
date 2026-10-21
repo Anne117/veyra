@@ -1,6 +1,10 @@
 """Tests for network access rules."""
 
+import inspect
+import re
+
 from veyra.models import Finding, Severity
+from veyra.rules import network
 from veyra.rules.network import (
     collapse_http_claims,
     detect_download_execute,
@@ -80,6 +84,27 @@ def test_http_client_code_forms():
         "node-fetch(url)",
     ):
         assert detect_http_client(line, "x.py", 1) is not None, line
+
+
+def test_no_regex_branch_is_written_twice():
+    """A branch typed twice is not a second branch, and nothing can notice.
+
+    ``_HTTP_CALL_TAIL`` ended with ``r"|\\burlopen\\b|\\burlretrieve\\s*\\("``
+    twice: the copy was left behind when the ``urllib.request`` module branch
+    was removed. A repeated alternative in an alternation never changes a
+    match, so no behavioural test, no corpus case and no field measurement can
+    see it -- the source has to be checked. Two adjacent, byte-identical
+    string literals in a rule builder are always this defect.
+    """
+    source = inspect.getsource(network)
+    lines = [line.strip() for line in source.splitlines()]
+    literal = re.compile(r'^r?"')
+    repeated = [
+        line
+        for above, line in zip(lines, lines[1:])
+        if literal.match(above) and above == line
+    ]
+    assert repeated == []
 
 
 def test_fetch_definition_method_call_and_prose_are_not_network_access():
