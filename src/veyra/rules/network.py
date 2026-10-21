@@ -70,6 +70,10 @@ _HTTP_CALL_HEAD = (
 _HTTP_DECLARATION = (
     r"|\b(?:import|from)\s+(?:requests|httpx|aiohttp|node-fetch)\b"
     r"|\bfrom\s+urllib\s+import\s+request\b"
+    # ``import urllib.request`` binds the same module as ``from urllib import
+    # request``; it was missing here, so the line matched only the call
+    # alternative below and could never be recognised as a declaration.
+    r"|\b(?:import|from)\s+urllib\.request\b"
     r"|\brequire\s*\(\s*['\"](?:axios|node-fetch|got)['\"]"
     r"|\bimport\s+got\s+from\b"
 )
@@ -90,8 +94,9 @@ _HTTP_CALL_TAIL = (
     # does ``urllib.request.Request``: it is the request *record* -- URL,
     # method, headers, body -- that ``urlopen`` sends, and building one opens
     # nothing. The request line is the ``urlopen``/``urlretrieve`` one (or the
-    # opener built to send it), and ``import urllib.request`` keeps carrying
-    # the file-level claim. Field probe 2026-10-21 on the slice
+    # opener built to send it), and the import line carries the file-level
+    # claim only while no request line does (``collapse_http_claims``). Field
+    # probe 2026-10-21 on the slice
     # (agent/tools/skills/hermes_cli): 52 of 318 AS-003 MEDIUM were such
     # records (49 constructions + 3 annotations) in 38 files, and no file had
     # one as its only claim -- each reports the ``urlopen`` line that sends
@@ -104,6 +109,19 @@ HTTP_CLIENT = re.compile(_HTTP_CALL_HEAD + _HTTP_DECLARATION + _HTTP_CALL_TAIL)
 # needs the distinction; the detector itself still matches either.
 HTTP_CALL = re.compile(_HTTP_CALL_HEAD + _HTTP_CALL_TAIL)
 HTTP_DECLARATION = re.compile(_HTTP_DECLARATION.lstrip("|"))
+
+# An import statement binds a name; the symbols spelled inside it are declared,
+# not called. ``import urllib.request`` matches the ``urllib.request`` call
+# alternative and ``from urllib.request import urlopen`` matches ``urlopen``, so
+# without this span every such declaration counted as the call that supersedes
+# it -- and the import claim was never collapsed, in exactly the files whose
+# request line was two lines below.
+_IMPORT_STATEMENT = re.compile(r"(?m)^[ \t]*(?:import|from)\b[^;\n]*")
+
+
+def _in_import_statement(text: str, offset: int) -> bool:
+    """True when ``offset`` sits inside an import statement on its line."""
+    return any(m.start() <= offset < m.end() for m in _IMPORT_STATEMENT.finditer(text))
 
 # A request issued through a client *object* is invisible to the branches
 # above, because they all name a library: ``async with session.post(url)`` and
@@ -212,6 +230,14 @@ def collapse_http_claims(findings):
     Field probe 2026-10-20 on the agent tree: 218 files import AND call, which
     was 357 of 2001 AS-003 MEDIUM -- every one a per-file duplicate. Files that
     only import (87) are untouched.
+
+    A call-pattern match inside an import statement is the declaration itself:
+    the branches are peers, so importing the urllib request module also matches
+    the module's own call alternative, and importing its entry point by name
+    matches the bare name. Without that guard the declaration superseded
+    itself, and the urllib import claim survived in every file that made a
+    request -- 46 of them on the 2026-10-21 slice, in 45 files (see
+    ``docs/rule-precision-audit.md``).
     """
     def _is_http_medium(f):
         return f.rule_id == "AS-003" and f.severity is Severity.MEDIUM
@@ -220,7 +246,13 @@ def collapse_http_claims(findings):
         # A quoted call is a mention, not use: it supersedes nothing, so the
         # import keeps its claim (same guard as the detector).
         text = f.matched_text or ""
-        if _live_match(HTTP_CALL, text) is not None:
+        for m in HTTP_CALL.finditer(text):
+            if _is_mention(text, m.start()):
+                continue
+            # A match inside an import statement is the declaration itself
+            # (``import urllib.request``), not a call that supersedes it.
+            if _in_import_statement(text, m.start()):
+                continue
             return True
         # A proven session ``get`` (see ``SESSION_ASSIGN``) is a call as well:
         # it names the request line, so the file's import is the duplicate.

@@ -1230,3 +1230,40 @@ keys (`display += "… .env …"`, `arg("--access-token", help="… stored in .e
 helper whose name is not in the read-call list (`print(f"{load_text('.env')}")`) is
 dropped: the guard is a small allowlist of reading constructs, not a parser, and that
 is the honest limit of a line rule.
+
+## Finding: the AS-003 import-claim collapse never reached urllib
+
+The collapse drops an import-line claim when the same file calls the client, so
+`import requests` + `requests.get(url)` reports one line. It never fired for
+`import urllib.request`: the import line matched the `urllib.request` *call*
+alternative (the branches are written as peers, so an import statement is a match
+of both the declaration and the call pattern), which made the declaration its own
+superseder, and `_declares_only` saw a "call" on the very line it was judging.
+`import urllib.request` was also missing from the declaration branch, so the line
+could not be classified as a declaration at all.
+
+**Rule (scanner filter):** a call-pattern match that sits inside an import
+statement declares a name, not a call; the declaration branch now names the
+urllib request module import. An import-only file keeps its claim, and the claim
+that survives is the request line (`urlopen` / `urlretrieve`), not the import.
+
+| measurement | before | after |
+|---|---|---|
+| AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 266 | 220 (−46) |
+| total findings, same slice | 333 | 287 |
+| files carrying an AS-003 claim | 148 | 148 (no file lost its claim) |
+| removed lines | — | 46, all import statements, in 45 files; 0 added |
+| every other rule, same slice | 54 | 54 |
+| corpus (113 cases) | 102 D / 7 P / 4 M / 0 FP | unchanged, 0 drift |
+| suite | 1755 | 1758 |
+| self-scan (`src`, suppressed) | 55 | 55 |
+
+**Residual, measured:** 5 import claims stay because their file has no request
+line — two unused imports, one handler/`Request`-only module, one module that
+requests through a named helper, and `from urllib.request import urlretrieve`
+followed by a bare `urlretrieve(zip_url, zip_path)` call. That last one is a
+recall gap, not a collapse gap: the call alternatives name `urlopen` but not
+`urlretrieve`, so the bare form is invisible and the import is the only claim
+left. Also still firing: `urllib.request.proxy_bypass_environment(host)` and
+`urllib.request.url2pathname(...)`, which read local configuration and touch no
+socket.

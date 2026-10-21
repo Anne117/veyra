@@ -420,6 +420,39 @@ def test_a_client_configuration_object_is_not_a_client():
         assert detect_http_client(line, "x.py", 1) is None, line
 
 
+def test_the_urllib_import_is_collapsed_when_the_file_makes_the_request(tmp_path):
+    """``import urllib.request`` + ``urlopen`` is one fact, not two.
+
+    The import line matches the ``urllib.request`` call alternative, so before
+    the import-statement guard it was its own superseder and the per-file
+    duplicate survived in exactly the files whose request line sat below it.
+    """
+    (tmp_path / "fetch.py").write_text(
+        "import urllib.request\n\n\ndef go(url):\n"
+        "    with urllib.request.urlopen(url, timeout=5) as r:\n"
+        "        return r.read()\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [5]
+
+
+def test_a_from_urllib_request_import_is_collapsed_by_a_bare_urlopen(tmp_path):
+    """``from urllib.request import urlopen`` is declared, ``urlopen(...)`` is used."""
+    (tmp_path / "fetch.py").write_text(
+        "from urllib.request import urlopen\n\n\nresp = urlopen(url)\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [4]
+
+
+def test_a_urllib_import_without_a_request_line_keeps_its_claim(tmp_path):
+    """No request line supersedes the import: a record and a handler are not calls."""
+    (tmp_path / "handler.py").write_text(
+        "import urllib.request\n\n\n"
+        "def build(url, headers):\n"
+        "    return urllib.request.Request(url, headers=headers)\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]
+
+
 def test_a_client_constructed_around_a_configuration_object_still_counts():
     """The configuration list must not hide the client on the same line."""
     for line in (
