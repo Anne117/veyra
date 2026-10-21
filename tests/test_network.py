@@ -443,6 +443,29 @@ def test_a_from_urllib_request_import_is_collapsed_by_a_bare_urlopen(tmp_path):
     assert [f.line for f in _http_medium(str(tmp_path))] == [4]
 
 
+def test_a_bare_urlretrieve_is_the_request_line(tmp_path):
+    """``from urllib.request import urlretrieve`` + ``urlretrieve(...)`` is one fact.
+
+    The tail listed ``urlopen`` but not ``urlretrieve``, so a file that imported
+    the symbol and called it by the bare name had no request line at all and the
+    download was reported only as an unused-looking import
+    (``hermes_cli/update_cmd_zip.py:278,283``).
+    """
+    (tmp_path / "fetch.py").write_text(
+        "def download(zip_url, zip_path):\n"
+        "    from urllib.request import urlretrieve\n"
+        "\n"
+        "    urlretrieve(zip_url, zip_path)\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [4]
+
+
+def test_a_urlretrieve_name_reference_is_not_a_call():
+    """Passing the function around names no request; only the call does."""
+    assert detect_http_client("opener=urlretrieve", "x.py", 1) is None
+    assert detect_http_client("urllib.request.urlretrieve(url, dest)", "x.py", 2) is not None
+
+
 def test_a_urllib_import_without_a_request_line_keeps_its_claim(tmp_path):
     """No request line supersedes the import: a record and a handler are not calls."""
     (tmp_path / "handler.py").write_text(

@@ -101,7 +101,14 @@ _HTTP_CALL_TAIL = (
     # records (49 constructions + 3 annotations) in 38 files, and no file had
     # one as its only claim -- each reports the ``urlopen`` line that sends
     # it. A line naming both keeps its finding at the ``urlopen`` match.
-    r"|\burllib\.request\b(?!\.Request\b)|\burlopen\b"
+    # ``urlretrieve`` was absent here while ``urlopen`` was present, so a file
+    # that imported the symbol (``from urllib.request import urlretrieve``) and
+    # called it by the bare name had no request line at all: the only claim was
+    # the import. Field probe 2026-10-21 on the slice
+    # (agent/tools/skills/hermes_cli): ``hermes_cli/update_cmd_zip.py:278,283``.
+    # The ``(`` keeps a name reference (``opener=urlretrieve``) out, exactly as
+    # the record branch keeps ``urllib.request.Request`` out.
+    r"|\burllib\.request\b(?!\.Request\b)|\burlopen\b|\burlretrieve\s*\("
 )
 HTTP_CLIENT = re.compile(_HTTP_CALL_HEAD + _HTTP_DECLARATION + _HTTP_CALL_TAIL)
 # The same branches, partitioned: a line that only *declares* a client states
