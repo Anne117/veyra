@@ -78,7 +78,6 @@ def test_http_client_code_forms():
         "client = httpx.Client(timeout=5)",
         "from aiohttp import ClientSession",
         "const r = await fetch(url)",
-        "const r = await fetch(url)",
         "axios.get(url)",
         "const got = require('axios')",
         "node-fetch(url)",
