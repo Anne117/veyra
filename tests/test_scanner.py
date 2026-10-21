@@ -245,3 +245,54 @@ def test_print_of_a_read_is_still_an_access(tmp_path):
     result = scan_path(str(target))
     lines = [f.line for f in result.findings if f.rule_id == "AS-006"]
     assert lines == [1, 2]
+
+
+def test_a_detection_table_entry_is_not_a_read(tmp_path):
+    """AS-006: a path that lives only in a literal is a mention, not an access.
+
+    Detection tables, argparse help strings and route paths all name credential
+    files in Python source without ever opening one. Every string on these
+    lines is blanked, so the code that remains cannot read anything.
+    """
+    target = tmp_path / "patterns.py"
+    target.write_text(
+        "_PATTERNS = [\n"
+        '    (r"cat\\s+[^\\n]*(\\.env|credentials)", "read_secrets"),\n'
+        '    (r"\\busers[\\\\/][^\\\\/\\s]+[\\\\/]\\.ssh\\b", "access to SSH keys"),\n'
+        "]\n"
+        'parser.add_argument("--token", help="stored in .env")\n'
+        '@router.get("/api/credentials/pool")\n',
+        encoding="utf-8",
+    )
+    result = scan_path(str(target))
+    assert [f for f in result.findings if f.rule_id == "AS-006"] == []
+
+
+def test_an_assignment_of_a_path_is_not_a_read(tmp_path):
+    """Storing a sensitive path in a variable opens no file, even when the
+    trailing comment says the path is read somewhere else."""
+    target = tmp_path / "paths.py"
+    target.write_text(
+        'ENV_PATH = ".env"  # read at startup\n'
+        'KEY_PATH = "~/.ssh/id_rsa"  # read on demand\n'
+        'open(".env").read()\n',
+        encoding="utf-8",
+    )
+    result = scan_path(str(target))
+    lines = [f.line for f in result.findings if f.rule_id == "AS-006"]
+    assert lines == [3]
+
+
+def test_a_path_consumed_by_a_call_is_still_an_access(tmp_path):
+    """A literal path handed to a call that reads or executes stays a finding."""
+    target = tmp_path / "read.py"
+    target.write_text(
+        'subprocess.run(["cat", os.path.expanduser("~/.ssh/id_rsa")])\n'
+        'os.system("cat ~/.aws/credentials")\n'
+        'data = Path(".env").read_text()\n'
+        'print("Saved the API key to .env")\n',
+        encoding="utf-8",
+    )
+    result = scan_path(str(target))
+    lines = [f.line for f in result.findings if f.rule_id == "AS-006"]
+    assert lines == [1, 2]

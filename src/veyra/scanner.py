@@ -395,18 +395,21 @@ def _confidence_for(f: Finding) -> Confidence:
     return Confidence.MEDIUM
 
 
-# AS-006: a printed message is not a read. When the code on a Python line
-# (string literals blanked) is nothing but an output call, the sensitive path
-# can only live inside the message literal: `print(f"... {home}/.env")`
-# renders text, it never opens the file. The line is still kept when the call
-# itself contains code (`print(open(".env").read())`) and when a read call can
-# hide inside an f-string expression, which Python 3.11 tokenises as a single
-# STRING token and therefore blanks entirely.
-_AS006_OUTPUT_CALL = re.compile(
-    r"^\s*(?:print|sys\.(?:stdout|stderr)\.write|console\.print"
-    r"|log(?:ger)?\.\w+)\s*\([\s\w,%+\-)]*$"
-)
+# AS-006: an access needs code that can read. A sensitive path that survives
+# only inside a string literal or a comment cannot open anything: it is a
+# mention -- an entry in a detection table, an argparse help string, an HTTP
+# route, a printed message. A Python line is kept when the path is still there
+# in code (`self.env` is an identifier, not a dotenv file; that attribute form
+# is its own measurement) or when a call on the line can consume the literal
+# (`open`, `Path`, `subprocess.run`, ...). The *raw* line is checked for a read
+# call because Python 3.11 tokenises an f-string as one STRING token, so
+# `print(f"{open('.env').read()}")` would otherwise blank the call that reads.
 _AS006_READ_CALL = re.compile(r"\b(?:open|read|read_text|read_bytes|Path)\s*\(")
+_AS006_CONSUMER = re.compile(
+    r"\b(?:open|read|read_text|read_bytes|readlines|Path|load|loads|safe_load"
+    r"|expanduser|expandvars|system|popen|run|call|check_call|check_output"
+    r"|Popen|copy|copyfile|copytree|send_file|FileResponse)\s*\("
+)
 
 
 def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
@@ -488,6 +491,7 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
     code_lines = None
     raw_lines = text.splitlines()
     if path.suffix == ".py":
+        from veyra.rules.sensitive_paths import SENSITIVE_PATH as _AS006_SENSITIVE_PATH
         from veyra.step_sequence import _code_only_lines
 
         code_lines = _code_only_lines(text)
@@ -513,13 +517,14 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
     findings = collapse_http_claims(findings)
 
     if code_lines is not None:
-        def _as006_prose(lineno: int) -> bool:
+        def _as006_mention(lineno: int) -> bool:
+            """The path is text only and nothing on the line reads it."""
             code = code_lines[lineno - 1]
-            if not code.strip():
-                return True
-            if not _AS006_OUTPUT_CALL.match(code):
+            if _AS006_SENSITIVE_PATH.search(code):
                 return False
-            return not _AS006_READ_CALL.search(raw_lines[lineno - 1])
+            if _AS006_READ_CALL.search(raw_lines[lineno - 1]):
+                return False
+            return not _AS006_CONSUMER.search(code)
 
         findings = [
             f
@@ -528,7 +533,7 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
                 f.rule_id == "AS-006"
                 and f.line
                 and 0 < f.line <= len(code_lines)
-                and _as006_prose(f.line)
+                and _as006_mention(f.line)
             )
         ]
 

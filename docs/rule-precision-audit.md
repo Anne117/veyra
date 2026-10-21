@@ -1231,6 +1231,43 @@ helper whose name is not in the read-call list (`print(f"{load_text('.env')}")`)
 dropped: the guard is a small allowlist of reading constructs, not a parser, and that
 is the honest limit of a line rule.
 
+## Round 19 — AS-006: a path that lives only in a literal is a mention
+
+Round 18 left 23 AS-006 HIGH on the same slice. Re-measured before touching the code by
+blanking literals and comments on each flagged `.py` line:
+
+| class | count | example |
+|---|---|---|
+| path only inside a literal or a comment, nothing on the line reads | 15 | `(r'cat\s+…(\.env|credentials)', "read_secrets")`, `help="stored in .env"` |
+| attribute form (`.key`, `.env`) survives as code | 6 | `values.get(field.key)` |
+| markdown (no tokeniser; instruction text) | 2 | `cat ~/.ssh/id_ed25519.pub` |
+
+The 15 are exactly the "regex literal" (5) and "other prose/config keys" (10) classes round
+18 named as residual. **Rule (replaces the round-18 predicate, `.py` only):** an AS-006
+finding is a mention when the sensitive path does not survive in the code part of the line
+and no call on the line can consume it. Kept: the path still present in code (`self.env` is
+an identifier — the attribute class, measured separately), a read call anywhere on the raw
+line (the f-string escape from round 18), and a consumer call in code
+(`open|read|read_text|read_bytes|readlines|Path|load(s)|safe_load|expanduser|expandvars|system|popen|run|call|check_call|check_output|Popen|copy|copyfile|copytree|send_file|FileResponse`).
+Rules and `expected` are untouched.
+
+| measurement | before | after |
+|---|---|---|
+| AS-006 HIGH, field slice | 23 | 8 |
+| files reporting AS-006, same slice | 20 | 6 |
+| total findings, same slice | 262 | 247 |
+| every other rule, same slice | 239 | 239 |
+| corpus (113 cases) | 103 D / 7 P / 3 M / 0 FP | unchanged, 0 drift |
+| suite | 1780 | 1783 |
+| self-scan of `src/` (no config) | 55 | 38 |
+| wall clock, 4 directories | 96.9 s | 94.2 s (run-to-run noise) |
+
+**Residual cost, measured:** the consumer list is an allowlist of reading/executing
+constructs, not a parser, so a real read through a helper outside it
+(`print(load_text('.env'))`) is dropped. The attribute form still fires six times (`.key`
+used as a dict key, `self.env` as an attribute); that is the next class and needs its own
+measurement. The two markdown hits are instructions to `cat` a private key and are kept.
+
 ## Finding: the AS-003 import-claim collapse never reached urllib
 
 The collapse drops an import-line claim when the same file calls the client, so
