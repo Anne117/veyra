@@ -217,6 +217,24 @@ SESSION_WITH_AS = re.compile(
 # finding, so inside a finding this says "this line issued a request".
 SESSION_GET = re.compile(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.get[ \t]*\(")
 
+# A client *construction* allocates a transport; it opens nothing. ``with
+# httpx.Client(timeout=5) as client:`` builds a session object, and the line
+# that sends is the ``client.get(...)``/``client.post(...)`` inside the block.
+# The construction is therefore an availability statement -- the same kind of
+# fact as an ``import`` -- not a request line. It is dropped for a file that
+# also reports a request line, and kept (once, first by line number) for a file
+# whose only claim it is: there the block's verb may be a ``post`` on a
+# receiver this scanner does not prove, and the construction is the only
+# pointer to it. Field probe 2026-10-21 on the slice
+# (agent/tools/skills/hermes_cli): 46 of 195 AS-003 MEDIUM were constructions in
+# 29 files; 18 of them sat in files that report a request line anyway, and 19
+# files relied on the construction as their only claim (11 of those call a
+# verb on the bound name -- mostly ``client.post``, which the object branch
+# excludes by naming convention).
+CLIENT_CONSTRUCTION = re.compile(
+    rf"\b(?:{SESSION_CTOR}|httpx\.AsyncClient|aiohttp\.ClientSession)[ \t]*\("
+)
+
 
 def session_client_names(text: str) -> List[str]:
     """Names this file bound to a ``requests.Session`` / ``httpx.Client``.
@@ -314,6 +332,11 @@ def collapse_http_claims(findings):
     (`process_bootstrap.py` 3, `chat_completion_helpers.py` 3,
     `mcp_oauth_provider.py` 2), so one file reported one fact up to three times.
 
+    A client *construction* is the same kind of fact as an import: ``with
+    httpx.Client(...) as client:`` allocates a transport and opens nothing, so
+    it is dropped for a file that reports a request line and kept as the single
+    availability claim of a file that has none (see ``CLIENT_CONSTRUCTION``).
+
     A call-pattern match inside an import statement is the declaration itself:
     the branches are peers, so importing the urllib request module also matches
     the module's own call alternative, and importing its entry point by name
@@ -345,6 +368,41 @@ def collapse_http_claims(findings):
         text = f.matched_text or ""
         return bool(HTTP_DECLARATION.search(text)) and not _calls(f)
 
+    def _construction(f):
+        """A construction line, not a request line (mention-guarded)."""
+        text = f.matched_text or ""
+        if not _is_http_medium(f):
+            return False
+        return _live_match(CLIENT_CONSTRUCTION, text) is not None
+
+    # A file that reports any non-construction claim reports its request line:
+    # the construction above it is the same fact on a line that opens nothing.
+    # A declaration states availability too: only a call claim names a request.
+    requesting = {
+        f.file
+        for f in findings
+        if _is_http_medium(f)
+        and not _construction(f)
+        and not _declares_only(f)
+    }
+
+    first_construction = {}
+    for f in findings:
+        if not _construction(f) or f.file in requesting:
+            continue
+        line = f.line or 0
+        if f.file not in first_construction or line < first_construction[f.file]:
+            first_construction[f.file] = line
+
+    def _superseded_construction(f):
+        return _construction(f) and f.file in requesting
+
+    def _duplicate_construction(f):
+        # One availability statement per file, as for declarations.
+        if not (_construction(f) and f.file not in requesting):
+            return False
+        return (f.line or 0) != first_construction[f.file]
+
     calling = {f.file for f in findings if _is_http_medium(f) and _calls(f)}
     # One declaration per file. A file that imports a client in three places
     # and never calls it states its availability once; the other two lines are
@@ -369,7 +427,9 @@ def collapse_http_claims(findings):
 
     return [f for f in findings
             if not (_is_http_medium(f) and f.file in calling and _declares_only(f))
-            and not _duplicate_declaration(f)]
+            and not _duplicate_declaration(f)
+            and not _superseded_construction(f)
+            and not _duplicate_construction(f)]
 
 
 # --- Download-and-execute --------------------------------------------------

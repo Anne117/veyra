@@ -338,10 +338,12 @@ def test_object_form_keeps_prose_and_non_http_receivers_quiet():
 def test_a_session_get_is_a_request_when_the_file_proves_the_receiver(tmp_path):
     """``client.get(url)`` is a request if this file built ``client`` as a session.
 
-    The import claim is superseded: the request line is the claim that names
-    something the file actually does. The construction keeps its own claim --
-    collapsing those is a separate question, and the field count below shows
-    why it is not decided here.
+    Three lines describe one request: the import states availability, the
+    ``with httpx.Client(...)`` allocates a transport and opens nothing, and the
+    ``client.get(url)`` inside the block sends. Both of the first two are
+    availability facts, so the file reports one claim, on the line that acts
+    (field probe 2026-10-21: 18 of 46 construction claims sat in files that
+    already reported a request line).
     """
     (tmp_path / "models.py").write_text(
         "import httpx\n"
@@ -351,7 +353,50 @@ def test_a_session_get_is_a_request_when_the_file_proves_the_receiver(tmp_path):
         "    with httpx.Client(timeout=5) as client:\n"
         "        return client.get(url).json()\n"
     )
-    assert [f.line for f in _http_medium(str(tmp_path))] == [5, 6]
+    assert [f.line for f in _http_medium(str(tmp_path))] == [6]
+
+
+def test_a_construction_only_file_keeps_one_claim(tmp_path):
+    """Without a request line the construction is the only pointer there is.
+
+    ``client.post(...)`` on a receiver named ``client`` is invisible to the
+    object branch (it needs ``http``/``session`` in the name) and to the session
+    rule (``get`` only), so a file whose block sends that way must not go silent
+    just because the line it reports is a construction. Two construction sites
+    are one availability fact, first by line number.
+    """
+    (tmp_path / "posting.py").write_text(
+        "import httpx\n"
+        "\n"
+        "\n"
+        "def one(url):\n"
+        "    with httpx.Client(timeout=5) as client:\n"
+        "        return client.post(url, json={})\n"
+        "\n"
+        "\n"
+        "def two(url):\n"
+        "    with httpx.Client(timeout=10) as client:\n"
+        "        return client.post(url, json={})\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [5]
+
+
+def test_a_construction_is_not_collapsed_by_a_declaration(tmp_path):
+    """The import states availability too; it does not make the construction a request."""
+    (tmp_path / "declared.py").write_text(
+        "import httpx\n"
+        "client = httpx.AsyncClient(**kwargs)\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [2]
+
+
+def test_a_quoted_construction_is_a_mention_and_collapses_nothing(tmp_path):
+    """A construction named inside backticks allocates nothing."""
+    (tmp_path / "noted.py").write_text(
+        "import httpx\n"
+        "# ``with httpx.Client(timeout=5) as client:`` is the shape we look for\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]
 
 
 def test_a_session_get_inside_a_multiline_construction_is_a_request(tmp_path):

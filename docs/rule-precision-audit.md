@@ -1468,3 +1468,48 @@ the claim, the answer is a rule for embedded templates, not a special case here.
 Residual (measured, not fixed): a match inside a trailing comment on a line that
 also has code is still reported (`LIMIT = 5  # see requests.get(url)`), because
 the filter is whole-line; 2 such lines exist on the slice.
+
+## Finding: a client construction is availability, not a request (AS-003)
+
+`with httpx.Client(timeout=5) as client:` allocates a transport. It opens no
+connection; the line that sends is the `client.get(...)` / `client.post(...)`
+inside the block, and `import httpx` above it only states that the client is
+available. The line rule cannot see the difference — it matches a library name
+followed by an argument list, and a constructor is exactly that — so every
+`with ... Client(...) as x:` line became its own AS-003 MEDIUM claim, next to
+the request line it belongs to.
+
+**Rule (collapse):** after the existing import collapse, an AS-003 MEDIUM claim
+whose matched symbol is a client *construction* — `requests.Session(`,
+`httpx.Client(`, `httpx.AsyncClient(`, `aiohttp.ClientSession(` — is dropped for
+a file that reports a request line (a call claim that is not itself a
+declaration or a construction), and is kept, once, first by line number, for a
+file whose only claim it is. A construction-only file keeps it on purpose: a
+block that sends with `client.post(...)` on a receiver named `client` is
+invisible both to the object branch (it requires `http`/`session` in the name)
+and to the session rule (`get` only), so the construction is the only pointer
+to that request. The decision is file-scoped; a sibling's call proves nothing.
+
+| measurement | before | after |
+|---|---|---|
+| AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 195 | 168 (−27) |
+| — construction claims in that remainder | 46 in 29 files | 19 in 19 files |
+| — files carrying an AS-003 claim | 127 | 127 (none lost its only claim) |
+| findings from every other rule, same slice | 52 | 52 |
+| total findings, same slice | 247 | 220 |
+| corpus (113 cases) | 103 D / 7 P / 3 M / 0 FP | unchanged, 0 drift |
+| suite | 1783 | 1786 (+3) |
+| self-scan (`src`, suppressed) | 38 | 38 |
+| wall clock, 4 directories | 102.6 s | 103.5 s (run-to-run noise) |
+
+**What the delta costs, honestly:** 18 of the 27 dropped claims sat in files
+that already name their request line, so the file keeps reporting and the
+report moves from the transport allocation to the call — that is a dedupe, not
+a loss. The 9 others were repeats of the same construction in 6 files that have
+no other claim; each of those files still reports once. What stays on the
+slice: 19 files whose single claim is a construction, 11 of which do call a
+verb on the bound name (`client.post`, `http_client.post`) — for those the
+claim points at the block, not at the sending line. Closing that is a recall
+change (prove the receiver from the `with ... as` binding for verbs other than
+`get`), measured separately; folding it into this precision change would have
+mixed two directions in one commit.
