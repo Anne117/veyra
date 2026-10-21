@@ -564,3 +564,68 @@ def test_a_client_constructed_around_a_configuration_object_still_counts():
         "self._http = http_client or httpx.Client(timeout=httpx.Timeout(connect=15.0))",
     ):
         assert detect_http_client(line, "x.py", 1) is not None, line
+
+
+def test_an_import_of_a_timeout_is_not_a_network_client():
+    """``from httpx import Timeout`` binds a value, not a transport.
+
+    The declaration branch matches the library name, so a file whose only
+    network symbol was a timeout class reported AS-003 MEDIUM. A timeout holds
+    two numbers; ``Limits`` holds pool sizes; ``HTTPError`` is raised, not sent;
+    ``ClientState`` is an enum. Field probe 2026-10-21 on the slice
+    (agent/tools/skills/hermes_cli): three such lines were the only AS-003 claim
+    of their file -- ``anthropic_adapter.py:307`` (``Timeout``),
+    ``auxiliary_client.py:5399`` (``ClientState``, imported from the submodule),
+    ``mcp_oauth_provider.py:87`` (``HTTPError``).
+    """
+    for line in (
+        "from httpx import Timeout",
+        "from httpx import Limits, URL",
+        "from httpx import HTTPError",
+        "from httpx._client import ClientState",
+        "from aiohttp import ClientTimeout",
+        "from requests import Timeout as _T",
+    ):
+        assert detect_http_client(line, "x.py", 1) is None, line
+
+
+def test_an_import_that_binds_a_client_still_counts():
+    """A client symbol keeps the claim, alone or beside a value object.
+
+    The trade the configuration list makes elsewhere: only an import whose
+    names are *all* values or exceptions goes quiet. ``from httpx import
+    Timeout, Client`` still names a transport.
+    """
+    for line in (
+        "import httpx",
+        "import httpx as _httpx",
+        "from httpx import Client",
+        "from httpx import Timeout, Client",
+        "from httpx._client import AsyncClient",
+        "from requests import Session",
+        "from requests import get",
+        "from urllib import request as urlrequest",
+    ):
+        assert detect_http_client(line, "x.py", 1) is not None, line
+
+
+def test_a_file_that_only_imports_a_value_object_reports_nothing(tmp_path):
+    """End to end: the rejected declaration leaves the file with no claim."""
+    (tmp_path / "adapter.py").write_text(
+        "def _client_timeout(timeout):\n"
+        "    from httpx import Timeout\n"
+        "    return Timeout(timeout=float(timeout), connect=10.0)\n"
+    )
+    assert _http_medium(str(tmp_path)) == []
+
+
+def test_a_value_object_import_does_not_hide_a_request_line(tmp_path):
+    """The call is still the claim when the same file also imports a value."""
+    (tmp_path / "adapter.py").write_text(
+        "from httpx import Timeout\n"
+        "import httpx\n"
+        "\n"
+        "resp = httpx.get('https://example.com', timeout=Timeout(5.0))\n"
+    )
+    findings = _http_medium(str(tmp_path))
+    assert [f.line for f in findings] == [4]

@@ -62,6 +62,32 @@ _HTTP_CONFIG_CTOR = (
     r"(?:Timeout|Limits|URL|Proxy|Headers|Cookies|Auth|BasicAuth|DigestAuth"
     r"|NetRCAuth|ClientTimeout)"
 )
+# An import binds names. ``from httpx import Timeout`` binds a value object: a
+# timeout holds a number pair, a ``Limits`` holds pool sizes, ``HTTPError`` is
+# an exception class, ``ClientState`` an enum. None of them can send a byte, so
+# a line whose only network symbol is one of these states no request
+# capability. The list is deliberately closed: every name here is a value,
+# exception, enum or record in the libraries' public (or semi-public) surface,
+# and a client-bearing import (``from httpx import Client``) stays a claim even
+# when it shares a line with one of them.
+_HTTP_NON_CLIENT_SYMBOL = frozenset({
+    # value objects -- the config constructors excluded from the call branch
+    "Timeout", "Limits", "URL", "Proxy", "Headers", "Cookies", "Auth",
+    "BasicAuth", "DigestAuth", "NetRCAuth", "ClientTimeout", "QueryParams",
+    # exceptions and state: raised, caught or assigned, never sent
+    "HTTPError", "HTTPStatusError", "RequestError", "TransportError",
+    "TimeoutException", "ConnectError", "ConnectTimeout", "ReadTimeout",
+    "WriteTimeout", "PoolTimeout", "CloseError", "ClientState",
+    # records and responses: built or read, not a transport
+    "Request", "Response", "Transport", "BaseTransport", "MockTransport",
+})
+# ``from requests import a, b as c`` -- the imported names, aliases stripped.
+_FROM_LIB_IMPORT = re.compile(
+    # a dotted submodule carries the same symbols: ``httpx._client.ClientState``
+    r"\bfrom\s+(?:requests|httpx|aiohttp)(?:\.[A-Za-z_]\w*)*\s+import\s+\(?([^)\n#]*)"
+)
+_IMPORT_ALIAS = re.compile(r"\s+as\s+\w+")
+
 _HTTP_CALL_HEAD = (
     r"\b(?:requests|httpx|aiohttp)"
     rf"(?:\.(?!{_HTTP_CONFIG_CTOR}\b)[A-Za-z_]\w*)*\s*\("
@@ -224,7 +250,29 @@ def _is_mention(line: str, start: int) -> bool:
     return False
 
 
-def _live_match(pattern, line: str):
+def _imports_no_client(line: str, match) -> bool:
+    """True when the matched declaration imports only non-client symbols.
+
+    ``from httpx import Timeout`` makes the timeout class available; it makes no
+    request possible, because a timeout value is not a transport, and the file
+    that only names it never opened a socket through it. Field probe 2026-10-21
+    on the slice (agent/tools/skills/hermes_cli): three such lines were the only
+    AS-003 claim of their file -- ``agent/anthropic_adapter.py:307``
+    (``Timeout``), ``agent/auxiliary_client.py:5399`` (``ClientState``),
+    ``tools/mcp_oauth_provider.py:87`` (``HTTPError``). An import that binds any
+    other name (``from httpx import Client``, ``from requests import Session``)
+    stays a declaration, and a comma list keeps its claim if one name is a
+    client.
+    """
+    stmt = _FROM_LIB_IMPORT.match(line, match.start())
+    if stmt is None:
+        return False
+    names = {_IMPORT_ALIAS.sub("", n).strip() for n in stmt.group(1).split(",")}
+    names.discard("")
+    return bool(names) and names <= _HTTP_NON_CLIENT_SYMBOL
+
+
+def _live_match(pattern, line: str, reject=None):
     """Return the first match of ``pattern`` that is not a quoted mention.
 
     The declaration branch had no mention guard, so a docstring quoting an
@@ -233,10 +281,17 @@ def _live_match(pattern, line: str):
     fired AS-003 MEDIUM on a line that cannot make a request. The object-call
     branch has skipped mentions since it was added; this makes the library
     branch agree. A line whose only matches are mentions makes no claim.
+
+    ``reject`` lets a caller drop specific matches (a declaration that imports
+    only value objects and exceptions); the search then continues, so a file
+    that also imports a real client still reports that line.
     """
     for m in pattern.finditer(line):
-        if not _is_mention(line, m.start()):
-            return m
+        if _is_mention(line, m.start()):
+            continue
+        if reject is not None and reject(line, m):
+            continue
+        return m
     return None
 
 
@@ -326,7 +381,7 @@ DOWNLOAD_EXECUTE = re.compile(
 
 @register
 def detect_http_client(content: str, file_path: str, line: int) -> "Finding | None":
-    matched = _live_match(HTTP_CLIENT, content)
+    matched = _live_match(HTTP_CLIENT, content, reject=_imports_no_client)
     if matched is None:
         matched = _live_match(HTTP_OBJECT_CALL, content)
     if matched is not None:

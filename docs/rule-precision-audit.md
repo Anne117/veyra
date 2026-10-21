@@ -1341,3 +1341,47 @@ reports once. `agent/anthropic_adapter.py` (`from httpx import Timeout`) and
 `agent/auxiliary_client.py` (`from httpx._client import ClientState`) keep their single
 claim and stay as residual precision items — they import a *type/exception*, not a
 client, which is a different question from duplicate counting.
+
+## Finding: an import of a timeout or an exception is not a client
+
+**Measured.** `_HTTP_DECLARATION` matches the library name in `from <lib> import
+...`, so the *imported names* never mattered. Three files on the 2026-10-21 slice
+(agent/tools/skills/hermes_cli) had one network symbol and it was a value object or
+an exception: `agent/anthropic_adapter.py:307` (`from httpx import Timeout`, used to
+build a `Timeout(timeout=..., connect=...)` value), `agent/auxiliary_client.py:5399`
+(`from httpx._client import ClientState`, assigned as an enum to mark a closed
+client), `tools/mcp_oauth_provider.py:87` (`from httpx import HTTPError`, caught in
+`except`). A timeout holds two numbers, `Limits` holds pool sizes, `ClientState` is
+an enum, `HTTPError` is raised — none of them sends a byte, and none of the three
+files calls a matched client symbol anywhere (the request path in the first two goes
+through the `anthropic`/`openai` SDK, which AS-003 does not name).
+
+**Rule (scanner filter):** a `from <lib> import <names>` declaration is rejected when
+*every* imported name is in a closed list of value objects, exceptions, enums and
+records (`Timeout, Limits, URL, Proxy, Headers, Cookies, Auth, BasicAuth,
+DigestAuth, NetRCAuth, ClientTimeout, QueryParams, HTTPError, HTTPStatusError,
+RequestError, TransportError, TimeoutException, ConnectError, ConnectTimeout,
+ReadTimeout, WriteTimeout, PoolTimeout, CloseError, ClientState, Request, Response,
+Transport, BaseTransport, MockTransport`). A dotted submodule counts as the same
+library (`httpx._client`). A comma list keeps its claim when one name is a client
+(`from httpx import Timeout, Client`), and `import httpx` / `from requests import
+Session` / `from requests import get` are untouched: the check is on the imported
+names, not on the library.
+
+| measurement | before | after |
+|---|---|---|
+| AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 217 | 214 |
+| — files carrying a claim | 138 | 135 |
+| findings from every other rule, same slice (AS-002/004/005/006/CHAIN-002) | 54 | 54 |
+| corpus (113 cases) | 103 D / 7 P / 3 M / 0 FP | unchanged, 0 drift |
+| suite | 1771 | 1775 |
+| self-scan (`src`, suppressed) | 55 | 55 |
+
+**What the delta costs, honestly:** the three removed lines were the *only* AS-003
+claim of their files, so those files now report nothing (138 → 135). That is the
+intended trade — the claim was false (a type import states no request capability),
+and the trade is the one N6/N9 made on the same slice, except that there a request
+line or an import line kept the claim. Residual: `from aiohttp import web`
+(`hermes_cli/proxy/server.py:17`) is a *server* framework binding, not a client
+either, but the file's request line is `aiohttp.ClientSession(...)` at :71, which
+already supersedes both declarations, so the count there is unchanged.
