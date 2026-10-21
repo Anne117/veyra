@@ -1308,3 +1308,36 @@ pre-existing — `agent/chat_completion_helpers.py` (3 declarations) and
 delta: 27 declaration claims in 22 import-only files. Queued as the next item;
 removing the request-less lines is the point of this change, and no file stopped
 reporting.
+
+## Finding: two declarations of the same client are one claim
+
+**Measured.** On the 2026-10-21 slice (agent/tools/skills/hermes_cli) the collapse
+dropped a declaration only against a *call in the same file*, never against another
+declaration. 27 declaration claims sat in 22 files that never call a client, five of
+them repeats: `agent/process_bootstrap.py` reports three times (`import urllib.request`
+at :18, `import httpx` at :310 and :406), `agent/chat_completion_helpers.py` three
+(`import httpx as _httpx` at :791, :2750, :3093), `tools/mcp_oauth_provider.py` two
+(`from httpx import HTTPError` at :87 and :101 — two separate statements, each one
+claim). A file that states its availability once reported it up to three times.
+
+**Rule (scanner filter):** for a file with no call claim, the first declaration by
+line number survives and later declarations are dropped. Files with a call claim are
+untouched (every declaration there is already superseded by the call). The filter
+stays file-scoped and rule-scoped: AS-003 MEDIUM only, `expected` untouched.
+
+| measurement | before | after |
+|---|---|---|
+| AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 222 | 217 |
+| — call claims | 189 | 189 |
+| — declaration claims | 27 | 22 |
+| — files carrying a declaration claim | 22 | 22 (no file lost its claim) |
+| findings from every other rule, same slice | 54 | 54 |
+| corpus (113 cases) | 102 D / 7 P / 4 M / 0 FP | unchanged, 0 drift |
+| suite | 1762 | 1764 |
+| self-scan (`src`, suppressed) | 55 | 55 |
+
+**No recall lost:** the survivor is the top-most import, so each of the 22 files still
+reports once. `agent/anthropic_adapter.py` (`from httpx import Timeout`) and
+`agent/auxiliary_client.py` (`from httpx._client import ClientState`) keep their single
+claim and stay as residual precision items — they import a *type/exception*, not a
+client, which is a different question from duplicate counting.

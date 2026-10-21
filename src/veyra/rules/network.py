@@ -247,12 +247,17 @@ def collapse_http_claims(findings):
     on a URL states that it is used. Both fire AS-003 MEDIUM, so a file that does both
     reported one fact twice -- once on a line that cannot make a request. The
     call names the request line, so it is the claim that survives; the import is
-    dropped only for a file that has a call claim, and an import-only file keeps
-    its finding because nothing supersedes it.
+    dropped for a file that has a call claim. A file with no call claims one
+    fact once: the first declaration by line number survives, later ones are
+    the same availability statement repeated.
 
     Field probe 2026-10-20 on the agent tree: 218 files import AND call, which
-    was 357 of 2001 AS-003 MEDIUM -- every one a per-file duplicate. Files that
-    only import (87) are untouched.
+    was 357 of 2001 AS-003 MEDIUM -- every one a per-file duplicate.
+
+    Field probe 2026-10-21 on the slice (agent/tools/skills/hermes_cli): 27
+    declaration claims in 22 import-only files, five of them repeats
+    (`process_bootstrap.py` 3, `chat_completion_helpers.py` 3,
+    `mcp_oauth_provider.py` 2), so one file reported one fact up to three times.
 
     A call-pattern match inside an import statement is the declaration itself:
     the branches are peers, so importing the urllib request module also matches
@@ -286,10 +291,30 @@ def collapse_http_claims(findings):
         return bool(HTTP_DECLARATION.search(text)) and not _calls(f)
 
     calling = {f.file for f in findings if _is_http_medium(f) and _calls(f)}
-    if not calling:
-        return findings
+    # One declaration per file. A file that imports a client in three places
+    # and never calls it states its availability once; the other two lines are
+    # the same fact, not two more facts (``agent/process_bootstrap.py`` imports
+    # ``urllib.request`` once and ``httpx`` twice). The surviving line is the
+    # first by number so the report points at the top-most import. Only
+    # declaration-only files are touched: a call claim always wins.
+    first_declaration = {}
+    for f in findings:
+        if not (_is_http_medium(f) and _declares_only(f)):
+            continue
+        if f.file in calling:
+            continue
+        line = f.line or 0
+        if f.file not in first_declaration or line < first_declaration[f.file]:
+            first_declaration[f.file] = line
+
+    def _duplicate_declaration(f):
+        if not (_is_http_medium(f) and f.file not in calling and _declares_only(f)):
+            return False
+        return (f.line or 0) != first_declaration[f.file]
+
     return [f for f in findings
-            if not (_is_http_medium(f) and f.file in calling and _declares_only(f))]
+            if not (_is_http_medium(f) and f.file in calling and _declares_only(f))
+            and not _duplicate_declaration(f)]
 
 
 # --- Download-and-execute --------------------------------------------------
