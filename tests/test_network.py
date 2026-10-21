@@ -34,6 +34,40 @@ def test_urllib_parse_is_not_network():
     assert detect_http_client("urllib.request.urlopen(url)", "x.py", 4) is not None
 
 
+def test_urllib_request_record_is_not_a_request():
+    """``urllib.request.Request`` is the record ``urlopen`` sends.
+
+    Building one holds a URL, method, headers and body; it opens nothing. The
+    line that names a request is the ``urlopen``/``urlretrieve`` one, and
+    ``import urllib.request`` keeps the file-level claim.
+    """
+    assert detect_http_client("req = urllib.request.Request(url, headers={})", "x.py", 1) is None
+    assert detect_http_client("req = urllib.request.Request(", "x.py", 2) is None
+    assert detect_http_client(
+        "def send(req: urllib.request.Request, *, timeout: float) -> None:", "x.py", 3
+    ) is None
+    # The request line still reports, including when it names the record too.
+    assert detect_http_client("with urllib.request.urlopen(req, timeout=5) as r:", "x.py", 4) is not None
+    assert detect_http_client(
+        "urllib.request.urlopen(urllib.request.Request(url))", "x.py", 5
+    ) is not None
+    assert detect_http_client("urllib.request.urlretrieve(url, dest)", "x.py", 6) is not None
+    assert detect_http_client("import urllib.request", "x.py", 7) is not None
+    assert detect_http_client("from urllib.request import urlretrieve", "x.py", 8) is not None
+
+
+def test_urllib_request_record_does_not_supersede_the_import():
+    """A record construction is not a call, so the import claim survives it."""
+    import_f = Finding(rule_id="AS-003", severity=Severity.MEDIUM, title="t", description="d",
+                       file="src/a.py", line=1, evidence="HTTP client call",
+                       remediation="r", matched_text="import urllib.request")
+    record = Finding(rule_id="AS-003", severity=Severity.MEDIUM, title="t", description="d",
+                     file="src/a.py", line=2, evidence="HTTP client call",
+                     remediation="r", matched_text="req = urllib.request.Request(url)")
+    kept = collapse_http_claims([import_f, record])
+    assert [f.line for f in kept] == [1, 2]
+
+
 def test_http_client_code_forms():
     for line in (
         "response = requests.get(url)",

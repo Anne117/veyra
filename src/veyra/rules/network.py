@@ -86,8 +86,17 @@ _HTTP_CALL_TAIL = (
     r"|\bwindow\.fetch\("
     r"|\bnode-fetch\("
     r"|\bgot\.[A-Za-z_]+\s*\("
-    # urllib: ``urllib.parse`` / ``urllib.error`` make no requests.
-    r"|\burllib\.request\b|\burlopen\b"
+    # urllib: ``urllib.parse`` / ``urllib.error`` make no requests. Neither
+    # does ``urllib.request.Request``: it is the request *record* -- URL,
+    # method, headers, body -- that ``urlopen`` sends, and building one opens
+    # nothing. The request line is the ``urlopen``/``urlretrieve`` one (or the
+    # opener built to send it), and ``import urllib.request`` keeps carrying
+    # the file-level claim. Field probe 2026-10-21 on the slice
+    # (agent/tools/skills/hermes_cli): 52 of 318 AS-003 MEDIUM were such
+    # records (49 constructions + 3 annotations) in 38 files, and no file had
+    # one as its only claim -- each reports the ``urlopen`` line that sends
+    # it. A line naming both keeps its finding at the ``urlopen`` match.
+    r"|\burllib\.request\b(?!\.Request\b)|\burlopen\b"
 )
 HTTP_CLIENT = re.compile(_HTTP_CALL_HEAD + _HTTP_DECLARATION + _HTTP_CALL_TAIL)
 # The same branches, partitioned: a line that only *declares* a client states
