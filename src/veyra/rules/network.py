@@ -108,7 +108,23 @@ _HTTP_CALL_TAIL = (
     # (agent/tools/skills/hermes_cli): ``hermes_cli/update_cmd_zip.py:278,283``.
     # The ``(`` keeps a name reference (``opener=urlretrieve``) out, exactly as
     # the record branch keeps ``urllib.request.Request`` out.
-    r"|\burllib\.request\b(?!\.Request\b)|\burlopen\b|\burlretrieve\s*\("
+    #
+    # The ``urllib.request`` module is not a request either. Three of its
+    # helpers read local state with no socket in sight: ``proxy_bypass_environment``
+    # (and its ``proxy_bypass`` spelling) checks NO_PROXY against a hostname,
+    # ``url2pathname`` and ``pathname2url`` convert between a ``file:`` URL string
+    # and a filesystem path. A line whose only network symbol is one of them makes
+    # no request, and the file-level claim stays where the import puts it -- the
+    # same trade the record branch makes. Field probe 2026-10-21 on the slice
+    # (agent/tools/skills/hermes_cli): 2 such lines, one each in
+    # ``agent/process_bootstrap.py`` (proxy bypass for a base URL) and
+    # ``hermes_cli/web_server_files.py`` (a ``file:`` URI to a path); both files
+    # import ``urllib.request`` and have no other request line, so both move
+    # their single claim to the import (they already report exactly one line).
+    # ``urlopen``/``urlretrieve`` on the same line still report: the branch is
+    # matched at those names, not at the module.
+    r"|\burllib\.request\b(?!\.(?:Request|proxy_bypass|proxy_bypass_environment|url2pathname|pathname2url)\b)"
+    r"|\burlopen\b|\burlretrieve\s*\("
 )
 HTTP_CLIENT = re.compile(_HTTP_CALL_HEAD + _HTTP_DECLARATION + _HTTP_CALL_TAIL)
 # The same branches, partitioned: a line that only *declares* a client states

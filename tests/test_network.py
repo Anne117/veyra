@@ -476,6 +476,45 @@ def test_a_urllib_import_without_a_request_line_keeps_its_claim(tmp_path):
     assert [f.line for f in _http_medium(str(tmp_path))] == [1]
 
 
+def test_urllib_local_configuration_helpers_are_not_requests():
+    """A proxy check and a ``file:`` URL conversion touch no socket.
+
+    ``proxy_bypass_environment`` / ``proxy_bypass`` compare a hostname against
+    NO_PROXY, ``url2pathname`` / ``pathname2url`` convert between a ``file:``
+    URL string and a filesystem path. The module name alone is not a request;
+    the request line is still ``urlopen`` / ``urlretrieve``.
+    """
+    assert detect_http_client(
+        "return None if host and urllib.request.proxy_bypass_environment(host) else proxy",
+        "x.py", 1,
+    ) is None
+    assert detect_http_client("raw = urllib.request.url2pathname(uri_path)", "x.py", 2) is None
+    assert detect_http_client("uri = urllib.request.pathname2url(path)", "x.py", 3) is None
+    assert detect_http_client("if urllib.request.proxy_bypass(host):", "x.py", 4) is None
+    # The module still declares availability, and the request line still reports.
+    assert detect_http_client("import urllib.request", "x.py", 5) is not None
+    assert detect_http_client("urllib.request.urlopen(url)", "x.py", 6) is not None
+    assert detect_http_client(
+        "resp = urllib.request.urlopen(urllib.request.proxy_bypass_environment(h))",
+        "x.py", 7,
+    ) is not None
+
+
+def test_a_local_configuration_helper_leaves_the_claim_on_the_import(tmp_path):
+    """``import urllib.request`` + ``url2pathname(...)`` is one fact, at the import.
+
+    The helper opens nothing, so no request line supersedes the declaration and
+    the file keeps its single claim where the import put it -- the file still
+    reports ``urllib.request`` availability, at file granularity.
+    """
+    (tmp_path / "files.py").write_text(
+        "import urllib.request\n\n\n"
+        "def to_path(uri_path):\n"
+        "    return urllib.request.url2pathname(uri_path)\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]
+
+
 def test_a_client_constructed_around_a_configuration_object_still_counts():
     """The configuration list must not hide the client on the same line."""
     for line in (

@@ -1267,3 +1267,44 @@ recall gap, not a collapse gap: the call alternatives name `urlopen` but not
 left. Also still firing: `urllib.request.proxy_bypass_environment(host)` and
 `urllib.request.url2pathname(...)`, which read local configuration and touch no
 socket.
+
+## AS-003 — a urllib helper that reads local configuration is not a request (2026-10-21)
+
+The `urllib.request` branch is the module *name*: any line that spells it claimed
+AS-003 MEDIUM. Three helpers of that module never open a socket —
+`proxy_bypass_environment` / `proxy_bypass` compare a hostname against `NO_PROXY`,
+`url2pathname` and `pathname2url` convert between a `file:` URL string and a
+filesystem path. Both field lines were exactly that:
+
+- `agent/process_bootstrap.py:300` — `return None if host and urllib.request.proxy_bypass_environment(host) else proxy`
+- `hermes_cli/web_server_files.py:38` — `raw = urllib.request.url2pathname(uri_path)`
+
+**Rule (scanner filter):** the module branch is `urllib.request` not followed by
+`.Request`, `.proxy_bypass`, `.proxy_bypass_environment`, `.url2pathname` or
+`.pathname2url`. One negative lookahead, no new token, rules untouched. The module
+itself still declares availability on its import line, and `urlopen` /
+`urlretrieve` on the same line still report — the branch is matched at those names.
+
+| measurement | before | after |
+|---|---|---|
+| AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 220 | 222 |
+| — request-less helper lines | 2 | 0 |
+| — declaration (`import`) lines | 23 | 27 |
+| total findings, same slice | 287 | 289 |
+| files carrying an AS-003 claim | 138 | 138 (no file lost its claim) |
+| every other rule, same slice | 67 | 67 |
+| corpus (113 cases) | 102 D / 7 P / 4 M / 0 FP | unchanged, 0 drift |
+| suite | 1760 | 1762 |
+| self-scan (`src`, suppressed) | 55 | 55 |
+
+**Why the count rises, measured:** the two removed lines were the *only* claim in
+their files, so each file fell back to its import line — `web_server_files.py:38 →
+:6` (net 0), and `process_bootstrap.py:300 → :18, :310, :406` (net +2): that file
+imports `urllib.request` once and `httpx` twice, and the collapse drops a
+declaration only against a *call in the same file*, never against another
+declaration. So one file reports three times for one fact. That duplication is
+pre-existing — `agent/chat_completion_helpers.py` (3 declarations) and
+`tools/mcp_oauth_provider.py` (2) already did it — and it is now the whole of the
+delta: 27 declaration claims in 22 import-only files. Queued as the next item;
+removing the request-less lines is the point of this change, and no file stopped
+reporting.
