@@ -229,3 +229,33 @@ print("### G1b utf-16le: is_binary=", _is_binary(p.read_bytes()),
       "strict decode ok=", bool(p.read_bytes().decode("utf-16-le")))
 probe("G1b utf-16le text", d)
 ```
+
+## 7. Статус T3 (реализовано): молчаливый пропуск стал записью
+
+Поля `ScanResult.files_scanned` / `files_skipped` / `rule_errors` заполняет `veyra.coverage.ScanCoverage`
+(словарь причин — константы модуля, не текст исключения). Экспорт: JSON — top-level `coverage`,
+SARIF — `runs[0].properties.coverage`; пропущенные файлы в `artifacts` не добавляются, потому что
+результата, к которому крепится локация, у них нет.
+
+Замер после правки — те же входы, что в §1 (скрипт §6, теперь печатает `coverage`):
+
+| вход | до (§1) | после |
+|---|---|---|
+| G1 бинарник (NUL) | `SAFE`/`PASS`, признаков 0 | `[{skill.md, binary}]`, `files_scanned=0` |
+| G1b валидный UTF-16LE | `SAFE`/`PASS` | `[{skill.md, binary}]` (тот же эвристик, причина названа) |
+| G2 размер > 1 МБ | `SAFE`/`PASS` | `[{big.md, too_large}]` |
+| G3 `OSError` на read | `SAFE`/`PASS` | `[{locked.md, unreadable}]` |
+| G4 cp1251 | прочитан как каша, 0 находок | без изменений: `files_scanned=1`, записи нет — `decode_error` по-прежнему недостижим (`errors="replace"`) |
+| G5 исключение line-rule | строка потеряна молча | `{rule_id: <имя функции>, line: N, error_type: line_rule_exception}` |
+| G6 исключение file-rule | файл потерян молча | `{rule_id: <имя функции>, line: null, error_type: file_rule_exception}` |
+| G7 имя вне `SCAN_EXTENSIONS` | `SAFE`/`PASS`, 0 | `[{Makefile, not_scannable}]`; то же для одиночного файла-цели |
+| G7b `Makefile` с инъекцией vs `SKILL.md` | `SAFE` vs `AS-004 HIGH` | разница сохраняется (тот же файл отброшен), но пропуск назван: `[{Makefile, not_scannable}]` |
+| G8 `SKIP_DIRS` | поддерево не посещено | **не исправлено**: файлов не видно, записи нет (нужен `dirs_pruned` или расширение словаря) |
+| G9 симлинк-директория | `os.walk` не идёт по ссылке | без записи, но и потери нет: содержимое прочитано по реальному пути (`files_scanned=1`, находка есть) |
+
+Реальное дерево (`.hermes/hermes-agent`, тот же прогон, что §3): `files_scanned=11446`,
+`files_skipped=1354` = `not_scannable 1353` + `too_large 1`, `rule_errors=0`. Цифры §3 совпали до
+единицы: 1354 файла, которые раньше исчезали, теперь названы — 89.4% покрытия впервые выражено в отчёте.
+
+Что T3 **не** делает: `risk_level`/`policy_status` по-прежнему считаются только из score (T4/T5),
+terminal и HTML блок покрытия не печатают, `SKIP_DIRS`/симлинк-поддеревья без причины (см. G8).

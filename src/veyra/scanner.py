@@ -12,6 +12,16 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from veyra.correlation import correlate_detailed
+from veyra.coverage import (
+    RULE_ERROR_FILE,
+    RULE_ERROR_LINE,
+    SKIP_BINARY,
+    SKIP_DECODE_ERROR,
+    SKIP_NOT_SCANNABLE,
+    SKIP_TOO_LARGE,
+    SKIP_UNREADABLE,
+    ScanCoverage,
+)
 from veyra.cwe import cwe_for
 from veyra.graph import PathAnalyzer, build_from_actions, build_from_findings, NodeType
 from veyra.graph.context import (
@@ -123,18 +133,23 @@ def scan_path(
     """
     rules = load_rules()
     file_rules = load_file_rules()
+    # One recorder per scan: every file the scanner refuses and every rule that
+    # raises is written down here instead of disappearing (see veyra.coverage).
+    coverage = ScanCoverage()
     findings: List[Finding] = []
     file_texts: List[str] = []  # (text, path) pairs for step-sequence analysis
     root = Path(target)
 
     if root.is_file():
-        findings.extend(_scan_file(root, rules, file_rules, file_texts))
+        findings.extend(_scan_file(root, rules, file_rules, file_texts, coverage))
     elif root.is_dir():
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             for fname in filenames:
                 fpath = Path(dirpath) / fname
-                findings.extend(_scan_file(fpath, rules, file_rules, file_texts))
+                findings.extend(
+                    _scan_file(fpath, rules, file_rules, file_texts, coverage)
+                )
     else:
         raise FileNotFoundError(f"Path not found: {target}")
 
@@ -180,6 +195,13 @@ def scan_path(
             f.matched_text = f.evidence or ""
 
     result = ScanResult(target=target, findings=findings)
+    # Coverage accounting (additive): what was read, what was refused and why.
+    # This says nothing about detection -- it only stops a partial read from
+    # looking like a complete one.
+    coverage_snapshot = coverage.snapshot()
+    result.files_scanned = coverage_snapshot["files_scanned"]
+    result.files_skipped = coverage_snapshot["files_skipped"]
+    result.rule_errors = coverage_snapshot["rule_errors"]
     attack_paths, merged = _build_attack_paths(findings, file_texts)
     result.attack_paths = attack_paths
     # Derive a deterministic mapping from finalized attack paths to a real
@@ -412,32 +434,54 @@ _AS006_CONSUMER = re.compile(
 )
 
 
-def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
+def _scan_file(
+    path: Path,
+    rules,
+    file_rules,
+    file_texts,
+    coverage: Optional[ScanCoverage] = None,
+) -> List[Finding]:
+    """Scan one file, recording every refusal in ``coverage``.
+
+    Each of the early returns below used to be a bare ``return []``: the file
+    was dropped and the report still said SAFE. They now name the surface that
+    gave up (fixed vocabulary, no exception text, no host paths in prose).
+    """
+    if coverage is None:
+        coverage = ScanCoverage()
+
     if not _should_scan(path):
+        coverage.skipped(str(path), SKIP_NOT_SCANNABLE)
         return []
 
     try:
         size = path.stat().st_size
     except OSError:
+        coverage.skipped(str(path), SKIP_UNREADABLE)
         return []
 
     if size > MAX_FILE_SIZE:
+        coverage.skipped(str(path), SKIP_TOO_LARGE)
         return []
 
     try:
         data = path.read_bytes()
     except OSError:
+        coverage.skipped(str(path), SKIP_UNREADABLE)
         return []
 
     if _is_binary(data):
+        coverage.skipped(str(path), SKIP_BINARY)
         return []
 
     try:
         text = data.decode("utf-8", errors="replace")
     except Exception:
+        coverage.skipped(str(path), SKIP_DECODE_ERROR)
         return []
 
     file_texts.append((text, str(path)))
+    coverage.counted()
 
     findings: List[Finding] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -445,7 +489,10 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
             try:
                 finding = rule(line, str(path), lineno)
             except Exception:
-                # A rule must never crash the whole scan.
+                # A rule must never crash the whole scan -- but it must not
+                # vanish either: the file was read, this rule contributed
+                # nothing, and that loss is a fact about the report.
+                coverage.rule_failed(rule, str(path), lineno, RULE_ERROR_LINE)
                 continue
             if finding is not None:
                 # Preserve the exact source line that triggered the rule.
@@ -468,6 +515,9 @@ def _scan_file(path: Path, rules, file_rules, file_texts) -> List[Finding]:
                     finding.matched_text = finding.evidence or ""
                 findings.append(finding)
         except Exception:
+            # Same contract for file rules: the whole file-level pass is lost,
+            # so the record carries line=None (there is no line to point at).
+            coverage.rule_failed(frule, str(path), None, RULE_ERROR_FILE)
             continue
 
     # A line that is entirely a comment or a string literal is prose, not an

@@ -241,6 +241,11 @@ veyra scan ./path --format json
   "score": 72,
   "risk_level": "HIGH",
   "summary": { "critical": 1, "high": 1, "medium": 0, "low": 0 },
+  "coverage": {
+    "files_scanned": 12,
+    "files_skipped": [ { "path": "assets/logo.png", "reason": "not_scannable" } ],
+    "rule_errors": []
+  },
   "findings": [ ... ],
   "attack_paths": [
     {
@@ -290,6 +295,25 @@ explicit component-context associations are supplied, the additive
 `component_path_composition` / `component_risk_evidence` fields are emitted
 (and omitted when empty). These fields are added **without** changing the
 existing `target`/`score`/`risk_level`/`summary`/`findings` schema.
+
+### Coverage
+
+`coverage` is always present, because a clean report has to state how much of
+the target it actually read:
+
+- `files_scanned` — files whose text was read and whose rules ran.
+- `files_skipped` — every path the scanner refused, with one reason token from
+  a fixed vocabulary: `binary`, `too_large`, `unreadable`, `decode_error`,
+  `not_scannable`. The reason is never an exception message and never a host
+  path glued into prose.
+- `rule_errors` — a rule that raised instead of crashing the scan
+  (`rule_id`, `path`, `line`, `error_type`); `line` is `null` when a file rule
+  failed on the file as a whole, so a whole-file loss stays visible.
+
+The same block is exposed in SARIF under `runs[0].properties.coverage`. Skipped
+files are **not** added to SARIF `artifacts`: they produced no result to attach
+a location to. A `SAFE` badge next to a non-empty `files_skipped` describes a
+partial read, not a clean target.
 
 ### Attack Paths
 

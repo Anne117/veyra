@@ -352,6 +352,17 @@ def render_sarif(result: ScanResult) -> str:
     risk_evidence = _component_risk_evidence(result)
     if risk_evidence:
         run_props["component_risk_evidence"] = risk_evidence
+    # Run-level coverage accounting (additive, valid SARIF `properties`): what
+    # the scan read, what it refused and why, and which rules raised. Always
+    # present: a consumer must be able to see that a "clean" run came from a
+    # partial read instead of having to assume it did not. No SARIF structure
+    # is added or changed -- skipped files do NOT become artifacts, because
+    # they produced no result to attach a location to.
+    run_props["coverage"] = {
+        "files_scanned": result.files_scanned,
+        "files_skipped": list(result.files_skipped),
+        "rule_errors": list(result.rule_errors),
+    }
     if run_props:
         run["properties"] = run_props
     doc: Dict[str, Any] = {

@@ -133,6 +133,17 @@ class ScanResult:
     # Reporters (e.g. SARIF) MUST treat absence as "location omitted" and
     # mark that decision explicitly; they MUST NOT infer coordinates.
     attack_path_entry_files: Dict[str, str] = field(default_factory=dict)
+    # Additive coverage accounting. What this scan actually READ, what it
+    # refused, and why. Reasons are fixed tokens from ``veyra.coverage``
+    # (``binary``, ``too_large``, ``unreadable``, ``decode_error``,
+    # ``not_scannable``), never free text and never a host path in prose.
+    # ``rule_errors`` records a rule that raised (``line`` is None when the
+    # rule failed on the file as a whole). Zero/empty means "no tree was
+    # walked or nothing was refused" -- it NEVER by itself means "everything
+    # was read": read ``files_scanned`` before believing a clean result.
+    files_scanned: int = 0
+    files_skipped: List[Dict[str, str]] = field(default_factory=list)
+    rule_errors: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def score(self) -> int:
@@ -193,6 +204,16 @@ class ScanResult:
             "risk_level": self.risk_level,
             "summary": self.summary(),
             "findings": [f.to_dict() for f in self.findings],
+        }
+        # Additive coverage accounting, always present. A report that says
+        # "SAFE" without saying how much of the target was read is the exact
+        # silence this block exists to end, so it is emitted even when empty:
+        # a manually-built ScanResult reports files_scanned=0 rather than
+        # pretending it scanned something.
+        d["coverage"] = {
+            "files_scanned": self.files_scanned,
+            "files_skipped": list(self.files_skipped),
+            "rule_errors": list(self.rule_errors),
         }
         if self.attack_paths:
             d["attack_paths"] = [p.to_dict() for p in self.attack_paths]
