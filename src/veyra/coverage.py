@@ -22,7 +22,7 @@ policy, it only makes the existing silence visible.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 # --- fixed skip vocabulary ------------------------------------------------
 
@@ -54,6 +54,39 @@ RULE_ERROR_LINE = "line_rule_exception"
 RULE_ERROR_FILE = "file_rule_exception"
 
 RULE_ERROR_TYPES = frozenset({RULE_ERROR_LINE, RULE_ERROR_FILE})
+
+
+# --- coverage status --------------------------------------------------------
+#
+# A three-state verdict over what the walk actually read. It exists so that
+# "no findings" can never be presented as "nothing was there":
+#
+#   full    -- at least one file was read, nothing was refused, no rule raised.
+#   partial -- something was read, but part of the target was not inspected.
+#   none    -- nothing was read at all: an empty tree, a target that was
+#              entirely refused, or a result that never went through a walk.
+#
+# The status is derived from the accounting above and nothing else. It never
+# infers that an unrecorded path was scanned.
+
+COVERAGE_FULL = "full"
+COVERAGE_PARTIAL = "partial"
+COVERAGE_NONE = "none"
+
+COVERAGE_STATUSES = frozenset({COVERAGE_FULL, COVERAGE_PARTIAL, COVERAGE_NONE})
+
+
+def coverage_status(
+    files_scanned: int,
+    files_skipped: Sequence[Dict[str, str]],
+    rule_errors: Sequence[Dict[str, Any]],
+) -> str:
+    """Classify how much of the target the scan actually inspected."""
+    if files_scanned <= 0:
+        return COVERAGE_NONE
+    if files_skipped or rule_errors:
+        return COVERAGE_PARTIAL
+    return COVERAGE_FULL
 
 
 def rule_identity(rule: Any) -> str:

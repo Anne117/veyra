@@ -96,6 +96,7 @@ def _summary_html(result: ScanResult) -> str:
         ("Findings", _esc(total_findings)),
         ("Attack paths", _esc(total_paths)),
         ("Score", _esc(result.score)),
+        ("Coverage", _esc(result.coverage_status)),
     ]
     if highest:
         cells.append(("Highest attack risk", _esc(highest["score"])))
@@ -584,6 +585,7 @@ _CSS = """
   --sev-medium: #d29922;
   --sev-low: #58a6ff;
   --sev-info: #8b949e;
+  --sev-unknown: #a371f7;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -641,6 +643,7 @@ h4 { font-size: 14px; margin: 18px 0 8px; color: var(--accent); }
 .badge.sev-medium  { background: rgba(210,153,34,.14); color: var(--sev-medium); border-color: var(--sev-medium); }
 .badge.sev-low     { background: rgba(88,166,255,.12); color: var(--sev-low); border-color: var(--sev-low); }
 .badge.sev-info    { background: rgba(139,148,158,.14); color: var(--sev-info); border-color: var(--sev-info); }
+.badge.sev-unknown { background: rgba(163,113,247,.14); color: var(--sev-unknown); border-color: var(--sev-unknown); }
 
 .card {
   background: var(--panel);

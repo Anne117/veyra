@@ -153,3 +153,55 @@ of the scan. Each was observed in the outputs above.
   plus a nameless action.
 - These are real nodes and real edges; the defect is that their labels carry no
   evidence. Input for T6 (provenance invariant on every path), not fixed here.
+
+## 6. Decision: what `SAFE` is allowed to mean (T4)
+
+Item 5 of section 3 said `SAFE` is a pure function of the score and therefore
+carries no coverage evidence. Two ways out were on the table: make `SAFE` require
+full coverage, or add a `coverage_status` field and an explicit `UNKNOWN`.
+**Both were taken, and neither by itself**, because each alone leaves a hole:
+
+- A new field alone is not enough: a report can still print `SAFE` in the place
+  people read (`risk_level`, `Risk:`, the HTML badge) and bury `partial` in a
+  block nobody opens. That is the same silence with better bookkeeping.
+- A stricter `SAFE` alone is not enough: `UNKNOWN` without a stated reason is a
+  shrug. The reader has to be able to see *what* was not read.
+- Renaming the bucket (`SAFE` → `NO FINDINGS`) was rejected: a score of zero over
+  a fully read tree is a real, earned statement, and we would be throwing away a
+  true signal to fix a false one.
+
+Implemented, additively:
+
+- `ScanResult.coverage_status` ∈ {`full`, `partial`, `none`}, derived from
+  `files_scanned` / `files_skipped` / `rule_errors` in `veyra.coverage`. `none`
+  means nothing was read at all — including a result built by hand with no walk
+  behind it, which no longer inherits the word `SAFE`.
+- `ScanResult.risk_level` = score bucket, except that a `SAFE` bucket is returned
+  **only** when `coverage_status == full`; otherwise `UNKNOWN`. `score` and
+  `risk_level_for_score` are untouched, so no existing number moved.
+- A non-zero score keeps its bucket on partial coverage: an unread neighbour
+  cannot un-prove a finding that was actually found. The invariant is one-way —
+  silence never upgrades a verdict, evidence is never downgraded by silence.
+- Exposed in JSON (`coverage.coverage_status`), SARIF
+  (`runs[0].properties.coverage.coverage_status`, schema untouched), the terminal
+  `Coverage:` line, and an HTML `Coverage` cell; `UNKNOWN` gets its own badge
+  (`.badge.sev-unknown`) instead of borrowing a severity colour.
+
+Measured (same inputs as `docs/COVERAGE-GAPS.md` §1):
+
+| input | before | after |
+|---|---|---|
+| `clean.md` only | `SAFE` / `PASS` | `SAFE`, `coverage=full` |
+| `clean.md` + one binary | `SAFE` / `PASS` | **`UNKNOWN`**, `coverage=partial`, 1 skipped |
+| `Makefile` only (injection inside) | `SAFE` / `PASS` | **`UNKNOWN`**, `coverage=none`, 0 read |
+| injection `skill.md` | `MEDIUM` | `MEDIUM` (bucket unchanged), `coverage=full` |
+| `ScanResult(target="x")` | `SAFE` | **`UNKNOWN`**, `coverage=none` |
+
+Corpus did not move: 113 / 103 D / 7 P / 3 M / 0 FP (`test_attack_lab`, 33 passed),
+because classification reads findings, not `risk_level`. CI self-scan
+(`veyra scan src --config .veyra.toml`): `risk_level=SAFE`, `coverage_status=full`,
+55 files read, 0 skipped — the word is earned there, and the `SAFE` next to
+`policy_status=FAIL` stays an item 6 / T5 problem, not a coverage one.
+Tests: 1809 → 1815. Behaviour elsewhere: none — findings, score, paths, policy
+untouched.
+

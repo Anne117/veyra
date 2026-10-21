@@ -359,6 +359,7 @@ def render_sarif(result: ScanResult) -> str:
     # is added or changed -- skipped files do NOT become artifacts, because
     # they produced no result to attach a location to.
     run_props["coverage"] = {
+        "coverage_status": result.coverage_status,
         "files_scanned": result.files_scanned,
         "files_skipped": list(result.files_skipped),
         "rule_errors": list(result.rule_errors),

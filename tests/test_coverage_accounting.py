@@ -96,11 +96,16 @@ def test_scanned_file_is_counted_and_never_listed_as_skipped(tmp_path):
 def test_clean_scan_states_coverage_instead_of_bare_safe(tmp_path):
     _write(tmp_path / "clean.md", "# nothing to see here\n")
     result = scan_path(str(tmp_path))
+    assert result.coverage_status == "full"
     assert result.score == 0 and result.risk_level == "SAFE"
-    # SAFE is still a score bucket at T3 -- but the read is now on the record.
     assert result.files_scanned == 1
     payload = result.to_dict()["coverage"]
-    assert payload == {"files_scanned": 1, "files_skipped": [], "rule_errors": []}
+    assert payload == {
+        "coverage_status": "full",
+        "files_scanned": 1,
+        "files_skipped": [],
+        "rule_errors": [],
+    }
 
 
 def test_manually_built_result_reports_zero_scanned_not_fake_coverage():
@@ -238,3 +243,75 @@ def test_accounting_does_not_change_findings(tmp_path):
     ]
     assert with_skips.score == clean_only.score
     assert with_skips.files_scanned == clean_only.files_scanned
+
+
+# --- T4: "SAFE" needs full coverage, a score alone does not buy it ---------
+#
+# The score bucket answers "how heavy were the proven findings". It cannot
+# answer "was anything looked at". A zero score over a partial read is
+# therefore UNKNOWN, not SAFE -- and a non-zero score keeps its bucket,
+# because unread neighbours cannot un-prove a finding that was found.
+
+def test_clean_file_next_to_a_skipped_one_is_not_safe(tmp_path):
+    _write(tmp_path / "clean.md", "# nothing to see here\n")
+    _write(tmp_path / "bin.md", b"\x00\x00")
+    result = scan_path(str(tmp_path))
+    assert result.score == 0
+    assert result.files_scanned == 1 and len(result.files_skipped) == 1
+    assert result.coverage_status == "partial"
+    assert result.risk_level == "UNKNOWN"
+
+
+def test_a_target_that_was_never_read_is_not_safe(tmp_path):
+    _write(tmp_path / "Makefile", INJECTION)  # outside the scannable set
+    result = scan_path(str(tmp_path))
+    assert result.files_scanned == 0
+    assert result.coverage_status == "none"
+    assert result.risk_level == "UNKNOWN"
+
+
+def test_a_rule_error_makes_coverage_partial(tmp_path, monkeypatch):
+    _write(tmp_path / "skill.md", INJECTION)
+
+    def boom_rule(content, file_path, line):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(scanner_module, "load_rules", lambda: [boom_rule])
+    result = scan_path(str(tmp_path))
+    assert result.files_scanned == 1 and result.rule_errors
+    assert result.coverage_status == "partial"
+    assert result.risk_level == "UNKNOWN"
+
+
+def test_a_proven_finding_keeps_its_bucket_on_partial_coverage(tmp_path):
+    _write(tmp_path / "skill.md", INJECTION)
+    _write(tmp_path / "bin.md", b"\x00\x00")
+    result = scan_path(str(tmp_path))
+    assert result.score > 0
+    assert result.coverage_status == "partial"
+    # The bucket comes from the finding, not from the missing file.
+    full = scan_path(str(tmp_path / "skill.md"))
+    assert result.risk_level == full.risk_level != "UNKNOWN"
+
+
+def test_hand_built_result_claims_no_coverage_and_no_safety():
+    from veyra.models import ScanResult
+
+    result = ScanResult(target="x")
+    assert result.coverage_status == "none"
+    assert result.risk_level == "UNKNOWN"
+
+
+def test_coverage_status_reaches_json_sarif_and_terminal(tmp_path, capsys):
+    from veyra.reporters.sarif import render_sarif
+    from veyra.reporters.terminal import render_terminal
+
+    _write(tmp_path / "clean.md", "# nothing to see here\n")
+    _write(tmp_path / "bin.md", b"\x00\x00")
+    result = scan_path(str(tmp_path))
+
+    assert result.to_dict()["coverage"]["coverage_status"] == "partial"
+    sarif = json.loads(render_sarif(result))
+    assert sarif["runs"][0]["properties"]["coverage"]["coverage_status"] == "partial"
+    assert sarif["runs"][0]["properties"]["coverage"]["files_scanned"] == 1
+    assert "Coverage: partial" in render_terminal(result)

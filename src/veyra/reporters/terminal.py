@@ -16,6 +16,13 @@ def render_terminal(result: ScanResult) -> str:
     lines.append(f"Target: {result.target}")
     lines.append(f"Risk: {result.risk_level}")
     lines.append(f"Score: {result.score}/100")
+    # A score without its denominator invites reading "0 findings" as
+    # "nothing was there". The status word is the denominator.
+    lines.append(
+        "Coverage: "
+        f"{result.coverage_status} "
+        f"({result.files_scanned} read, {len(result.files_skipped)} skipped)"
+    )
     lines.append("")
 
     for f in result.findings:

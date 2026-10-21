@@ -6,6 +6,8 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from veyra.coverage import COVERAGE_FULL, coverage_status
+
 if TYPE_CHECKING:
     from veyra.graph.path import AttackPath
     from veyra.policy import PolicyResult
@@ -40,6 +42,12 @@ SEVERITY_WEIGHTS: Dict[Severity, int] = {
 }
 
 MAX_SCORE = 100
+
+
+# Not a bucket of ``risk_level_for_score``: a score cannot produce it. The
+# bucket function answers "how much did the proven findings weigh"; UNKNOWN
+# answers "may this clean score be believed at all" -- and only coverage can.
+RISK_UNKNOWN = "UNKNOWN"
 
 
 def risk_level_for_score(score: int) -> str:
@@ -151,8 +159,32 @@ class ScanResult:
         return min(total, MAX_SCORE)
 
     @property
+    def coverage_status(self) -> str:
+        """What the scan actually read: ``full``, ``partial`` or ``none``.
+
+        Derived from ``files_scanned`` / ``files_skipped`` / ``rule_errors``
+        (see ``veyra.coverage``). A result built by hand, with no walk behind
+        it, is ``none`` -- it never guesses that its target was covered.
+        """
+        return coverage_status(
+            self.files_scanned, self.files_skipped, self.rule_errors
+        )
+
+    @property
     def risk_level(self) -> str:
-        return risk_level_for_score(self.score)
+        """Risk verdict: a score bucket, downgraded to UNKNOWN when unproven.
+
+        A non-zero score is a proven finding and keeps its bucket -- unread
+        neighbours cannot make a HIGH go away. A zero score is only ``SAFE``
+        when the coverage is ``full``; otherwise nothing was proven, and the
+        verdict says so instead of borrowing certainty from silence.
+        """
+        level = risk_level_for_score(self.score)
+        if level != "SAFE":
+            return level
+        if self.coverage_status != COVERAGE_FULL:
+            return RISK_UNKNOWN
+        return level
 
     @property
     def policy_violation_count(self) -> int:
@@ -211,6 +243,7 @@ class ScanResult:
         # a manually-built ScanResult reports files_scanned=0 rather than
         # pretending it scanned something.
         d["coverage"] = {
+            "coverage_status": self.coverage_status,
             "files_scanned": self.files_scanned,
             "files_skipped": list(self.files_skipped),
             "rule_errors": list(self.rule_errors),

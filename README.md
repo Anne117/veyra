@@ -242,6 +242,7 @@ veyra scan ./path --format json
   "risk_level": "HIGH",
   "summary": { "critical": 1, "high": 1, "medium": 0, "low": 0 },
   "coverage": {
+    "coverage_status": "partial",
     "files_scanned": 12,
     "files_skipped": [ { "path": "assets/logo.png", "reason": "not_scannable" } ],
     "rule_errors": []
@@ -301,6 +302,9 @@ existing `target`/`score`/`risk_level`/`summary`/`findings` schema.
 `coverage` is always present, because a clean report has to state how much of
 the target it actually read:
 
+- `coverage_status` — `full` / `partial` / `none`: whether everything the walk
+  met was actually inspected (`full`), part of it was (`partial`), or nothing
+  was (`none`). This is what makes a zero score readable.
 - `files_scanned` — files whose text was read and whose rules ran.
 - `files_skipped` — every path the scanner refused, with one reason token from
   a fixed vocabulary: `binary`, `too_large`, `unreadable`, `decode_error`,
@@ -312,8 +316,16 @@ the target it actually read:
 
 The same block is exposed in SARIF under `runs[0].properties.coverage`. Skipped
 files are **not** added to SARIF `artifacts`: they produced no result to attach
-a location to. A `SAFE` badge next to a non-empty `files_skipped` describes a
-partial read, not a clean target.
+a location to.
+
+`risk_level` is `SAFE` **only** when the score is zero and `coverage_status` is
+`full`. A zero score over a partial or empty read is `UNKNOWN` (`risk_level`
+in JSON, `Risk:` in the terminal report, the status badge in HTML) — the
+scanner did not find anything, which is not the same as the target being
+clean. `UNKNOWN` is not a score bucket and `score` is unchanged: it is the
+statement that no verdict was earned. A non-zero score keeps its bucket even
+on partial coverage, because a proven finding does not become less true when
+a neighbouring file was skipped.
 
 ### Attack Paths
 
@@ -802,7 +814,8 @@ derived from the score:
 | 50–79  | HIGH |
 | 25–49  | MEDIUM |
 | 5–24   | LOW |
-| 0–4    | SAFE |
+| 0–4    | SAFE (only with `coverage_status: full`) |
+| 0      | UNKNOWN (coverage `partial` or `none`) |
 
 ## ⚠️ Current limitations
 
