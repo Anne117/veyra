@@ -741,3 +741,60 @@ def test_the_prose_filter_is_whole_line_only(tmp_path):
         "LIMIT = 5  # see requests.get(url) for the form\n"
     )
     assert [f.line for f in _http_medium(str(tmp_path))] == [1]
+
+
+def test_urllib_handler_machinery_is_not_a_request():
+    """A handler class or the opener registry opens no socket.
+
+    ``urllib.request`` is a module namespace. Its handler classes
+    (``HTTPRedirectHandler``, ``BaseHandler``, ``HTTPSHandler``), its opener
+    registry read through ``getattr`` and ``build_opener`` are the machinery
+    *around* a request: a handler is consulted during a send, it does not
+    perform one, and an opener object is built to be used by a caller. The
+    request line is ``urlopen`` / ``urlretrieve``, which name it themselves.
+    """
+    assert detect_http_client(
+        "class SafeCredentialRedirectHandler(urllib.request.HTTPRedirectHandler):", "x.py", 1
+    ) is None
+    assert detect_http_client(
+        "class _CrossOriginRequestSanitizer(urllib.request.BaseHandler):", "x.py", 2
+    ) is None
+    assert detect_http_client(
+        'installed = getattr(urllib.request, "_opener", None)', "x.py", 3
+    ) is None
+    assert detect_http_client(
+        "opener = urllib.request.build_opener(*handlers)", "x.py", 4
+    ) is None
+    assert detect_http_client(
+        "if not isinstance(handler, urllib.request.HTTPRedirectHandler):", "x.py", 5
+    ) is None
+    # The entry points still report, with and without the module prefix.
+    assert detect_http_client(
+        "with urllib.request.urlopen(req, timeout=5) as resp:", "x.py", 6
+    ) is not None
+    assert detect_http_client("urllib.request.urlretrieve(url, dest)", "x.py", 7) is not None
+    assert detect_http_client("resp = urlopen(url)", "x.py", 8) is not None
+
+
+def test_a_urllib_handler_module_keeps_one_claim_at_the_import(tmp_path):
+    """A security wrapper around urllib reports availability once, at its import.
+
+    ``hermes_cli/urllib_security.py`` builds handlers and openers and is the
+    only such file on the slice: its seven claims were class bases, a
+    ``getattr`` on the module and two ``build_opener`` calls -- no request line
+    among them. The file still needs its file-level claim, so it moves to the
+    declaration, exactly as for the record branch.
+    """
+    (tmp_path / "security.py").write_text(
+        "import urllib.request\n"
+        "\n"
+        "\n"
+        "class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):\n"
+        "    def redirect_request(self, req, *rest):\n"
+        "        return super().redirect_request(req, *rest)\n"
+        "\n"
+        "\n"
+        "def build(ctx):\n"
+        "    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]

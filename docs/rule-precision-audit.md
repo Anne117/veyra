@@ -1322,6 +1322,10 @@ filesystem path. Both field lines were exactly that:
 itself still declares availability on its import line, and `urlopen` /
 `urlretrieve` on the same line still report — the branch is matched at those names.
 
+> **Superseded 2026-10-21 (N5):** the module alternative no longer exists. It was
+> the first four names of a larger class — the module's *machinery* — and narrowing
+> it name by name left the rest firing; see the section at the end of this file.
+
 | measurement | before | after |
 |---|---|---|
 | AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 220 | 222 |
@@ -1513,3 +1517,55 @@ claim points at the block, not at the sending line. Closing that is a recall
 change (prove the receiver from the `with ... as` binding for verbs other than
 `get`), measured separately; folding it into this precision change would have
 mixed two directions in one commit.
+
+## Finding: the `urllib.request` module is a namespace, not a request (AS-003)
+
+`urllib.request` is a module. Nothing on a line that only *spells* it can send a
+byte: a handler class in a base list (`class H(urllib.request.BaseHandler)`), a
+handler class as the second argument of `isinstance`, the opener registry read
+through `getattr(urllib.request, "_opener", None)`, a handler constructed for an
+opener (`urllib.request.HTTPSHandler(context=ctx)`), and `build_opener`, which
+builds an opener object *to be used later*. A handler is consulted during a send;
+it does not perform one. The module branch matched the bare token, so each of
+those became its own AS-003 MEDIUM claim.
+
+The earlier narrowing (`.Request`, `.proxy_bypass*`, `.url2pathname`,
+`.pathname2url`) treated four names of this class and left the rest, which is how
+a security wrapper ends up reporting its handler registry seven times and its real
+send line zero times.
+
+**Rule (branch removed):** the `urllib.request` alternative is gone from the call
+tail. Every name that can send is already spelled by another alternative:
+`urlopen` by its bare name (`urllib.request.urlopen(url)`, `urlopen(url)`, and the
+`opener=urllib.request.urlopen` reference all match it), `urlretrieve` by its bare
+call form, and the import by the declaration branch. Nothing is narrowed for the
+entry points; only the namespace reference stops being a claim.
+
+| measurement | before | after |
+|---|---|---|
+| AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 168 | 162 (−6) |
+| — module-only lines (handlers, registry, `build_opener`) | 7 | 0 |
+| — files carrying an AS-003 claim | 127 | 127 (none lost its only claim) |
+| findings from every other rule, same slice | 52 | 52 |
+| total findings, same slice | 220 | 214 |
+| corpus (113 cases) | 103 D / 7 P / 3 M / 0 FP | unchanged, 0 drift |
+| suite | 1786 | 1788 (+2) |
+| self-scan (`src`, `.veyra.toml`) | 38 suppressed, 0 critical/high | unchanged |
+| self-scan (`src`, no config) | 38 | 38 |
+| wall clock, 4 directories | 98.7 s | 96.7 s (run-to-run noise) |
+
+**What the delta costs, honestly:** all seven lines are in one file,
+`hermes_cli/urllib_security.py`, so this is a narrow gain, not a corpus-wide one.
+That file is the wrapper that installs a credential-safe redirect handler over
+`urlopen`; its real send line is `opener.open(request, timeout=timeout)`, which
+the scanner does not see at all — proving an opener *object* is a recall change,
+recorded as residual, not folded in here. After the change the file reports once,
+on `import urllib.request:11`, so it keeps its file-level claim.
+
+**Negative control (tests):**
+`test_urllib_handler_machinery_is_not_a_request` — handler base, `isinstance`,
+`getattr` on the module, `build_opener`, `HTTPSHandler(...)` → no finding;
+`urllib.request.urlopen(...)`, `urllib.request.urlretrieve(...)`, bare
+`urlopen(...)` → still findings.
+`test_a_urllib_handler_module_keeps_one_claim_at_the_import` — a wrapper file with
+an import plus three machinery lines → exactly one claim, on the import line.

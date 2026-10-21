@@ -135,21 +135,31 @@ _HTTP_CALL_TAIL = (
     # The ``(`` keeps a name reference (``opener=urlretrieve``) out, exactly as
     # the record branch keeps ``urllib.request.Request`` out.
     #
-    # The ``urllib.request`` module is not a request either. Three of its
-    # helpers read local state with no socket in sight: ``proxy_bypass_environment``
-    # (and its ``proxy_bypass`` spelling) checks NO_PROXY against a hostname,
-    # ``url2pathname`` and ``pathname2url`` convert between a ``file:`` URL string
-    # and a filesystem path. A line whose only network symbol is one of them makes
-    # no request, and the file-level claim stays where the import puts it -- the
-    # same trade the record branch makes. Field probe 2026-10-21 on the slice
-    # (agent/tools/skills/hermes_cli): 2 such lines, one each in
-    # ``agent/process_bootstrap.py`` (proxy bypass for a base URL) and
-    # ``hermes_cli/web_server_files.py`` (a ``file:`` URI to a path); both files
-    # import ``urllib.request`` and have no other request line, so both move
-    # their single claim to the import (they already report exactly one line).
-    # ``urlopen``/``urlretrieve`` on the same line still report: the branch is
-    # matched at those names, not at the module.
-    r"|\burllib\.request\b(?!\.(?:Request|proxy_bypass|proxy_bypass_environment|url2pathname|pathname2url)\b)"
+    # The ``urllib.request`` module is a namespace, not an entry point, and the
+    # module alternative is gone. It matched the bare ``urllib.request`` token,
+    # so every reference to the module's *machinery* became an AS-003 MEDIUM
+    # claim: a handler class in a base list (``class H(urllib.request.BaseHandler)``),
+    # the opener registry (``getattr(urllib.request, "_opener", None)``), a
+    # handler constructed for an opener (``urllib.request.HTTPSHandler(...)``)
+    # and ``build_opener`` itself, which builds an opener object and sends
+    # nothing. A handler is consulted during a send; it does not perform one.
+    # Field probe 2026-10-21 on the slice (agent/tools/skills/hermes_cli): seven
+    # such lines, all in ``hermes_cli/urllib_security.py`` -- the module that
+    # wraps ``urlopen`` with a credential-safe redirect handler. Its real send
+    # line is ``opener.open(request, timeout=timeout)``, which the scanner does
+    # not see (recorded as residual: proving an opener object, a recall change).
+    # None of the seven could make a request, and the file keeps its file-level
+    # claim at ``import urllib.request``, the same trade the record branch and
+    # the local-configuration helpers make.
+    #
+    # Nothing is lost for the entry points: ``urlopen`` (``urllib.request.urlopen``,
+    # ``urlopen``, ``opener=urllib.request.urlopen``) is matched by its own bare
+    # name below, and ``urlretrieve`` by its bare call form, with or without the
+    # module prefix. The earlier exclusions (``Request``, ``proxy_bypass*``,
+    # ``url2pathname``, ``pathname2url``) were the first four names of this same
+    # class; the branch is removed rather than narrowed, because every name that
+    # can send a byte is already spelled by another alternative.
+    r"|\burlopen\b|\burlretrieve\s*\("
     r"|\burlopen\b|\burlretrieve\s*\("
 )
 HTTP_CLIENT = re.compile(_HTTP_CALL_HEAD + _HTTP_DECLARATION + _HTTP_CALL_TAIL)
