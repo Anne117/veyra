@@ -213,6 +213,17 @@ HTTP_OBJECT_CALL = re.compile(
 # ``session.get("cwd")`` and ``draftsBySession.delete(key)`` unreported: none of
 # them can be a session this file created. Being file-scoped, this cannot leak
 # across files (a sibling's ``client = httpx.Client()`` proves nothing here).
+#
+# The proof is about the *receiver*, not the verb, so it covers every HTTP verb
+# the same way: ``with httpx.Client(...) as client: ... client.post(url)`` is a
+# request on the line that sends. The library branch cannot see it (the line
+# names no library) and the object branch reaches only receivers whose *name*
+# says what they are (``session``/``http``), so a plain ``client.post(...)``
+# was invisible and the file's only claim stayed on the construction. Field
+# probe 2026-10-21 on the slice (agent/tools/skills/hermes_cli): 16 such call
+# lines in 9 files, 13 of them on a name the object branch cannot prove.
+# The verb does not widen the receiver proof: ``dict.get``/``.post`` on a name
+# this file did not bind stays unreported.
 SESSION_CTOR = r"(?:requests\.Session|httpx\.Client)"
 SESSION_ASSIGN = re.compile(
     rf"(?m)^[ \t]*(?P<name>(?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)"
@@ -223,9 +234,14 @@ SESSION_WITH_AS = re.compile(
     rf"[ \t]*as[ \t]+(?P<name>[A-Za-z_]\w*)",
     re.S,
 )
-# Any ``<receiver>.get(`` on a line. Only a *proven* receiver ever becomes a
+# The verbs a session object sends with. ``request`` is included because
+# ``client.request(method, url)`` names its verb in an argument.
+SESSION_VERBS = r"(?:get|post|put|patch|delete|head|options|request)"
+# Any ``<receiver>.<verb>(`` on a line. Only a *proven* receiver ever becomes a
 # finding, so inside a finding this says "this line issued a request".
-SESSION_GET = re.compile(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.get[ \t]*\(")
+SESSION_REQUEST = re.compile(
+    rf"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.{SESSION_VERBS}[ \t]*\("
+)
 
 # A client *construction* allocates a transport; it opens nothing. ``with
 # httpx.Client(timeout=5) as client:`` builds a session object, and the line
@@ -370,9 +386,10 @@ def collapse_http_claims(findings):
             if _in_import_statement(text, m.start()):
                 continue
             return True
-        # A proven session ``get`` (see ``SESSION_ASSIGN``) is a call as well:
-        # it names the request line, so the file's import is the duplicate.
-        return _live_match(SESSION_GET, text) is not None
+        # A request through a proven session (see ``SESSION_ASSIGN``) is a call
+        # as well: it names the request line, so the file's import is the
+        # duplicate.
+        return _live_match(SESSION_REQUEST, text) is not None
 
     def _declares_only(f):
         text = f.matched_text or ""
@@ -469,17 +486,20 @@ def detect_http_client(content: str, file_path: str, line: int) -> "Finding | No
 
 
 @register_file_rule
-def detect_session_get(text: str, file_path: str) -> List[Finding]:
-    """``X.get(...)`` where ``X`` is a session this file created.
+def detect_session_request(text: str, file_path: str) -> List[Finding]:
+    """``X.<verb>(...)`` where ``X`` is a session this file created.
 
     The line rule cannot decide this: a bare ``session.get("cwd")`` is a
     dictionary read. The file can, because the assignment is in it. The
     finding is attached to the request line rather than to the construction,
     so a chain or a graph edge points at the statement that makes the request.
+
+    A line the library or object branch already reports is skipped: both fire
+    AS-003 MEDIUM on the same statement, and one statement is one fact.
     """
     findings: List[Finding] = []
     for name in session_client_names(text):
-        pattern = re.compile(rf"\b{re.escape(name)}\.get[ \t]*\(")
+        pattern = re.compile(rf"\b{re.escape(name)}\.{SESSION_VERBS}[ \t]*\(")
         for m in pattern.finditer(text):
             line_start = text.rfind("\n", 0, m.start()) + 1
             line_end = text.find("\n", m.end())
@@ -487,6 +507,10 @@ def detect_session_get(text: str, file_path: str) -> List[Finding]:
                 line_end = len(text)
             line = text[line_start:line_end]
             if _is_mention(line, m.start() - line_start):
+                continue
+            if _live_match(HTTP_CLIENT, line) is not None:
+                continue
+            if _live_match(HTTP_OBJECT_CALL, line) is not None:
                 continue
             findings.append(
                 Finding(

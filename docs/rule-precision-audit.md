@@ -1518,6 +1518,60 @@ change (prove the receiver from the `with ... as` binding for verbs other than
 `get`), measured separately; folding it into this precision change would have
 mixed two directions in one commit.
 
+Residual closed 2026-10-21: the session rule no longer stops at `get` (next
+section), so a file that sends with `client.post(...)` on a proven receiver now
+reports the sending line instead of the block.
+
+## Finding: a proven session sends with every verb, not only `get` (AS-003)
+
+`get` is not HTTP-only — `_HTTP_CALL_ERRORS.get(code, ...)` and
+`session.get("cwd")` are dictionary reads — so `X.get(...)` was reported only
+when the *file* proved what `X` was: a name bound on the same file from
+`requests.Session()` or `httpx.Client()`, either by assignment or by
+`with ... as X:`. The proof is about the receiver, not the verb, yet the rule
+carried the verb `get` into the pattern and nothing else. The other verbs are
+HTTP-only, so a session that sends with `client.post(...)` was handled by
+`HTTP_OBJECT_CALL`, which recognises a receiver by *name* (`http`, `session`) —
+and a receiver called `client` is invisible to it. The file then reported its
+construction (`with httpx.Client(...) as client:`) and nothing on the line that
+actually sends.
+
+**Rule (recall):** the proven-receiver pattern uses the verb set
+`get|post|put|patch|delete|head|options|request`. The receiver proof is
+unchanged — the name must still be bound in the same file from a session
+constructor — so a parameter, a mapping, or a `.post` on a foreign object stays
+unreported. A line that the library or object branch already reports is skipped:
+both fire AS-003 MEDIUM on the same statement, and one statement is one fact.
+
+| measurement | before | after |
+|---|---|---|
+| AS-003 MEDIUM, field slice (agent/tools/skills/hermes_cli) | 162 | 174 (+12) |
+| — request lines gained in that remainder | — | 15 in 9 files |
+| — construction claims dropped (the file now names its request line) | — | 3 (`models_local.py:600`, `web_server_messaging.py:432`, `web_routers/oauth.py:123`) |
+| — files carrying an AS-003 claim | 127 | 127 (none gained or lost its only claim) |
+| findings from every other rule, same slice | 52 | 52 |
+| total findings, same slice | 214 | 226 |
+| corpus (113 cases) | 103 D / 7 P / 3 M / 0 FP | unchanged, 0 drift |
+| suite | 1788 | 1792 |
+| self-scan (`src`, suppressed) | 38 | 38 |
+| wall clock, 4 directories | 98.4 s | 97.6 s (run-to-run noise) |
+
+**Why the count goes up and that is still a win:** the 15 new claims are
+statements that send, and 12 of them were previously covered only by the
+construction line of the same file — a pointer at the transport allocation
+instead of the request. The number of files reporting is unchanged, so no file
+newly appears in the report; AS-003 MEDIUM is a capability claim, and a file
+that sends now names the line that sends. Four of the 16 verb lines found by the
+probe were already reported by the object branch (`self._session.request(...)`,
+`self._http.post(...)`) and are skipped, not counted twice.
+
+**What stays residual, measured:** `self._http = http_client or
+httpx.Client(...)` binds a computed expression, not a constructor call, so that
+receiver is still unproven by the file rule (`agent/gemini_native_adapter.py:668`
+is covered only by the object branch's `http` naming convention); proving
+arbitrary expression-level provenance is a dataflow change, not this one. The
+line rule stays line-scoped: `client.post(url)` alone still proves nothing.
+
 ## Finding: the `urllib.request` module is a namespace, not a request (AS-003)
 
 `urllib.request` is a module. Nothing on a line that only *spells* it can send a

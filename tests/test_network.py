@@ -356,14 +356,15 @@ def test_a_session_get_is_a_request_when_the_file_proves_the_receiver(tmp_path):
     assert [f.line for f in _http_medium(str(tmp_path))] == [6]
 
 
-def test_a_construction_only_file_keeps_one_claim(tmp_path):
-    """Without a request line the construction is the only pointer there is.
+def test_a_post_on_a_proven_session_names_the_sending_line(tmp_path):
+    """The receiver proof is about ``client``, not about the verb ``get``.
 
     ``client.post(...)`` on a receiver named ``client`` is invisible to the
-    object branch (it needs ``http``/``session`` in the name) and to the session
-    rule (``get`` only), so a file whose block sends that way must not go silent
-    just because the line it reports is a construction. Two construction sites
-    are one availability fact, first by line number.
+    library branch (the line names no library) and to the object branch (it
+    needs ``http``/``session`` in the name), so before the verb was widened the
+    only claim this file had was its construction. The construction allocates a
+    transport and opens nothing; the two ``client.post`` lines send. Both send,
+    so both are claims -- one per statement that acts.
     """
     (tmp_path / "posting.py").write_text(
         "import httpx\n"
@@ -377,6 +378,70 @@ def test_a_construction_only_file_keeps_one_claim(tmp_path):
         "def two(url):\n"
         "    with httpx.Client(timeout=10) as client:\n"
         "        return client.post(url, json={})\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [6, 11]
+
+
+def test_a_proven_session_passed_on_without_a_verb_keeps_the_construction(tmp_path):
+    """Without a request line the construction is the only pointer there is.
+
+    The block builds the client and hands it to a helper, so no line in this
+    file names a verb on the proven receiver: the capability claim stays on the
+    construction. Two construction sites are one availability fact, first by
+    line number.
+    """
+    (tmp_path / "handoff.py").write_text(
+        "import httpx\n"
+        "\n"
+        "\n"
+        "def one(url):\n"
+        "    with httpx.Client(timeout=5) as client:\n"
+        "        return send(client, url)\n"
+        "\n"
+        "\n"
+        "def two(url):\n"
+        "    with httpx.Client(timeout=10) as client:\n"
+        "        return send(client, url)\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [5]
+
+
+def test_a_post_on_a_receiver_the_file_never_bound_stays_quiet(tmp_path):
+    """Widening the verb must not widen the receiver proof.
+
+    A parameter, a mapping write and a ``.post`` on a foreign object are not
+    requests this file proves; only the import carries the capability claim.
+    """
+    (tmp_path / "unproven.py").write_text(
+        "import httpx\n"
+        "\n"
+        "\n"
+        "def go(client, url, queue, draftsBySession):\n"
+        "    queue.put(\"x\")\n"
+        "    draftsBySession.delete(\"draft-1\")\n"
+        "    return client.post(url, json={}), client.request(method, url)\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [1]
+
+
+def test_a_quoted_post_on_a_proven_session_is_a_mention(tmp_path):
+    """A docstring naming the shape sends nothing; the construction claim stays."""
+    (tmp_path / "noted.py").write_text(
+        "import httpx\n"
+        "client = httpx.Client()\n"
+        "# ``client.post(url, json=payload)`` is the shape we grep for\n"
+    )
+    assert [f.line for f in _http_medium(str(tmp_path))] == [2]
+
+
+def test_a_session_post_is_not_reported_twice(tmp_path):
+    """The object branch and the session rule describe one line once."""
+    (tmp_path / "once.py").write_text(
+        "import httpx\n"
+        "\n"
+        "\n"
+        "with httpx.Client(timeout=5) as session:\n"
+        "    session.post(url, json={})\n"
     )
     assert [f.line for f in _http_medium(str(tmp_path))] == [5]
 
