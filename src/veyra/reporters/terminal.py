@@ -21,7 +21,8 @@ def render_terminal(result: ScanResult) -> str:
     lines.append(
         "Coverage: "
         f"{result.coverage_status} "
-        f"({result.files_scanned} read, {len(result.files_skipped)} skipped)"
+        f"({result.files_scanned} read, {len(result.files_skipped)} skipped"
+        f", {len(result.dirs_pruned)} pruned dirs)"
     )
     # The policy verdict is printed even when it is PASS: a report that shows
     # violations only is silent about the case "not evaluated", which reads as

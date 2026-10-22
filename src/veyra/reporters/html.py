@@ -97,6 +97,10 @@ def _summary_html(result: ScanResult) -> str:
         ("Attack paths", _esc(total_paths)),
         ("Score", _esc(result.score)),
         ("Coverage", _esc(result.coverage_status)),
+        # Named next to the status, not folded into it: a pruned subtree is
+        # reported, and the status word is left to state what it actually
+        # counts (see ScanResult.dirs_pruned).
+        ("Pruned directories", _esc(len(result.dirs_pruned))),
         (
             "Policy",
             f'<span class="badge sev-{_esc(result.policy_status.lower())}">'

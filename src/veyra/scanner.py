@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple
 
 from veyra.correlation import correlate_detailed
 from veyra.coverage import (
+    PRUNE_IGNORED_DIR,
     RULE_ERROR_FILE,
     RULE_ERROR_LINE,
     SKIP_BINARY,
@@ -144,6 +145,16 @@ def scan_path(
         findings.extend(_scan_file(root, rules, file_rules, file_texts, coverage))
     elif root.is_dir():
         for dirpath, dirnames, filenames in os.walk(root):
+            # Name every subtree the walk refuses to enter. The name is a
+            # record, not a verdict: coverage_status does not read it (see
+            # veyra.coverage.PRUNE_REASONS), but the report can no longer say
+            # "full" while silently standing on top of an unopened
+            # node_modules/ or dist/.
+            for name in dirnames:
+                if name in SKIP_DIRS:
+                    coverage.pruned(
+                        str(Path(dirpath) / name), PRUNE_IGNORED_DIR
+                    )
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             for fname in filenames:
                 fpath = Path(dirpath) / fname
@@ -202,6 +213,7 @@ def scan_path(
     result.files_scanned = coverage_snapshot["files_scanned"]
     result.files_skipped = coverage_snapshot["files_skipped"]
     result.rule_errors = coverage_snapshot["rule_errors"]
+    result.dirs_pruned = coverage_snapshot["dirs_pruned"]
     attack_paths, merged = _build_attack_paths(findings, file_texts)
     result.attack_paths = attack_paths
     # Derive a deterministic mapping from finalized attack paths to a real

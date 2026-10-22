@@ -56,6 +56,23 @@ RULE_ERROR_FILE = "file_rule_exception"
 RULE_ERROR_TYPES = frozenset({RULE_ERROR_LINE, RULE_ERROR_FILE})
 
 
+# --- pruned-directory vocabulary -------------------------------------------
+#
+# A directory the walk refused to enter is a different kind of omission from a
+# file the reader refused to open: no rule was ever given a chance to run, so
+# there is no path, no line and no matched text to attach. One token covers it,
+# and it is kept out of ``SKIP_REASONS`` on purpose -- a pruned subtree does
+# NOT by itself make ``coverage_status`` partial (that step is option (b) in
+# ``docs/COVERAGE-GAPS.md`` and is a product decision, not an accounting one).
+# Recording it is what lets a report say "full" and "eleven directories were
+# not entered" in the same breath, so the contradiction is visible instead of
+# implied.
+
+PRUNE_IGNORED_DIR = "ignored_dir"
+
+PRUNE_REASONS = frozenset({PRUNE_IGNORED_DIR})
+
+
 # --- coverage status --------------------------------------------------------
 #
 # A three-state verdict over what the walk actually read. It exists so that
@@ -118,6 +135,7 @@ class ScanCoverage:
     files_scanned: int = 0
     files_skipped: List[Dict[str, str]] = field(default_factory=list)
     rule_errors: List[Dict[str, Any]] = field(default_factory=list)
+    dirs_pruned: List[Dict[str, str]] = field(default_factory=list)
 
     # -- writers ----------------------------------------------------------
 
@@ -130,6 +148,12 @@ class ScanCoverage:
         if reason not in SKIP_REASONS:
             raise ValueError(f"unknown skip reason: {reason!r}")
         self.files_skipped.append({"path": str(path), "reason": reason})
+
+    def pruned(self, path: str, reason: str) -> None:
+        """The walk refused to enter ``path``; no rule ran inside it."""
+        if reason not in PRUNE_REASONS:
+            raise ValueError(f"unknown prune reason: {reason!r}")
+        self.dirs_pruned.append({"path": str(path), "reason": reason})
 
     def rule_failed(
         self,
@@ -167,5 +191,8 @@ class ScanCoverage:
                     r["rule_id"],
                     r["error_type"],
                 ),
+            ),
+            "dirs_pruned": sorted(
+                self.dirs_pruned, key=lambda r: (r["path"], r["reason"])
             ),
         }

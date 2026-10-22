@@ -161,6 +161,14 @@ class ScanResult:
     files_scanned: int = 0
     files_skipped: List[Dict[str, str]] = field(default_factory=list)
     rule_errors: List[Dict[str, Any]] = field(default_factory=list)
+    # Directories the walk never entered, with reason token ``ignored_dir``.
+    # This is a RECORD, not a verdict: ``coverage_status`` deliberately does
+    # not read it, because turning every ``node_modules`` into ``partial``
+    # changes the product's verdict on ordinary repositories -- that trade is
+    # option (b) in ``docs/COVERAGE-GAPS.md`` and is not taken silently here.
+    # Emitted so a report can print "full" together with "these subtrees were
+    # not opened", instead of leaving the reader to assume there were none.
+    dirs_pruned: List[Dict[str, str]] = field(default_factory=list)
 
     @property
     def score(self) -> int:
@@ -271,6 +279,10 @@ class ScanResult:
             "files_scanned": self.files_scanned,
             "files_skipped": list(self.files_skipped),
             "rule_errors": list(self.rule_errors),
+            # Additive: subtrees the walk refused. ``coverage_status`` above
+            # does not count them; printing both is what makes the residual
+            # gap legible rather than invisible.
+            "dirs_pruned": list(self.dirs_pruned),
         }
         if self.attack_paths:
             d["attack_paths"] = [p.to_dict() for p in self.attack_paths]
