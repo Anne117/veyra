@@ -292,7 +292,14 @@ veyra scan ./path --format json
 `attack_paths` is present only when the Security Graph reveals a real
 object-continuity path (or an explicit `HANDOFF` chain). Each path carries a
 deterministic `path_id`, its ordered nodes/edges, attack type, and the
-risk/evidence/breakpoint fields. `policy_results` is the complete policy
+risk/evidence/breakpoint fields. A path's declared `severity`/`confidence` are
+capped at what its own walk proves (`risk_severity`/`risk_confidence`), so a
+correlation-only path cannot ship `HIGH` metadata next to a `MEDIUM` risk
+verdict; the cap never raises a value. After the paths and policy results are
+final, `scanner` asserts their provenance (`veyra.invariants`): identity
+re-derived, every node/edge present in the graph that produced the path, no
+violation resting on a path with no proven semantics. A broken invariant raises
+instead of producing a report. `policy_results` is the complete policy
 evaluation; `policy_status` is the aggregate `PASS`/`FAIL` decision. When
 explicit component-context associations are supplied, the additive
 `component_security_scopes` / `component_path_participation` /

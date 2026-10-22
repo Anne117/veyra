@@ -249,6 +249,13 @@ def scan_path(
     from veyra.graph.path import build_explanation
     for p in attack_paths:
         p.explanation_details = build_explanation(p)
+    # Assertion layer: every path must own its identity and every edge it names,
+    # and no path or policy result may claim more than the walk proves. This runs
+    # on the finalized artifacts against the very graph that produced them, so a
+    # report can never be built from a chain that has already broken its own
+    # provenance. It raises rather than repairs.
+    from veyra.invariants import assert_provenance
+    assert_provenance(attack_paths, result.policy_results, merged)
 
     # Additive explicit component-security-scope projection. Only when the
     # caller supplied explicit ComponentContextAssociation records: each is

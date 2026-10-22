@@ -148,6 +148,16 @@ def assess_risk(path: "AttackPath") -> "AttackPath":
     model. Independent of mutable metadata (severity, confidence, title, rule
     ids) and of graph insertion order, so identical canonical paths always
     yield identical risk and evidence.
+
+    One thing IS changed here, in one direction only: the declared ``severity``
+    and ``confidence`` are capped at what the path semantics prove. Those two
+    fields start as the strongest metadata carried by the contributing edges,
+    which describes an *asset* (a secret read is HIGH) and not the walk (the
+    same secret read plus an execution is a MEDIUM correlation). Left uncapped,
+    a correlation-only path serialized ``severity=HIGH`` next to
+    ``risk_severity=MEDIUM`` and the stronger of the two numbers travelled with
+    the report. The clamp never raises a value: proof is a floor for the
+    verdict, never a ceiling lifted by metadata.
     """
     is_contiguous = path.is_contiguous and bool(path.nodes)
     edge_types = [et for _, _, et in path.edges]
@@ -160,6 +170,11 @@ def assess_risk(path: "AttackPath") -> "AttackPath":
     attack_type = path.attack_type if is_contiguous else AttackType.UNKNOWN
     path.risk_severity, path.risk_confidence, path.risk_score = _risk_for(attack_type)
     path.evidence = _evidence_for(attack_type, has_transformation, has_flow)
+    # One-sided clamp: declared metadata may not outrun the proven walk.
+    if _SEV_RANK[path.severity.value] > _SEV_RANK[path.risk_severity.value]:
+        path.severity = path.risk_severity
+    if _CONF_RANK[path.confidence.value] > _CONF_RANK[path.risk_confidence.value]:
+        path.confidence = path.risk_confidence
     return path
 
 

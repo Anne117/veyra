@@ -249,3 +249,61 @@ No number moved: `score`, `risk_level`, findings, paths and `policy_results` are
 untouched; corpus stays 113 / 103 D / 7 P / 3 M / 0 FP. CI self-scan
 (`veyra scan src --config .veyra.toml`): `coverage=full`, `policy_status=FAIL`
 (self-referential chains), so the gate result is unchanged. Tests: 1815 → 1826.
+
+## 8. Decision: an assertion layer for the chain (T6)
+
+Sections 6 and 7 fixed two words at the *ends* of the chain (`SAFE`, `PASS`). This
+section fixes the middle: what an `AttackPath` and a `PolicyResult` are allowed
+to say about themselves. Five invariants are now executable
+(`src/veyra/invariants.py`, `assert_provenance`, wired into `scanner.scan_path`
+after the paths and policy results are final):
+
+1. **Identity.** Every path carries a `path_id`, and it is re-derived from the
+   path's own nodes/edges with `path_id_of`, never trusted as stored. A policy
+   result pointing at a `path_id` that resolves to no evaluated path, or the same
+   `(policy_id, path_id)` evaluated twice, is a violation.
+2. **Walk reality.** `nodes`/`edges` must form a contiguous walk, and every walk
+   node, walk edge and associated edge must exist in the graph the path came
+   from. A path listing an edge the graph does not have is a `phantom_edge`.
+3. **Proven ceiling.** A fixed table — not the risk model's own return value —
+   states the strongest severity/confidence each attack type can prove:
+   `UNKNOWN` → `INFO`/`LOW`, `CORRELATED_SECRET_EXECUTION` → `MEDIUM`/`MEDIUM`,
+   `DATA_EXFILTRATION` → `HIGH`/`HIGH`, `SECRET_EXFILTRATION` →
+   `CRITICAL`/`HIGH`. Risk severity is measured against the same ceiling, so the
+   risk model is inside the assertion surface rather than above it.
+4. **No violation without proof.** `violated=True` on a path whose attack type is
+   `UNKNOWN`, or with an empty reason, is a violation.
+5. **Evidence.** A non-`INFO` risk severity with an empty `evidence` list is a
+   violation.
+
+The one real defect the audit found: `AttackPath.severity`/`confidence` started
+as the strongest metadata carried by the contributing edges, which describes an
+*asset*, not the walk. On the project's own tree, 1 of 12 paths —
+`CORRELATED_SECRET_EXECUTION`, a secret read plus an execution, which proves
+`MEDIUM`/`MEDIUM` (`risk_score=38`) — serialized:
+
+```json
+{"attack_type": "CORRELATED_SECRET_EXECUTION",
+ "severity": "HIGH", "confidence": "HIGH",
+ "risk_severity": "MEDIUM", "risk_confidence": "MEDIUM"}
+```
+
+Two severities in one record, and the stronger one is the one a consumer reads
+first. The fix is the minimal one and lives in the producer, not the auditor:
+`assess_risk` caps the declared pair at the proven pair, in one direction only.
+It never raises a value — proof is a floor for the verdict, never a ceiling
+lifted by metadata. Measured on the same targets:
+
+| input | before | after |
+|---|---|---|
+| `src`, correlated execution path | `severity=HIGH`, `confidence=HIGH`, risk `MEDIUM` | `severity=MEDIUM`, `confidence=MEDIUM`, risk `MEDIUM` |
+| `src`, 11 other paths | `MEDIUM`/`MEDIUM` | unchanged |
+| `multi-stage/exfiltration-flow` (data exfil) | `MEDIUM`/`MEDIUM`, risk `HIGH`/`HIGH` | unchanged (clamp never lifts) |
+| `multi-stage/{data-sync,download-run,benign}` | no paths | no paths |
+
+Nothing else moved: findings, `score`, `risk_level`, `coverage_status`,
+`policy_status`, `risk_severity`, `risk_confidence`, `risk_score`, `path_id`,
+the SARIF/HTML/terminal surfaces (all of which read `risk_*`) and the corpus
+(113 / 103 D / 7 P / 3 M / 0 FP) are unchanged. CI self-scan: `coverage=full`,
+`risk_level=SAFE`, `policy_status=FAIL`, `critical 0`, `high 0`, exits 1/1 as
+before. Tests: 1826 → 1840.
