@@ -1,9 +1,15 @@
-"""Tests for the aggregate policy_status on ScanResult (Commit 20).
+"""Tests for the aggregate policy_status on ScanResult (Commit 20, T5).
 
-policy_status is a read-only derived property: "FAIL" iff any violated
-PolicyResult exists, else "PASS". It is exposed in JSON via ScanResult.to_dict()
-(through render_json). No enum, no caching, no duplicated state; policy_results
-contents are unchanged.
+policy_status is a read-only derived property with three values: "FAIL" iff any
+violated PolicyResult exists; "PASS" only when no violation is present AND the
+walk read the whole target; "UNKNOWN" otherwise. It is exposed in JSON via
+ScanResult.to_dict() (through render_json). No enum, no caching, no duplicated
+state; policy_results contents are unchanged.
+
+The hand-built results below (``_result``) never walked a target, so their
+coverage is ``none`` and they must NOT claim PASS: that is the point of T5, not
+an accident of the fixture. The ``PASS`` cases are the ones produced by a real
+scan of a fully read directory.
 """
 
 import json
@@ -31,21 +37,26 @@ def _json(r):
 
 # A. Empty -------------------------------------------------------------------
 
-def test_empty_pass():
+def test_empty_hand_built_is_unknown():
+    # No walk behind this result -> coverage "none" -> nothing was evaluated
+    # over the target, so "no violations" is not a pass.
     r = _result()
-    assert r.policy_status == "PASS"
+    assert r.coverage_status == "none"
+    assert r.policy_status == "UNKNOWN"
     d = _json(r)
-    assert d["policy_status"] == "PASS"
+    assert d["policy_status"] == "UNKNOWN"
     assert d["policy_results"] == []
 
 
 # B. Only non-violating -------------------------------------------------------
 
-def test_only_non_violating_pass():
+def test_only_non_violating_but_unwalked_is_unknown():
+    # Cleared paths without a full read of the target: the cleared paths are
+    # honoured (no FAIL invented), but the verdict cannot be PASS.
     r = _result(_mk("SECRET-EXFILTRATION-001", "p1", False),
                 _mk("DATA-EXFILTRATION-001", "p2", False))
-    assert r.policy_status == "PASS"
-    assert _json(r)["policy_status"] == "PASS"
+    assert r.policy_status == "UNKNOWN"
+    assert _json(r)["policy_status"] == "UNKNOWN"
 
 
 # C. One violated -------------------------------------------------------------
@@ -79,7 +90,7 @@ def test_multiple_violated_fail():
 
 def test_derived_not_cached():
     r = _result(_mk("SECRET-EXFILTRATION-001", "pS", False))
-    assert r.policy_status == "PASS"
+    assert r.policy_status == "UNKNOWN"  # unwalked: not cleared, not failed
     # Mutate underlying list (not cached) -> derived status changes.
     r.policy_results[0] = _mk("SECRET-EXFILTRATION-001", "pS", True)
     assert r.policy_status == "FAIL"

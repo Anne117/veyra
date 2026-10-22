@@ -229,6 +229,11 @@ def main(argv: list[str] | None = None) -> int:
         # preserved; policy failure never overrides a CRITICAL (2) but upgrades
         # a clean/low-severity (0) result to 1. The single source of truth for
         # the policy part is the finalized ScanResult policy status.
+        #
+        # "UNKNOWN" (no violation proven, target not fully read) does NOT fail
+        # the build: an unread .png next door must not turn every CI run red.
+        # It is also not a pass -- the exit code is a gate, not a verdict, and
+        # the verdict is UNKNOWN in JSON, SARIF, HTML and the terminal report.
         severity_code = _exit_code(result, args.fail_on)
         policy_code = 1 if result.policy_status == "FAIL" else 0
         return max(severity_code, policy_code)

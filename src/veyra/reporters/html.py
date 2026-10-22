@@ -97,6 +97,11 @@ def _summary_html(result: ScanResult) -> str:
         ("Attack paths", _esc(total_paths)),
         ("Score", _esc(result.score)),
         ("Coverage", _esc(result.coverage_status)),
+        (
+            "Policy",
+            f'<span class="badge sev-{_esc(result.policy_status.lower())}">'
+            f"{_esc(result.policy_status)}</span>",
+        ),
     ]
     if highest:
         cells.append(("Highest attack risk", _esc(highest["score"])))

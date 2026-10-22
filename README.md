@@ -223,6 +223,9 @@ The failure threshold is configurable with `--fail-on`. Policy violations
 (`ScanResult.policy_status == "FAIL"`) also force a non-zero exit, while
 preserving the severity behavior above. So a scan with a policy violation but
 no CRITICAL findings exits `1`; a scan with CRITICAL findings exits `2`.
+`policy_status == "UNKNOWN"` (target not fully read, no violation proven) exits
+`0` — the exit code is a build gate for proven problems, not a completeness
+claim; the report itself says `UNKNOWN` rather than `PASS`.
 
 ```bash
 veyra scan ./path --fail-on CRITICAL   # only fail on critical
@@ -407,8 +410,18 @@ Every finalized attack path is evaluated by a deterministic **policy engine**
   review (a review policy, not a proven-data-flow claim).
 
 Each produces a `PolicyResult` (`policy_id`, `path_id`, `violated`, `reason`).
-`ScanResult.policy_status` is the aggregate decision: `"FAIL"` iff any policy is
-violated, else `"PASS"`. Terminal output shows a **Policy Violations** section
+`ScanResult.policy_status` is the aggregate verdict, and it has three values:
+
+- `"FAIL"` — at least one policy is violated. Proof; unread files never take it away.
+- `"PASS"` — no violation **and** `coverage_status == "full"`. Only then does
+  "no violations" mean "nothing violated in the target".
+- `"UNKNOWN"` — no violation proven, but part (or all) of the target was never
+  read. Not a pass: the question was not answered for the whole target.
+
+The terminal report always prints the verdict (`Policy: PASS`,
+`Policy: UNKNOWN (no violation proven; coverage partial, 1 skipped)`), and JSON
+(`policy_status` next to `coverage`), SARIF (`runs[0].properties.policy`) and the
+HTML summary carry it too. Terminal output shows a **Policy Violations** section
 only when at least one policy is violated:
 
 ```

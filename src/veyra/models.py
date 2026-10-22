@@ -49,6 +49,15 @@ MAX_SCORE = 100
 # answers "may this clean score be believed at all" -- and only coverage can.
 RISK_UNKNOWN = "UNKNOWN"
 
+# Policy verdict vocabulary. ``PASS`` is a proof, not an absence: it may only be
+# returned when the whole target was read. A violation is proof on its own and
+# survives partial coverage -- an unread neighbour cannot clear a proven
+# violation. The third word exists because "no violation found in the part I
+# read" is not "no violation": it is "not proven either way".
+POLICY_PASS = "PASS"
+POLICY_FAIL = "FAIL"
+POLICY_UNKNOWN = "UNKNOWN"
+
 
 def risk_level_for_score(score: int) -> str:
     """Map a 0-100 score to a risk level (MVP heuristic)."""
@@ -212,12 +221,27 @@ class ScanResult:
 
     @property
     def policy_status(self) -> str:
-        """Aggregate policy status over the finalized policy results.
+        """Aggregate policy verdict over the finalized results: FAIL/PASS/UNKNOWN.
 
-        "FAIL" iff at least one PolicyResult has violated == True, otherwise
-        "PASS". Derived read-only from policy_results; never stored/cached.
+        ``FAIL`` -- at least one PolicyResult has violated == True. That is
+        proof, and unread files cannot take it away.
+
+        ``PASS`` -- no violation AND ``coverage_status == "full"``. Only then
+        does "no violations" mean "nothing violated in the target"; this is the
+        one case in which the word is earned.
+
+        ``UNKNOWN`` -- no violation proven, but part (or all) of the target was
+        never read. Neither "passed" nor "violated": the question was not
+        answered for the whole target. Previously this case reported ``PASS``,
+        which read as "everything was checked" and was a false assurance.
+
+        Derived read-only from policy_results and coverage; never stored/cached.
         """
-        return "FAIL" if self.has_policy_violations else "PASS"
+        if self.has_policy_violations:
+            return POLICY_FAIL
+        if self.coverage_status != COVERAGE_FULL:
+            return POLICY_UNKNOWN
+        return POLICY_PASS
 
     def summary(self) -> Dict[str, int]:
         active = [f for f in self.findings if not f.suppressed]

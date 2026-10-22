@@ -205,3 +205,47 @@ because classification reads findings, not `risk_level`. CI self-scan
 Tests: 1809 → 1815. Behaviour elsewhere: none — findings, score, paths, policy
 untouched.
 
+## 7. Decision: what `PASS` is allowed to mean (T5)
+
+Item 6 of section 3 said `policy_status` answers only "is any evaluated policy
+violated" and is read as "the target passed", even when nothing about the target
+was evaluated or part of it was never read. T4 fixed the same lie in
+`risk_level`; `PASS` was left carrying it.
+
+Two ways out were offered (make `PASS` require full coverage, or require
+`coverage_status` beside it). **Done: `PASS` requires full coverage** — proximity
+of two fields is not a guarantee, while a word that can only appear when it is
+earned is. The three states now mean:
+
+- `FAIL` — at least one `PolicyResult` with `violated == True`. Proven; partial
+  coverage cannot remove it (same one-way rule as T4: silence never upgrades a
+  verdict, evidence is never downgraded by silence).
+- `PASS` — no violation **and** `coverage_status == "full"`. A score of zero over
+  a fully read tree is an earned statement; this is the only way to get the word.
+- `UNKNOWN` — no violation proven and the target was not fully read (or was never
+  walked). The question was not answered for the whole target.
+
+Implemented, additively: `models.POLICY_PASS/FAIL/UNKNOWN`; `policy_status`
+derived from `policy_results` + `coverage_status` (no new stored state); the
+terminal prints `Policy: <verdict>` always, with `(no violation proven; coverage
+partial, N skipped)` for `UNKNOWN`; HTML gets a `Policy` cell using the existing
+`.badge.sev-unknown`; SARIF gets `runs[0].properties.policy.policy_status` next to
+`properties.coverage` (schema 2.1.0 untouched, no result added). The CLI gate is
+unchanged in meaning: `FAIL` → exit ≥1, `UNKNOWN` → exit `0`, because an unread
+`.png` next door must not redden every CI run — and the report never calls that
+`UNKNOWN` a pass.
+
+Measured (same fixtures as section 6):
+
+| input | before | after |
+|---|---|---|
+| clean `SKILL.md` only | `PASS`, `coverage=full` | `PASS`, `coverage=full` |
+| clean `SKILL.md` + binary `notes.md` | **`PASS`** | **`UNKNOWN`**, `coverage=partial`, 1 skipped |
+| exfil `SKILL.md` only | `FAIL`, `coverage=full` | `FAIL`, `coverage=full` |
+| exfil `SKILL.md` + binary `notes.md` | `FAIL`, `coverage=partial` | `FAIL`, `coverage=partial` (unchanged) |
+| `ScanResult(target="x")` | **`PASS`**, `coverage=none` | **`UNKNOWN`**, `coverage=none` |
+
+No number moved: `score`, `risk_level`, findings, paths and `policy_results` are
+untouched; corpus stays 113 / 103 D / 7 P / 3 M / 0 FP. CI self-scan
+(`veyra scan src --config .veyra.toml`): `coverage=full`, `policy_status=FAIL`
+(self-referential chains), so the gate result is unchanged. Tests: 1815 → 1826.

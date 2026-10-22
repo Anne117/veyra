@@ -364,6 +364,10 @@ def render_sarif(result: ScanResult) -> str:
         "files_skipped": list(result.files_skipped),
         "rule_errors": list(result.rule_errors),
     }
+    # Run-level policy verdict, next to the coverage it depends on. Additive
+    # `properties` only: no SARIF structure added, no result invented. A
+    # consumer must not read a run without policy results as "policies passed".
+    run_props["policy"] = {"policy_status": result.policy_status}
     if run_props:
         run["properties"] = run_props
     doc: Dict[str, Any] = {

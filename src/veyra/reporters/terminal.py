@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from veyra.models import ScanResult, Severity
+from veyra.models import POLICY_UNKNOWN, ScanResult, Severity
 
 # Simple box-drawing separator (no external deps).
 SEP = "\u2501" * 30
@@ -23,6 +23,17 @@ def render_terminal(result: ScanResult) -> str:
         f"{result.coverage_status} "
         f"({result.files_scanned} read, {len(result.files_skipped)} skipped)"
     )
+    # The policy verdict is printed even when it is PASS: a report that shows
+    # violations only is silent about the case "not evaluated", which reads as
+    # "checked and clean". UNKNOWN states its own reason instead of leaving the
+    # reader to infer it from the missing violations section.
+    policy_line = f"Policy: {result.policy_status}"
+    if result.policy_status == POLICY_UNKNOWN:
+        policy_line += (
+            f" (no violation proven; coverage {result.coverage_status}"
+            f", {len(result.files_skipped)} skipped)"
+        )
+    lines.append(policy_line)
     lines.append("")
 
     for f in result.findings:
