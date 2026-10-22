@@ -307,3 +307,41 @@ the SARIF/HTML/terminal surfaces (all of which read `risk_*`) and the corpus
 (113 / 103 D / 7 P / 3 M / 0 FP) are unchanged. CI self-scan: `coverage=full`,
 `risk_level=SAFE`, `policy_status=FAIL`, `critical 0`, `high 0`, exits 1/1 as
 before. Tests: 1826 → 1840.
+
+## 9. One end-to-end regression, and it can fail (T7)
+
+`tests/test_end_to_end_trace.py` walks the whole chain on real output — no
+hand-built `ScanResult`, no hand-built graph — and re-checks the claims of §1–§8
+at the point a reader meets them:
+
+1. **Chain fixture** (`multi-stage/exfiltration-flow`): every finding names a
+   file that exists and a line inside it; a line rule's `matched_text` must be
+   literally on that line, while an `AS-CHAIN-*` finding's `matched_text` must
+   equal its `evidence` and must *not* be found in the file (a label is never
+   passed off as a quotation). Every path's edges must join its own nodes in
+   order, its `entry_node` must be `nodes[0]`, a `SKILL:` node must resolve to a
+   real file, declared `severity`/`confidence` may not outrun `risk_*`, risk
+   without `evidence` is a failure, and `policy_ids` must equal exactly the
+   violated results for that `path_id`.
+2. **The same chain beside a refused file**: findings, score, attack types and
+   `policy_status=FAIL` are unchanged — an unread neighbour can neither erase
+   proof nor upgrade it.
+3. **A clean target**: `SAFE`/`PASS` while the whole target was read; adding one
+   binary file leaves findings and score at zero but turns the verdict into
+   `UNKNOWN`/`UNKNOWN`, records `{path, reason: "binary"}`, and no surface
+   prints `SAFE`/`PASS` any more. JSON/SARIF coverage blocks are compared to each
+   other; SARIF results stay empty and the skipped file is not an artifact.
+
+Cross-surface: SARIF path results are one-per-path in JSON order, their `level`
+is derived from `risk_severity` and never stronger, a located result points at
+the file its `SKILL:` entry node names, and the chain finding is marked
+`superseded_by_path` so the incident is counted once. HTML renders exactly one
+card per path, prints the earned severity badge and no invented node; when
+coverage is not `full` it contains neither `sev-safe` nor `PASS`.
+
+The test is checked to be able to fail: four tampered documents (weaker JSON
+severity than SARIF, a fabricated quote on a real line, an edge that does not
+join its nodes, `PASS` on partial coverage) each raise. One behaviour worth
+knowing while writing it: a `payload.bin` never reaches the binary check — a
+name outside `SCAN_EXTENSIONS` is refused earlier as `not_scannable`, so the
+binary path is exercised with a scannable name carrying NUL bytes.
