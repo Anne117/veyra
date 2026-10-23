@@ -15,6 +15,7 @@ unreadable neighbour must not move a finding that the readable file produces.
 
 from __future__ import annotations
 
+import codecs
 import json
 import os
 
@@ -47,6 +48,43 @@ def test_binary_file_is_reported_as_skipped(tmp_path):
     result = scan_path(str(tmp_path))
     assert _reasons(result) == [(str(target), "binary")]
     assert result.files_scanned == 0
+
+
+def test_utf16_text_with_a_bom_is_read_not_called_binary(tmp_path):
+    # G1: every ASCII character in UTF-16 carries a NUL, so the NUL heuristic
+    # calls the document binary. The BOM is the file declaring what it is.
+    _write(tmp_path / "skill.md", codecs.BOM_UTF16_LE + INJECTION.encode("utf-16-le"))
+    result = scan_path(str(tmp_path))
+    assert _reasons(result) == []
+    assert result.files_scanned == 1
+    assert [f.rule_id for f in result.findings] == ["AS-004"]
+    assert result.findings[0].line == 1
+
+
+def test_a_utf32_bom_is_not_mistaken_for_utf16(tmp_path):
+    # The UTF-32LE mark opens with the UTF-16LE mark; testing the short one
+    # first would decode the body into mojibake and lose the finding.
+    _write(tmp_path / "skill.md", codecs.BOM_UTF32_LE + INJECTION.encode("utf-32-le"))
+    result = scan_path(str(tmp_path))
+    assert result.files_scanned == 1
+    assert [f.rule_id for f in result.findings] == ["AS-004"]
+
+
+def test_a_bom_in_front_of_garbage_stays_binary(tmp_path):
+    target = _write(tmp_path / "skill.md", codecs.BOM_UTF16_LE + b"\x00\xd8\x41")
+    result = scan_path(str(tmp_path))
+    assert _reasons(result) == [(str(target), "binary")]
+    assert result.files_scanned == 0
+    assert result.risk_level != "SAFE"
+
+
+def test_bom_less_utf16_is_still_not_guessed(tmp_path):
+    # No declaration, no guess: the file is named binary and the verdict is
+    # UNKNOWN, so the refusal stays visible instead of becoming SAFE.
+    target = _write(tmp_path / "skill.md", INJECTION.encode("utf-16-le"))
+    result = scan_path(str(tmp_path))
+    assert _reasons(result) == [(str(target), "binary")]
+    assert result.risk_level != "SAFE"
 
 
 def test_oversized_file_is_reported_as_skipped(tmp_path):

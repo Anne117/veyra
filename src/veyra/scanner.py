@@ -6,6 +6,7 @@ requests.
 
 from __future__ import annotations
 
+import codecs
 import os
 import re
 from pathlib import Path
@@ -102,6 +103,34 @@ MAX_FILE_SIZE = 1_000_000  # 1 MB
 def _is_binary(data: bytes) -> bool:
     """Heuristic: a file is binary if it contains a NUL byte in the first chunk."""
     return b"\x00" in data[:8192]
+
+
+# Byte-order marks that declare a file as text even though its ASCII characters
+# are padded with NUL bytes. Longest first: the UTF-32LE mark opens with the
+# UTF-16LE mark, so a shorter mark must never be tested first.
+_TEXT_BOMS = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+
+
+def _decode_declared_text(data: bytes) -> Optional[str]:
+    """Decode a BOM-declared UTF-16/32 file; ``None`` if it is not one.
+
+    The NUL heuristic calls every UTF-16 document binary, because each ASCII
+    character carries a NUL byte. A BOM is the file saying what it is, so the
+    declaration wins -- but only when the body decodes strictly: a BOM in front
+    of garbage stays binary. BOM-less UTF-16 is still not guessed at.
+    """
+    for bom, encoding in _TEXT_BOMS:
+        if data.startswith(bom):
+            try:
+                return data.decode(encoding)
+            except UnicodeDecodeError:
+                return None
+    return None
 
 
 def _should_scan(path: Path) -> bool:
@@ -501,14 +530,17 @@ def _scan_file(
         return []
 
     if _is_binary(data):
-        coverage.skipped(str(path), SKIP_BINARY)
-        return []
-
-    try:
-        text = data.decode("utf-8", errors="replace")
-    except Exception:
-        coverage.skipped(str(path), SKIP_DECODE_ERROR)
-        return []
+        # A BOM is a declaration of text; the NUL heuristic is only a guess.
+        text = _decode_declared_text(data)
+        if text is None:
+            coverage.skipped(str(path), SKIP_BINARY)
+            return []
+    else:
+        try:
+            text = data.decode("utf-8", errors="replace")
+        except Exception:
+            coverage.skipped(str(path), SKIP_DECODE_ERROR)
+            return []
 
     file_texts.append((text, str(path)))
     coverage.counted()
