@@ -35,6 +35,7 @@ from __future__ import annotations
 import io
 import re
 import tokenize
+from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -120,12 +121,20 @@ _EXECUTION_SINK = re.compile(
 )
 
 
-def _code_only_lines(text: str) -> Optional[List[str]]:
-    """Blank comments and string literals in Python source, line by line.
+# The scanner asks for one file's code lines twice: once for the AS-003/AS-006
+# line filters (``scanner._scan_file``) and once to classify steps
+# (``analyze_file_chains``). Tokenising was 3.3 s of the 25.5 s scan on the
+# ``agent/`` tree (docs/PERFORMANCE.md), and both callers pass the *same* ``str``
+# object (field probe on ``src``: 112 calls, 56 distinct ids), so the second
+# question is answered from the first answer instead of re-parsing the file.
+# The bound is a file count, and ``scanner.scan_path`` clears the memo at the
+# start of every scan, so no file text outlives the scan that read it.
+_CODE_LINE_CACHE_FILES = 1024
 
-    Returns None when the text does not tokenize; the caller then keeps the raw
-    text, i.e. the previous behaviour.
-    """
+
+@lru_cache(maxsize=_CODE_LINE_CACHE_FILES)
+def _scrubbed_python_lines(text: str) -> Optional[Tuple[str, ...]]:
+    """Tokenise one text into comment/string-blanked lines (memoised)."""
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
@@ -143,7 +152,24 @@ def _code_only_lines(text: str) -> Optional[List[str]]:
             end = ec if row == er else len(buf)
             if start < end:
                 buf[start:end] = " " * (end - start)
-    return ["".join(row) for row in rows]
+    return tuple("".join(row) for row in rows)
+
+
+def _code_only_lines(text: str) -> Optional[List[str]]:
+    """Blank comments and string literals in Python source, line by line.
+
+    Returns None when the text does not tokenize; the caller then keeps the raw
+    text, i.e. the previous behaviour. The tokenised answer is memoised per
+    text (see ``_scrubbed_python_lines``); a fresh list is handed out each call
+    so no caller can edit the answer the next caller reads.
+    """
+    scrubbed = _scrubbed_python_lines(text)
+    return None if scrubbed is None else list(scrubbed)
+
+
+def clear_code_line_cache() -> None:
+    """Forget the memoised tokenisation; ``scanner.scan_path`` calls this."""
+    _scrubbed_python_lines.cache_clear()
 
 
 # Deterministic action separators. Deliberately narrow — no general NLP.

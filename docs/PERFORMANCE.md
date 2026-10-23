@@ -118,3 +118,47 @@ for i in 1 2 3; do /usr/bin/time -f "%e" .venv/bin/veyra scan \
 cProfile.run('scan_path(\"/home/ubuntu/.hermes/hermes-agent/agent\")', '/tmp/p.out'); \
 pstats.Stats('/tmp/p.out').sort_stats('tottime').print_stats(20)"
 ```
+
+## T10: one tokenisation per Python file, not one per phase
+
+**Change (one topic).** `step_sequence._code_only_lines` was called twice for
+every `.py` file on the same `str` object: `scanner._scan_file` needs it for the
+AS-003/AS-006 line filters, `step_sequence.analyze_file_chains` needs it to
+classify steps. The tokenise-and-blank step is now memoised
+(`_scrubbed_python_lines`, `lru_cache(maxsize=1024)`); `_code_only_lines` returns
+a fresh `list` so no caller can edit the answer the next caller reads. The memo
+is cleared at the start and at the end of `scanner.scan_path`, so it holds at
+most one scan's texts. Nothing else moved: no rule, no threshold, no output path.
+
+**Why this is the right first cut.** It was the largest single item in the T9
+profile (6.29 s of 25.55 s, 25 %) and the only one with **no detection risk**:
+the second answer is provably the first answer, so byte-identity is a property of
+the change, not a hope. (The other candidates -- one split/classify pass instead
+of two, a prefilter for `detect_http_client` -- have to be argued as supersets
+first.)
+
+**Measurement** (3 CLI runs each, median, same machine, same day):
+
+| tree | before | after | delta |
+|---|---|---|---|
+| `agent/` (516 files, 280 read) | 24.16 s (23.42/24.16/24.38) | **20.54 s** (20.06/20.54/20.77) | **-3.62 s = 15.0 %** |
+| `src` (56 files) | 2.36 s (2.36/2.36/2.47) | **2.05 s** (2.00/2.05/2.34) | -0.31 s = 13.1 % |
+
+The saved wall clock matches the profile's 3.1 s ceiling for this item: the two
+calls became 112 calls / 56 ids on `src` → 56 tokenisations, and each hit is now
+a dict lookup.
+
+**Output identity.** `--format json` compared byte-for-byte on `agent/`,
+`attack-lab` and `src`:
+
+* `agent/` — identical bytes (43 findings, 1 path).
+* `attack-lab` corpus — identical bytes (113 / 103 D / 7 P / 3 M / 0 FP).
+* `src` — identical except two AS-006 `line` values **inside `scanner.py`**, the
+  file this change edits (514 → 521, 625 → 632: eight added lines above them).
+  Same rule, same file, same evidence, same count (38 findings, 12 paths); no
+  other field on any other file moved.
+
+**Cost.** +3 tests (`tokenises one text once`, `hands out a fresh list`,
+`scan tokenises each file once and keeps no text afterwards`); 1864 passed.
+CI-scan equivalent unchanged: `full`, 56 read / 0 skipped / 0 lossy,
+`Policy: FAIL`, exit 1.

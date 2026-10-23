@@ -296,3 +296,28 @@ def test_a_path_consumed_by_a_call_is_still_an_access(tmp_path):
     result = scan_path(str(target))
     lines = [f.line for f in result.findings if f.rule_id == "AS-006"]
     assert lines == [1, 2]
+
+
+def test_scan_tokenises_each_file_once_and_keeps_no_text_afterwards(tmp_path, monkeypatch):
+    """T10: one tokenisation per Python file per scan, no text outliving it.
+
+    Both phases of ``scan_path`` need the same file's code lines. The memo is
+    per scan on purpose: a long-lived caller must not pin file contents.
+    """
+    from veyra import step_sequence
+
+    (tmp_path / "a.py").write_text("import requests\nrequests.post(url)\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("token = os.environ['T']\n", encoding="utf-8")
+
+    calls = []
+    real = step_sequence.tokenize.generate_tokens
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(step_sequence.tokenize, "generate_tokens", counting)
+    scan_path(str(tmp_path))
+
+    assert len(calls) == 2, "one tokenisation per file, not one per phase"
+    assert step_sequence._scrubbed_python_lines.cache_info().currsize == 0

@@ -44,7 +44,7 @@ from veyra.mitre import mitre_for
 from veyra.models import Confidence, Finding, ScanResult, Severity
 from veyra.rules import load_file_rules, load_rules
 from veyra.rules.network import collapse_http_claims
-from veyra.step_sequence import analyze_file_chains
+from veyra.step_sequence import analyze_file_chains, clear_code_line_cache
 
 # File extensions we inspect. Everything else is skipped.
 SCAN_EXTENSIONS = {
@@ -187,6 +187,10 @@ def scan_path(
     # One recorder per scan: every file the scanner refuses and every rule that
     # raises is written down here instead of disappearing (see veyra.coverage).
     coverage = ScanCoverage()
+    # The tokenisation memo belongs to one scan, not to the process: the two
+    # phases below ask for the same file's code lines, and a long-lived caller
+    # (tests, serve mode) must not keep file contents alive between scans.
+    clear_code_line_cache()
     findings: List[Finding] = []
     file_texts: List[str] = []  # (text, path) pairs for step-sequence analysis
     root = Path(target)
@@ -382,6 +386,9 @@ def scan_path(
                 existing_edges=existing_edges,
             )
         )
+    # Both phases that read code lines are done: drop the tokenisation memo
+    # now instead of letting the last scan's file texts wait for the next one.
+    clear_code_line_cache()
     return result
 
 

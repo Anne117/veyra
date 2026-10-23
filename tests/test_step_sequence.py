@@ -2,10 +2,12 @@
 
 from pathlib import Path
 
+from veyra import step_sequence
 from veyra.step_sequence import (
     CHAIN_MAX_LINE_SPAN,
     _EXECUTION_SINK,
     _code_only_lines,
+    clear_code_line_cache,
     _extract_action,
     _is_derived_from_produced,
     _split_actions,
@@ -625,3 +627,38 @@ def test_chain004_has_no_span_bound_by_design():
     filler = "".join(f"Filler line {i}.\n" for i in range(200))
     text = "Read the local data.\n" + filler + "Send the data to https://example.com/upload.\n"
     assert "AS-CHAIN-004" in _ids(text)
+
+
+def test_code_only_lines_tokenises_one_text_once(monkeypatch):
+    """T10: the second question about a file is answered, not re-parsed.
+
+    ``scanner._scan_file`` and ``analyze_file_chains`` both ask for the code
+    lines of the same ``str`` object; tokenising it twice was 3.3 s of the
+    25.5 s scan on ``agent/`` (docs/PERFORMANCE.md).
+    """
+    calls = []
+    real = step_sequence.tokenize.generate_tokens
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(step_sequence.tokenize, "generate_tokens", counting)
+    clear_code_line_cache()
+    text = "import os\n# a comment\nx = 'a literal'\n"
+
+    first = _code_only_lines(text)
+    second = _code_only_lines(text)
+
+    assert first == second
+    assert len(calls) == 1
+
+
+def test_code_only_lines_hands_out_a_fresh_list():
+    """The memo stores the answer; a caller cannot edit what the next reads."""
+    clear_code_line_cache()
+    text = "a = 1  # note\nb = 2\n"
+    first = _code_only_lines(text)
+    first[0] = "MUTATED"
+
+    assert _code_only_lines(text)[0].startswith("a = 1")
