@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 from veyra.correlation import correlate_detailed
 from veyra.coverage import (
     PRUNE_IGNORED_DIR,
+    PRUNE_SYMLINK_DIR,
     RULE_ERROR_FILE,
     RULE_ERROR_LINE,
     SKIP_BINARY,
@@ -149,11 +150,21 @@ def scan_path(
             # record, not a verdict: coverage_status does not read it (see
             # veyra.coverage.PRUNE_REASONS), but the report can no longer say
             # "full" while silently standing on top of an unopened
-            # node_modules/ or dist/.
+            # node_modules/, dist/ or a symlinked directory.
+            #
+            # Two refusals, two names. ``SKIP_DIRS`` is the scanner's own
+            # choice. A symlinked directory is never followed by
+            # ``os.walk`` (``followlinks=False``), while a symlinked *file*
+            # is read -- so the reach of the scan depends on the link type
+            # and, without a name here, on nothing the report can state.
             for name in dirnames:
                 if name in SKIP_DIRS:
                     coverage.pruned(
                         str(Path(dirpath) / name), PRUNE_IGNORED_DIR
+                    )
+                elif (Path(dirpath) / name).is_symlink():
+                    coverage.pruned(
+                        str(Path(dirpath) / name), PRUNE_SYMLINK_DIR
                     )
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             for fname in filenames:

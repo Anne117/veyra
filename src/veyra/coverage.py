@@ -60,17 +60,25 @@ RULE_ERROR_TYPES = frozenset({RULE_ERROR_LINE, RULE_ERROR_FILE})
 #
 # A directory the walk refused to enter is a different kind of omission from a
 # file the reader refused to open: no rule was ever given a chance to run, so
-# there is no path, no line and no matched text to attach. One token covers it,
-# and it is kept out of ``SKIP_REASONS`` on purpose -- a pruned subtree does
-# NOT by itself make ``coverage_status`` partial (that step is option (b) in
+# there is no path, no line and no matched text to attach. The tokens are kept
+# out of ``SKIP_REASONS`` on purpose -- a pruned subtree does NOT by itself
+# make ``coverage_status`` partial (that step is option (b) in
 # ``docs/COVERAGE-GAPS.md`` and is a product decision, not an accounting one).
 # Recording it is what lets a report say "full" and "eleven directories were
 # not entered" in the same breath, so the contradiction is visible instead of
 # implied.
+#
+# Two reasons, because there are two different refusals. ``ignored_dir`` is a
+# name the scanner chose to skip (``SKIP_DIRS``). ``symlink_dir`` is a subtree
+# the walk never follows by construction (``os.walk`` without ``followlinks``):
+# the scanner did not decide to skip it, it simply cannot see through the link,
+# and a *file* symlink is still read (``stat`` follows it). That asymmetry is
+# a fact about the target, not a policy -- so it is named, not judged.
 
 PRUNE_IGNORED_DIR = "ignored_dir"
+PRUNE_SYMLINK_DIR = "symlink_dir"
 
-PRUNE_REASONS = frozenset({PRUNE_IGNORED_DIR})
+PRUNE_REASONS = frozenset({PRUNE_IGNORED_DIR, PRUNE_SYMLINK_DIR})
 
 
 # --- coverage status --------------------------------------------------------

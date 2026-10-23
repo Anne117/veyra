@@ -416,3 +416,108 @@ def test_pruned_dir_order_is_deterministic(tmp_path):
     second = [r["path"] for r in scan_path(str(tmp_path)).dirs_pruned]
     assert first == second
     assert first == sorted(first)
+
+
+# --- G9: a symlinked directory is named, not silently skipped --------------
+#
+# ``os.walk`` does not follow symlinked directories while a symlinked *file*
+# is read (``stat`` follows the link). Before this block the asymmetry was
+# invisible: a directory link pointing at a tree full of injections produced
+# ``0 findings`` / ``SAFE`` / ``full`` with nothing in the report to say the
+# subtree was never entered. The name is added, the verdict is not -- same
+# line as ``ignored_dir`` (option (a)), and the last test pins it.
+
+
+def _symlink_dir(link, target):
+    """Create a directory symlink or skip the test where links are not allowed."""
+    try:
+        os.symlink(str(target), str(link), target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:  # pragma: no cover - platform
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+
+def test_a_symlinked_dir_is_named_with_a_fixed_reason(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(INJECTION)
+    tree = tmp_path / "tree"
+    _write(tree / "src" / "app.py", "print('hi')\n")
+    _symlink_dir(tree / "linked", outside)
+
+    result = scan_path(str(tree))
+
+    assert [(r["path"], r["reason"]) for r in result.dirs_pruned] == [
+        (str(tree / "linked"), "symlink_dir")
+    ]
+    assert result.dirs_pruned[0]["reason"] in PRUNE_REASONS
+    # The subtree really was not read: no finding, no skipped-file record.
+    assert result.findings == []
+    assert result.files_skipped == []
+    assert result.files_scanned == 1
+
+
+def test_a_symlinked_file_is_still_read_so_the_asymmetry_is_stated(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(INJECTION)
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    os.symlink(str(outside / "SKILL.md"), str(tree / "linked.md"))
+
+    result = scan_path(str(tree))
+
+    # A file link is followed and scanned -- this is the half of the
+    # asymmetry the new token must not hide.
+    assert [f.rule_id for f in result.findings] == ["AS-004"]
+    assert result.files_scanned == 1
+    assert result.dirs_pruned == []
+
+
+def test_symlink_prune_reason_is_not_a_file_skip_reason():
+    from veyra.coverage import PRUNE_SYMLINK_DIR
+
+    assert PRUNE_SYMLINK_DIR == "symlink_dir"
+    assert PRUNE_SYMLINK_DIR not in SKIP_REASONS
+    recorder = ScanCoverage()
+    with pytest.raises(ValueError):
+        recorder.pruned("linked", "symlink-to-dir")
+
+
+def test_a_symlinked_dir_does_not_change_the_verdict(tmp_path):
+    """Option (a) holds for links too: named, not counted as coverage."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(INJECTION)
+    tree = tmp_path / "tree"
+    _write(tree / "src" / "app.py", "print('hi')\n")
+    _symlink_dir(tree / "linked", outside)
+
+    result = scan_path(str(tree))
+
+    # Unchanged on purpose: the residual decision is the same one §10/§11 of
+    # COVERAGE-GAPS.md leave open for pruned subtrees in general.
+    assert result.coverage_status == "full"
+    assert result.risk_level == "SAFE"
+
+
+def test_symlinked_dir_prune_reaches_json_and_sarif(tmp_path):
+    from veyra.reporters.json import render_json
+    from veyra.reporters.sarif import render_sarif
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(INJECTION)
+    tree = tmp_path / "tree"
+    _write(tree / "src" / "app.py", "print('hi')\n")
+    _symlink_dir(tree / "linked", outside)
+
+    result = scan_path(str(tree))
+    payload = json.loads(render_json(result))
+    sarif_doc = json.loads(render_sarif(result))
+
+    assert payload["coverage"]["dirs_pruned"] == [
+        {"path": str(tree / "linked"), "reason": "symlink_dir"}
+    ]
+    assert (
+        sarif_doc["runs"][0]["properties"]["coverage"] == payload["coverage"]
+    )
