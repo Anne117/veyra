@@ -366,6 +366,10 @@ def render_sarif(result: ScanResult) -> str:
         # Subtrees never entered. Kept identical to the JSON reporter's block
         # so the two formats cannot disagree about what was skipped.
         "dirs_pruned": list(result.dirs_pruned),
+        # Files read with replacement characters: scanned, but not read in
+        # full. Same block shape as JSON so the two formats cannot disagree
+        # about why a run is ``partial``.
+        "decode_errors": list(result.decode_errors),
     }
     # Run-level policy verdict, next to the coverage it depends on. Additive
     # `properties` only: no SARIF structure added, no result invented. A

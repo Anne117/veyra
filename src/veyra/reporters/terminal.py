@@ -22,6 +22,7 @@ def render_terminal(result: ScanResult) -> str:
         "Coverage: "
         f"{result.coverage_status} "
         f"({result.files_scanned} read, {len(result.files_skipped)} skipped"
+        f", {len(result.decode_errors)} lossy"
         f", {len(result.dirs_pruned)} pruned dirs)"
     )
     # The policy verdict is printed even when it is PASS: a report that shows

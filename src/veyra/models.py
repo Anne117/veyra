@@ -169,6 +169,14 @@ class ScanResult:
     # Emitted so a report can print "full" together with "these subtrees were
     # not opened", instead of leaving the reader to assume there were none.
     dirs_pruned: List[Dict[str, str]] = field(default_factory=list)
+    # Files that were READ but not as the text they hold: the bytes were not
+    # UTF-8, so the decoder inserted replacement characters and part of the
+    # scanned text is the scanner's own. Reason token ``decode_error``. Such a
+    # file is not ``skipped`` (its readable lines did produce findings) but it
+    # is not a full read either -- ``coverage_status`` turns it into
+    # ``partial``, and therefore a zero score into ``UNKNOWN`` rather than
+    # ``SAFE``.
+    decode_errors: List[Dict[str, str]] = field(default_factory=list)
 
     @property
     def score(self) -> int:
@@ -184,7 +192,10 @@ class ScanResult:
         it, is ``none`` -- it never guesses that its target was covered.
         """
         return coverage_status(
-            self.files_scanned, self.files_skipped, self.rule_errors
+            self.files_scanned,
+            self.files_skipped,
+            self.rule_errors,
+            self.decode_errors,
         )
 
     @property
@@ -283,6 +294,10 @@ class ScanResult:
             # does not count them; printing both is what makes the residual
             # gap legible rather than invisible.
             "dirs_pruned": list(self.dirs_pruned),
+            # Additive: files read with replacement characters. Separate from
+            # ``files_skipped`` because the file WAS scanned; separate field
+            # because "scanned" and "read in full" are different claims.
+            "decode_errors": list(self.decode_errors),
         }
         if self.attack_paths:
             d["attack_paths"] = [p.to_dict() for p in self.attack_paths]

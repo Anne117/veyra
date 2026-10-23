@@ -50,6 +50,20 @@ SKIP_REASONS = frozenset(
 # no line of their own), which is exactly the form a file-level loss needs to
 # stay visible.
 
+# --- lossy-decode vocabulary ----------------------------------------------
+#
+# A file whose bytes are not valid UTF-8 is still scanned: decoding with
+# replacement characters keeps every line the rules *can* read, and refusing
+# the whole file would drop real findings (measured in
+# ``docs/COVERAGE-GAPS.md``). What must not happen is the file counting as
+# read in full -- the replacement characters are text the scanner invented,
+# not the text the file holds. So the file is *read* and separately
+# *declared lossy*; the reason token is the existing ``decode_error``, which
+# until now was unreachable. No encoding is guessed: a cp1251 body is not
+# "probably cp1251", it is "not UTF-8", and the report says exactly that.
+
+LOSSY_DECODE_REASONS = frozenset({SKIP_DECODE_ERROR})
+
 RULE_ERROR_LINE = "line_rule_exception"
 RULE_ERROR_FILE = "file_rule_exception"
 
@@ -105,11 +119,17 @@ def coverage_status(
     files_scanned: int,
     files_skipped: Sequence[Dict[str, str]],
     rule_errors: Sequence[Dict[str, Any]],
+    decode_errors: Sequence[Dict[str, Any]] = (),
 ) -> str:
-    """Classify how much of the target the scan actually inspected."""
+    """Classify how much of the target the scan actually inspected.
+
+    ``decode_errors`` counts as partial: the file was scanned, but part of its
+    text was invented by the decoder, so "full" would claim characters nobody
+    read. ``dirs_pruned`` is deliberately NOT read here (option (b)).
+    """
     if files_scanned <= 0:
         return COVERAGE_NONE
-    if files_skipped or rule_errors:
+    if files_skipped or rule_errors or decode_errors:
         return COVERAGE_PARTIAL
     return COVERAGE_FULL
 
@@ -144,6 +164,11 @@ class ScanCoverage:
     files_skipped: List[Dict[str, str]] = field(default_factory=list)
     rule_errors: List[Dict[str, Any]] = field(default_factory=list)
     dirs_pruned: List[Dict[str, str]] = field(default_factory=list)
+    # Files that were read, but not as the text they hold: the bytes did not
+    # decode as UTF-8 and some characters are the scanner's replacement. Kept
+    # out of ``files_skipped`` on purpose -- the file was scanned, and calling
+    # it skipped would hide the findings it did produce.
+    decode_errors: List[Dict[str, str]] = field(default_factory=list)
 
     # -- writers ----------------------------------------------------------
 
@@ -156,6 +181,16 @@ class ScanCoverage:
         if reason not in SKIP_REASONS:
             raise ValueError(f"unknown skip reason: {reason!r}")
         self.files_skipped.append({"path": str(path), "reason": reason})
+
+    def lossy(self, path: str, reason: str = SKIP_DECODE_ERROR) -> None:
+        """``path`` was read, but not every character came from the file.
+
+        Recorded rather than refused: the readable lines were scanned, and
+        only the claim of a *complete* read is withdrawn.
+        """
+        if reason not in LOSSY_DECODE_REASONS:
+            raise ValueError(f"unknown decode reason: {reason!r}")
+        self.decode_errors.append({"path": str(path), "reason": reason})
 
     def pruned(self, path: str, reason: str) -> None:
         """The walk refused to enter ``path``; no rule ran inside it."""
@@ -202,5 +237,8 @@ class ScanCoverage:
             ),
             "dirs_pruned": sorted(
                 self.dirs_pruned, key=lambda r: (r["path"], r["reason"])
+            ),
+            "decode_errors": sorted(
+                self.decode_errors, key=lambda r: (r["path"], r["reason"])
             ),
         }

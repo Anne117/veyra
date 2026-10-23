@@ -253,6 +253,7 @@ def scan_path(
     result.files_scanned = coverage_snapshot["files_scanned"]
     result.files_skipped = coverage_snapshot["files_skipped"]
     result.rule_errors = coverage_snapshot["rule_errors"]
+    result.decode_errors = coverage_snapshot["decode_errors"]
     result.dirs_pruned = coverage_snapshot["dirs_pruned"]
     attack_paths, merged = _build_attack_paths(findings, file_texts)
     result.attack_paths = attack_paths
@@ -537,10 +538,18 @@ def _scan_file(
             return []
     else:
         try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            # Not UTF-8. Two things must both stay true: the readable lines are
+            # still scanned (refusing the file drops real findings -- a secret
+            # on an ASCII line inside a latin-1 note is one), and the file is
+            # not reported as read in full (the replacement characters are the
+            # scanner's invention, not the file's text). So it is scanned with
+            # replacements AND recorded as lossy, which makes coverage partial.
+            # No encoding is guessed: "not UTF-8" is the entire claim, and a
+            # cp1251 body stays a cp1251 body nobody claimed to understand.
             text = data.decode("utf-8", errors="replace")
-        except Exception:
-            coverage.skipped(str(path), SKIP_DECODE_ERROR)
-            return []
+            coverage.lossy(str(path))
 
     file_texts.append((text, str(path)))
     coverage.counted()
