@@ -159,6 +159,37 @@ def _should_scan(path: Path) -> bool:
     return path.suffix.lower() in SCAN_EXTENSIONS
 
 
+# One answer per line text.
+#
+# A line rule is a pure function of the text it is handed: ``file_path`` and
+# ``line`` are stamped onto the Finding it returns, they never decide it. All
+# 28 registered rules were checked over 291 742 lines -- same verdict for
+# ``a.py`` line 1 and ``b.md`` line 977 -- and 34 985 of the 111 083 lines of
+# ``agent/`` (31 %) are repeats of a line the same scan already read.
+#
+# So the scan remembers, per line text, the *indexes* of the rules that were
+# not quiet: a rule that returned None for a text returns None for it again,
+# and need not be asked. A replay calls exactly those rules, so every Finding
+# is still produced by the rule itself on the current file path and line
+# number -- the cache can only skip a question, never answer one.
+#
+# A rule that raised is recorded as loud, not quiet: the loss is a fact about
+# *this* file and line and has to be written down again for each one. The
+# entry is also bound to the rule list it was learned with, so a caller that
+# scans two directories with two different rule sets never replays one set's
+# answer against another's indexes.
+_LINE_RULE_CACHE_SEGMENTS = 100_000
+_loud_rule_indexes: Dict[str, Tuple[int, ...]] = {}
+_loud_rule_list: Optional[List] = None
+
+
+def _clear_line_rule_cache() -> None:
+    """Forget the per-line answers; ``scanner.scan_path`` calls this twice."""
+    global _loud_rule_list
+    _loud_rule_indexes.clear()
+    _loud_rule_list = None
+
+
 def scan_path(
     target: str,
     component_context: Optional[List[ComponentContextAssociation]] = None,
@@ -189,8 +220,10 @@ def scan_path(
     coverage = ScanCoverage()
     # The tokenisation memo belongs to one scan, not to the process: the two
     # phases below ask for the same file's code lines, and a long-lived caller
-    # (tests, serve mode) must not keep file contents alive between scans.
+    # (tests, serve mode) must not keep file contents alive between scans. The
+    # per-line rule answers (``_loud_rule_indexes``) are dropped with it.
     clear_code_line_cache()
+    _clear_line_rule_cache()
     findings: List[Finding] = []
     file_texts: List[str] = []  # (text, path) pairs for step-sequence analysis
     root = Path(target)
@@ -386,9 +419,11 @@ def scan_path(
                 existing_edges=existing_edges,
             )
         )
-    # Both phases that read code lines are done: drop the tokenisation memo
-    # now instead of letting the last scan's file texts wait for the next one.
+    # Both phases that read code lines are done: drop the tokenisation memo and
+    # the per-line rule answers now instead of letting the last scan's file
+    # texts wait for the next one.
     clear_code_line_cache()
+    _clear_line_rule_cache()
     return result
 
 
@@ -588,26 +623,67 @@ def _scan_file(
     coverage.counted()
 
     findings: List[Finding] = []
+
+    def _keep(finding: Finding, source_line: str) -> None:
+        # Preserve the exact source line that triggered the rule. For secret
+        # findings, use the already-redacted evidence so the raw secret never
+        # appears in reports.
+        if not finding.matched_text:
+            if finding.rule_id == "AS-001":
+                finding.matched_text = finding.evidence or ""
+            else:
+                finding.matched_text = source_line.strip()
+        findings.append(finding)
+
+    # The cache entries are indexes into ``rules``, so they only mean anything
+    # against the list they were learned with: a caller that scans with a
+    # different rule set starts from an empty cache (see ``_loud_rule_indexes``).
+    global _loud_rule_list
+    if _loud_rule_list is not rules:
+        _clear_line_rule_cache()
+        _loud_rule_list = rules
+    loud_by_line = _loud_rule_indexes
+
+    # ``str(path)`` per line per rule was 3.1 M calls on ``agent/``
+    # (docs/PERFORMANCE.md): the path does not change between lines.
+    file_path = str(path)
     for lineno, line in enumerate(text.splitlines(), start=1):
-        for rule in rules:
+        loud = loud_by_line.get(line)
+        if loud is None:
+            # First sight of this text in this scan: ask every rule, and keep
+            # the indexes of the ones that were not quiet.
+            loud_indexes: List[int] = []
+            for index, rule in enumerate(rules):
+                try:
+                    finding = rule(line, file_path, lineno)
+                except Exception:
+                    # A rule must never crash the whole scan -- but it must not
+                    # vanish either: the file was read, this rule contributed
+                    # nothing, and that loss is a fact about the report.
+                    coverage.rule_failed(rule, file_path, lineno, RULE_ERROR_LINE)
+                    loud_indexes.append(index)
+                    continue
+                if finding is None:
+                    continue
+                loud_indexes.append(index)
+                _keep(finding, line)
+            if len(loud_by_line) >= _LINE_RULE_CACHE_SEGMENTS:
+                # Past the cap the scan is reading a different vocabulary;
+                # start a new epoch instead of refusing to remember.
+                loud_by_line.clear()
+            loud_by_line[line] = tuple(loud_indexes)
+            continue
+        # A text the scan has already read: only the rules that spoke last
+        # time can speak now, and each of them is asked again for real.
+        for index in loud:
+            rule = rules[index]
             try:
-                finding = rule(line, str(path), lineno)
+                finding = rule(line, file_path, lineno)
             except Exception:
-                # A rule must never crash the whole scan -- but it must not
-                # vanish either: the file was read, this rule contributed
-                # nothing, and that loss is a fact about the report.
-                coverage.rule_failed(rule, str(path), lineno, RULE_ERROR_LINE)
+                coverage.rule_failed(rule, file_path, lineno, RULE_ERROR_LINE)
                 continue
             if finding is not None:
-                # Preserve the exact source line that triggered the rule.
-                # For secret findings, use the already-redacted evidence so
-                # the raw secret never appears in reports.
-                if not finding.matched_text:
-                    if finding.rule_id == "AS-001":
-                        finding.matched_text = finding.evidence or ""
-                    else:
-                        finding.matched_text = line.strip()
-                findings.append(finding)
+                _keep(finding, line)
 
     # File-level rules (structured formats like MCP config).
     for frule in file_rules:

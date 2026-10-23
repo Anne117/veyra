@@ -68,6 +68,41 @@ NEGATION = re.compile(
 )
 
 
+# One cheap question in front of five regexes. Every branch of
+# ``SENSITIVE_PATH`` needs one of these stems (``.env`` -> "env", ``.aws`` ->
+# "aws", ``.ssh`` -> "ssh", ``id_rsa`` -> "rsa", ``id_ed25519`` ->
+# "ed25519", ``.pem`` -> "pem", ``.key``/``private key`` -> "key",
+# ``/credentials`` / "credentials file" -> "cred", "secret file" -> "secret"),
+# and the second signal needs ``CREDENTIAL_EXTRACTION``, whose every
+# alternative ("password"/"passwd" -> "passw", "tokens?" -> "token",
+# "secrets?" -> "secret", "credentials?" -> "cred", "api key"/"access key" ->
+# "key") is in the same set. So a line that contains none of them cannot
+# produce a finding, and NEGATION/SENSITIVE_PATH/ACCESS_VERB/CONFIG_ACCESS/
+# CREDENTIAL_EXTRACTION all skip it. This rule ran on every line of every file
+# and cost 1.334 s of the 20.5 s ``agent/`` scan (docs/PERFORMANCE.md); the
+# stems are a superset of the regex alternatives, so no match is lost.
+#
+# ``str.lower`` + ``in`` rather than one ``re.IGNORECASE`` alternation: a wide
+# literal alternation under IGNORECASE is not the cheap case in CPython, and on
+# this corpus it measured slower than the five regexes it was meant to save.
+# Measured on ``agent/`` (111 083 lines): 1.271 s -> 0.304 s for this rule,
+# 9 626 lines reach the detectors, 0 lines dropped and then matched, and the
+# tree's 43 findings are unchanged.
+_AS006_STEMS = (
+    "env", "aws", "ssh", "rsa", "ed25519", "pem", "key", "cred",
+    "secret", "passw", "token",
+)
+
+
+def _may_name_a_credential(content: str) -> bool:
+    """True when the line contains any stem a sensitive-path match needs."""
+    lowered = content.lower()
+    for stem in _AS006_STEMS:
+        if stem in lowered:
+            return True
+    return False
+
+
 @register
 def detect_sensitive_path_access(content: str, file_path: str, line: int) -> "Finding | None":
     """Detect a read/access operation against a sensitive credential path.
@@ -76,7 +111,13 @@ def detect_sensitive_path_access(content: str, file_path: str, line: int) -> "Fi
     1. A read/access of a known sensitive path (.env, ~/.aws, ~/.ssh, etc.).
     2. A generic config-file access combined with explicit credential
        extraction (password/token/secret/credential/API key).
+
+    A line with no credential stem at all is answered before any detector runs
+    (see ``_AS006_STEMS``); the prefilter drops lines, never matches.
     """
+    if not _may_name_a_credential(content):
+        return None
+
     # If the access verb is negated (e.g. "never read ~/.aws/credentials",
     # "do not expose .env"), it is NOT an actual access operation.
     if NEGATION.search(content):

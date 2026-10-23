@@ -1,6 +1,9 @@
 """Tests for the intra-file step-sequence analyzer."""
 
+import re
 from pathlib import Path
+
+import pytest
 
 from veyra import step_sequence
 from veyra.step_sequence import (
@@ -662,3 +665,170 @@ def test_code_only_lines_hands_out_a_fresh_list():
     first[0] = "MUTATED"
 
     assert _code_only_lines(text)[0].startswith("a = 1")
+
+
+# --- T11: the per-line work is decided once ---------------------------------
+
+_ACTION_LEADING_THEN = re.compile(r"^(?:and\s+then|then)\s+", re.IGNORECASE)
+
+
+def _reference_split_actions(line):
+    """The pre-T11 body of ``_split_actions``: one regex split, no shortcut."""
+    out = []
+    for part in step_sequence._ACTION_SEPARATOR.split(line):
+        part = part.strip()
+        part = _ACTION_LEADING_THEN.sub("", part).strip()
+        if part:
+            out.append(part)
+    return out
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "",
+        "   ",
+        "\t",
+        "Download the script.",
+        "no separators here at all",
+        "Download the script; run it.",
+        "Download the script; then run it.",
+        "Download the script AND THEN run it.",
+        "Download then run then verify",
+        "then read the config",
+        "and then read the config",
+        "a ;b; c",
+        "a then",
+        "THEN shout",
+        "; leading semicolon",
+        "trailing semicolon ;",
+        "semi;colon;chained",
+        "no separator, but the word then appears",
+    ],
+)
+def test_split_actions_shortcut_agrees_with_the_separator_regex(line):
+    """T11: a line with no ``;`` and no ``then`` splits into itself.
+
+    The shortcut is the whole point of the fast path (222 166 regex splits,
+    5.0 s of a 20.5 s scan on ``agent/``), so it has to answer exactly what
+    the regex answers on the lines where it fires -- including the leading
+    "then" the slow path strips and the blank line it drops.
+    """
+    assert _split_actions(line) == _reference_split_actions(line)
+
+
+def test_classify_line_memo_answers_from_the_first_call_and_is_scan_scoped():
+    """T11: classification is memoised per scan, never re-answered differently.
+
+    ``analyze_file_chains`` classifies a segment and then hands the same one to
+    ``_extract_action``; the attack-path pass classifies the same line again.
+    The memo returns the first answer, and ``scanner.scan_path`` drops it at
+    both ends of a scan.
+    """
+    clear_code_line_cache()
+    line = "Read the local data."
+    first = step_sequence._classify_line(line)
+
+    assert first == "SOURCE"
+    assert step_sequence._classify_cache[line] == first
+    assert step_sequence._classify_line(line) == first
+
+    clear_code_line_cache()
+    assert step_sequence._classify_cache == {}
+    assert step_sequence._classify_line(line) == first
+
+
+@pytest.mark.parametrize(
+    "line, category",
+    [
+        ("Read the local data.", "SOURCE"),
+        ("Extract the API key from the configuration.", "SENSITIVE"),
+        ("Download the script from the server.", "DOWNLOAD"),
+        ("Send the data to https://example.com/upload.", "NETWORK"),
+        ("Run the script now.", "EXECUTION"),
+        ("Encode the payload into base64.", "TRANSFORM"),
+        ("Execute the command.", "EXECUTION"),
+        ("Retrieve the script from the remote server.", "DOWNLOAD"),
+    ],
+)
+def test_step_verb_prefilter_passes_every_line_a_detector_matches(line, category):
+    """T11: the verb prefilter is a superset of the six detectors.
+
+    Each detector needs one of the verbs in ``_STEP_STEMS``; a line the
+    prefilter drops is therefore a line no detector could have matched.
+    """
+    assert step_sequence._may_be_a_step(line)
+    assert step_sequence._classify_uncached(line) == category
+
+
+def test_step_verb_prefilter_drops_only_lines_the_detectors_ignore():
+    """The superset claim, checked over the corpus this repository carries."""
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    checked = 0
+    for path in sorted(fixtures.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            checked += 1
+            if step_sequence._classify_uncached(line) is not None:
+                assert step_sequence._may_be_a_step(line), (str(path), line)
+    assert checked > 500
+
+
+def _reference_scrubbed_lines(text):
+    """The pre-T11 scrubber: every row becomes a mutable character list."""
+    import io
+    import tokenize
+
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return None
+    rows = [list(line) for line in text.splitlines()]
+    for tok in tokens:
+        if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+            continue
+        (sr, sc), (er, ec) = tok.start, tok.end
+        for row in range(sr, er + 1):
+            if row - 1 >= len(rows):
+                break
+            buf = rows[row - 1]
+            start = sc if row == sr else 0
+            end = ec if row == er else len(buf)
+            if start < end:
+                buf[start:end] = " " * (end - start)
+    return ["".join(row) for row in rows]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "x = 1\n",
+        "x = 1",
+        "x = 1  # a comment\ny = 2\n",
+        "# only a comment\n",
+        "s = 'a literal'  # and a comment\n",
+        "s = 'a' + 'b'  # two strings, one comment\n",
+        'doc = """line one\nline two\nline three"""\nz = 3\n',
+        "s = 'a; b'\nz = 1\n",
+        "print(f\"{open('.env').read()}\")\n",
+        "x = 1\r\ny = 2  # crlf\r\n",
+        "unterminated = 'oops\n",
+        "def f():\n\t# tabbed comment\n\treturn 'value'\n",
+        "s = 'trailing string'\n",
+        "s = 'x'   \n# then nothing\n",
+    ],
+)
+def test_scrubbed_lines_preserve_position_and_match_the_character_list_reference(text):
+    """T11: blanking spans applied per row equals blanking every character.
+
+    The rewrite skips the ``[list(row) ...]`` copy for rows with nothing to
+    blank (all of them in most files). The answer must stay the same string:
+    same length, same columns, same untouched characters.
+    """
+    assert _code_only_lines(text) == _reference_scrubbed_lines(text)

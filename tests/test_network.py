@@ -887,3 +887,54 @@ def test_a_urllib_handler_module_keeps_one_claim_at_the_import(tmp_path):
         "    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))\n"
     )
     assert [f.line for f in _http_medium(str(tmp_path))] == [1]
+
+
+# --- T11: the two HTTP prefilters drop only lines the regexes ignore --------
+
+def test_library_prefilter_covers_every_http_client_branch():
+    """T11: every spelling ``HTTP_CLIENT`` matches carries a prefilter stem.
+
+    ``_mentions_http_library`` runs before the (wide, case-sensitive)
+    ``HTTP_CLIENT`` alternation. These are the call, declaration and dependency
+    branches it is built from: if one of them can match a line the prefilter
+    drops, AS-003 loses a finding.
+    """
+    for line in (
+        "requests.get(url)",
+        "httpx.Client(timeout=5)",
+        "aiohttp.ClientSession()",
+        "import requests",
+        "from httpx import Client",
+        "import aiohttp",
+        "from urllib import request",
+        "import urllib.request",
+        'require("node-fetch")',
+        'require("axios")',
+        "import got from 'got'",
+        "axios.post(url)",
+        "fetch(url)",
+        "window.fetch(url)",
+        "node-fetch(url)",
+        "got.get(url)",
+        "urlopen(url)",
+        "urlretrieve(url, path)",
+    ):
+        assert network._mentions_http_library(line), line
+        assert network.HTTP_CLIENT.search(line), line
+
+
+def test_verb_prefilter_covers_every_object_call_branch():
+    """T11: ``HTTP_OBJECT_CALL`` needs http/session, a verb and an argument list.
+
+    The pattern is case-insensitive and matches a *receiver*, not a library, so
+    the prefilter asks for the three things both of its alternatives require.
+    """
+    for line in (
+        "await self._http_client.post(webhook)",
+        "async with session.post(url) as response",
+        "http_session.request('GET', url)",
+        "self._session.delete(key)",
+        "_HTTPSESSION.put(url)",
+    ):
+        assert network._calls_http_verb(line), line
+        assert network.HTTP_OBJECT_CALL.search(line), line

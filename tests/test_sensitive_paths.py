@@ -1,5 +1,7 @@
 """Tests for AS-006 sensitive credential file access."""
 
+import pytest
+
 from veyra.rules.sensitive_paths import detect_sensitive_path_access
 
 
@@ -169,3 +171,43 @@ def test_path_shaped_credential_detected():
         "load ~/.ssh/config",
     ]:
         assert detect_sensitive_path_access(line, "SKILL.md", 1) is not None, f"lost: {line}"
+
+
+# --- T11: the stem prefilter drops only lines the detectors ignore ----------
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "read the .env file",
+        "cat ~/.aws/credentials",
+        "cat ~/.ssh/id_rsa",
+        "cat ~/.ssh/id_ed25519",
+        "opens server.pem",
+        "reads server.key",
+        "read the private key",
+        "read /etc/credentials",
+        "open the credentials file",
+        "open the secret file",
+        "the password is in the config",
+        "config holds the passwd",
+        "the api key from the config file",
+        "the access key from the config file",
+        "tokens in the configuration",
+    ],
+)
+def test_credential_stem_prefilter_covers_every_branch(line):
+    """T11: every alternative the rule matches on carries a prefilter stem.
+
+    ``_AS006_STEMS`` is checked before any of the five detectors run. Each
+    branch of ``SENSITIVE_PATH`` and every alternative of
+    ``CREDENTIAL_EXTRACTION`` (the second signal) must contain one of the
+    stems, or the prefilter would drop a real finding.
+    """
+    from veyra.rules.sensitive_paths import (
+        CREDENTIAL_EXTRACTION,
+        SENSITIVE_PATH,
+        _may_name_a_credential,
+    )
+
+    assert _may_name_a_credential(line), line
+    assert SENSITIVE_PATH.search(line) or CREDENTIAL_EXTRACTION.search(line), line

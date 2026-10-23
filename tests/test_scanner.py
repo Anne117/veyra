@@ -321,3 +321,171 @@ def test_scan_tokenises_each_file_once_and_keeps_no_text_afterwards(tmp_path, mo
 
     assert len(calls) == 2, "one tokenisation per file, not one per phase"
     assert step_sequence._scrubbed_python_lines.cache_info().currsize == 0
+
+
+# --- T11: a line the scan has already read is not asked again ----------------
+
+def _marker_rule(rule_id, calls):
+    """A line rule that answers every line the same way and counts the asks."""
+    from veyra.models import Finding, Severity
+
+    def rule(content, file_path, line):
+        calls.append((rule_id, file_path, line))
+        if "MARKER" not in content:
+            return None
+        return Finding(
+            rule_id=rule_id,
+            severity=Severity.LOW,
+            title="marker",
+            description="marker",
+            file=file_path,
+            line=line,
+            evidence=content,
+        )
+
+    rule.__name__ = rule_id
+    return rule
+
+
+def test_a_repeated_line_is_answered_without_asking_the_quiet_rules_twice(
+    tmp_path, monkeypatch
+):
+    """T11: the same text twice in one scan is asked of the rules once.
+
+    A line rule is a pure function of the text: ``file_path`` and ``line`` are
+    stamped onto its finding, they do not decide it. A rule that returned None
+    for this text returns None for it again, so replaying the answer skips the
+    question. Only the rules that spoke are asked again.
+    """
+    from veyra import scanner
+
+    (tmp_path / "a.py").write_text("MARKER one\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("MARKER one\n", encoding="utf-8")
+
+    quiet_calls: list = []
+    loud_calls: list = []
+
+    def quiet_once(content, file_path, line):
+        # Answers None for every line: the rule the cache is built to stop
+        # asking.
+        quiet_calls.append((file_path, line))
+        return None
+
+    quiet_once.__name__ = "quiet_once"
+    rules = [_marker_rule("AS-900", loud_calls), quiet_once]
+
+    monkeypatch.setattr(scanner, "load_rules", lambda: rules)
+    monkeypatch.setattr(scanner, "load_file_rules", lambda: [])
+    result = scanner.scan_path(str(tmp_path))
+
+    # The asking rule answered the first copy and was asked again for the
+    # second -- one fact per line, not one fact per text.
+    assert [line for _, _, line in loud_calls] == [1, 1]
+    assert sorted(f.file for f in result.findings if f.rule_id == "AS-900") == [
+        str(tmp_path / "a.py"),
+        str(tmp_path / "b.py"),
+    ]
+    # The quiet rule was asked once, at first sight, and never again.
+    assert len(quiet_calls) == 1
+    assert quiet_calls[0][1] == 1
+
+
+def test_a_raising_rule_is_recorded_for_every_line_it_meets(tmp_path, monkeypatch):
+    """A raise is a fact about *this* file and line, so it is never replayed."""
+    from veyra import scanner
+
+    (tmp_path / "a.py").write_text("same text\nsame text\n", encoding="utf-8")
+
+    def boom(content, file_path, line):
+        raise RuntimeError("rule failure")
+
+    boom.__name__ = "boom"
+
+    monkeypatch.setattr(scanner, "load_rules", lambda: [boom])
+    monkeypatch.setattr(scanner, "load_file_rules", lambda: [])
+    result = scanner.scan_path(str(tmp_path))
+
+    assert [e["line"] for e in result.rule_errors] == [1, 2]
+    assert result.coverage_status != "full"
+
+
+def test_the_line_answers_are_dropped_when_the_scan_ends(tmp_path):
+    """T11: the per-line answers live for one scan, like the tokenisation memo."""
+    from veyra import scanner
+
+    (tmp_path / "a.py").write_text("MARKER one\n", encoding="utf-8")
+    scanner.scan_path(str(tmp_path))
+
+    assert scanner._loud_rule_indexes == {}
+    assert scanner._loud_rule_list is None
+
+
+def test_a_different_rule_list_never_replays_another_lists_answers(tmp_path):
+    """The entry is an index into ``rules``: a new list starts from nothing."""
+    from veyra import scanner
+    from veyra.models import Finding, Severity
+
+    target = tmp_path / "a.py"
+    target.write_text("MARKER one\n", encoding="utf-8")
+
+    def first(content, file_path, line):
+        return Finding(
+            rule_id="AS-900",
+            severity=Severity.LOW,
+            title="first",
+            description="first",
+            file=file_path,
+            line=line,
+        )
+
+    def second(content, file_path, line):
+        return Finding(
+            rule_id="AS-901",
+            severity=Severity.LOW,
+            title="second",
+            description="second",
+            file=file_path,
+            line=line,
+        )
+
+    first.__name__, second.__name__ = "first", "second"
+
+    first_pass = scanner._scan_file(target, [first], [], [])
+    second_pass = scanner._scan_file(target, [second], [], [])
+
+    assert [f.rule_id for f in first_pass] == ["AS-900"]
+    assert [f.rule_id for f in second_pass] == ["AS-901"]
+
+
+def test_duplicate_lines_do_not_change_what_a_scan_reports(tmp_path):
+    """The cache skips a question, never an answer: same tree, same report."""
+    from veyra.scanner import scan_path as scan
+
+    duplicated = tmp_path / "duplicated"
+    unique = tmp_path / "unique"
+    duplicated.mkdir()
+    unique.mkdir()
+    body = (
+        "import requests\n"
+        "requests.post(url)\n"
+        "run the script from the server\n"
+        "# read ~/.aws/credentials\n"
+        "\n"
+    )
+    (duplicated / "a.md").write_text(body * 3, encoding="utf-8")
+    (unique / "a.md").write_text(body, encoding="utf-8")
+
+    def fingerprint(root):
+        result = scan(str(root))
+        return sorted(
+            (f.rule_id, f.file.replace(str(root), ""), f.line, f.evidence)
+            for f in result.findings
+        )
+
+    repeated = fingerprint(duplicated)
+    # The same text appears three times on three different lines: every line
+    # the rules answered is still a finding on its own line.
+    once = fingerprint(unique)
+    assert len(repeated) == 3 * len(once)
+    for rule_id, _, _, evidence in once:
+        assert sum(1 for r in repeated if r[0] == rule_id and r[3] == evidence) == 3

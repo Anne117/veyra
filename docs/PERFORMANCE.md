@@ -162,3 +162,146 @@ a dict lookup.
 `scan tokenises each file once and keeps no text afterwards`); 1864 passed.
 CI-scan equivalent unchanged: `full`, 56 read / 0 skipped / 0 lossy,
 `Policy: FAIL`, exit 1.
+
+## T11: each per-line decision is made once, and the expensive rules ask first
+
+**Change (one topic).** T10 bought 15 % by tokenising a file once. T11 takes
+the rest of the ranked list from T9 — the repeated per-line decisions and the
+two rules that are 43.6 % of rule time — and every item is *provable*, not
+hoped for: a shortcut here may only skip work, never change an answer.
+
+1. **`step_sequence._split_actions`** ran a regex split on every line of every
+   file (`222 166` splits, 5.0 s). Every branch of the separator needs a literal
+   `;` or `then` (any case), and so does the leading-`"then"` strip, so a line
+   with neither is returned stripped, as one segment, without touching the
+   regex.
+2. **`step_sequence._classify_line`** is memoised per segment text
+   (`_classify_cache`, capped at 32 768 entries, dropped together with the
+   tokenisation memo at both ends of `scan_path`), and `_extract_action` now
+   accepts the category its caller has just computed instead of running the six
+   detectors a second time. Before: `244 257` calls for ~100 000 distinct
+   segments, six regexes each (3.1 s). `_classify_uncached` also asks one cheap
+   question first — every branch of the six detectors needs one of 38 verbs
+   (`_STEP_STEMS`), tested as `in` on the lowercased line.
+3. **`rules.network.detect_http_client`** (26.9 % of rule time). `HTTP_CLIENT`
+   is a wide case-sensitive alternation and `HTTP_OBJECT_CALL` carries `(?i)`.
+   One stem test in front of each: the client spellings the first branch names,
+   and `http`/`session` + one of seven verbs + `(` for the second.
+   `1.934 s -> 0.176 s` over the 111 083 lines of `agent/`; 805 lines reach the
+   detectors.
+4. **`rules.sensitive_paths.detect_sensitive_path_access`** (16.7 % of rule
+   time). Eleven stems that every branch of `SENSITIVE_PATH` and every
+   alternative of `CREDENTIAL_EXTRACTION` contains, in front of five regexes.
+   `1.271 s -> 0.304 s`; 9 626 lines reach the detectors.
+5. **`step_sequence._scrubbed_python_lines`**: the comment/string spans are
+   collected per row and applied right-to-left on the original line strings,
+   instead of copying every line of every file into a character list. On the
+   279 `.py` files of `agent/` (5.5 M chars): `3.09 s -> 2.59 s`, byte-identical
+   output on all 279.
+6. **`scanner._scan_file`**: `str(path)` is computed once per file, not once
+   per line per rule (3.1 M calls).
+
+**Why the prefilters cannot move a finding.** Each stem set is a *superset* of
+the literals and verbs its patterns require, so a line the prefilter drops is a
+line no pattern could match. Checked twice: per rule, over every one of the
+111 083 lines of `agent/`, 0 lines were dropped and then matched by the
+pattern they were dropped from; and at the output, byte-for-byte (below). The
+tests carry the same claim as a property (`_STEP_STEMS` / `_AS006_STEMS` /
+`_HTTP_CLIENT_STEMS` each cover every branch of the patterns they front, over
+the repository's own fixture corpus).
+
+**What was not taken.** "One split/classify pass instead of three": the
+attack-path pass builds its `Action`s from *raw* lines, the step-sequence pass
+from *scrubbed* ones, so handing one pass's actions to the other would change
+what a chain and a path read. The memo plus the category passthrough buy the
+same seconds with no such risk. "Tokenise fewer files": exactly 1 of the 279
+`.py` files in `agent/` contains no step verb at all, so a per-file skip buys
+nothing.
+
+**Measurement** (5 CLI runs each, *interleaved* with the baseline so both see
+the same machine load; median; same box, same day, page cache warm):
+
+| tree | before | after | delta |
+|---|---|---|---|
+| `agent/` (280 read) | **20.88 s** (20.61 / 20.65 / 20.88 / 20.95 / 21.48) | **10.63 s** (10.46 / 10.51 / 10.63 / 10.74 / 10.91) | **-10.25 s = 49.1 %** |
+| `src` (56 files) | **2.25 s** (2.23 / 2.25 / 2.30) | **1.18 s** (1.14 / 1.18 / 1.23) | **-1.07 s = 47.6 %** |
+
+The `agent/` target of T11 (12 s) is met with 12 % of headroom; the
+interleaved baseline re-measured at 20.88 s, matching the 20.54 s T10 reported.
+
+**Output identity.** `--format json` compared byte-for-byte:
+
+* `agent/` — 10 runs (5 before, 5 after the change), one md5
+  (`e6abe4538c27e1e48aac7ee69cebde58`): identical. 43 findings, 1 path.
+* `src` — identical md5 before and after: 38 findings, 12 paths.
+* Attack-Lab corpus — unchanged: **113 / 103 D / 7 P / 3 M / 0 FP**.
+* CI-scan equivalent (`veyra scan src --config .veyra.toml`) — unchanged:
+  exit 1, `Policy: FAIL`.
+
+**Cost.** +60 tests (the fast split path against a reference splitter, the
+memo's answer and its scan scope, the three prefilter superset properties, and
+the scrubber against the character-list reference): **1924 passed** under both
+`pytest -q` and `python -m pytest -q`. No rule, threshold, chain, path or
+output path changed.
+
+## T11, second cut: a line the scan has already read is not asked again
+
+**Where the scan is after the first cut.** The first T11 commit took `agent/`
+from 20.5 s to 10.6 s, and the profile moved with it: the line-rule loop was
+still the largest block, **3 110 324 rule calls** (28 rules x 111 083 lines,
+0.77 us of pure call overhead each on top of the regex work), but the rules
+themselves were no longer the expensive ones -- the two that were 43.6 % of
+rule time are prefiltered and the split/classify work is memoised. What was
+left was the *shape* of the loop: every line asks all 28 rules, even the
+34 985 lines (31 %) that are a repeat of a text the same scan already read.
+
+**Change (one topic).** A line rule is a pure function of the text it is
+handed: `file_path` and `line` are stamped onto the Finding it returns, they
+never decide it. That was not assumed -- all 28 registered rules were run over
+291 742 lines (the `agent/` tree, `src`, and the fixture corpus) twice, as
+`a.py` line 1 and as `b.md` line 977, and every verdict was identical modulo
+the two stamped fields. So `scanner._scan_file` now remembers, per line text,
+the **indexes of the rules that were not quiet**: a rule that returned None for
+a text returns None for it again and is not asked. A replay calls exactly
+those rules with the current file path and line number, so every Finding is
+still produced by the rule itself -- the cache can only skip a question, never
+answer one. `3 110 324 -> 2 130 763` rule calls on `agent/`.
+
+Three things keep it honest:
+
+* a rule that **raised** is recorded as loud, never quiet: the loss is a fact
+  about *this* file and line, so `coverage.rule_failed` still fires once per
+  occurrence (`test_a_raising_rule_is_recorded_for_every_line_it_meets`);
+* the entry is bound to the **rule list** it was learned with -- the indexes
+  mean nothing against another list, so a caller scanning with a different rule
+  set starts from an empty cache
+  (`test_a_different_rule_list_never_replays_another_lists_answers`);
+* the cache is **per scan**, capped at 100 000 texts, and dropped with the
+  tokenisation memo at both ends of `scan_path`.
+
+**Measurement** (7 CLI runs each, *interleaved* with the previous commit
+(`f433070`) and with the pre-T10 baseline (`31acf41`) so all three see the same
+machine load; median; same box, same day, page cache warm):
+
+| tree | baseline 31acf41 | first cut f433070 | this commit |
+|---|---|---|---|
+| `agent/` (280 read) | **23.45 s** (22.64-24.27) | **10.58 s** (10.09-11.02) | **10.32 s** (9.84-10.44) |
+
+`agent/` against the original T11 target (12 s): met with 14 % of headroom, and
+2.3x against the 23.8 s the task started from. The second cut is worth **-2.5 %**
+on this tree; it is worth much more on a tree with more repetition, because what
+it removes is the per-line cost of the text that repeats.
+
+**Output identity.** `--format json` compared byte for byte against the
+pre-change baseline on three targets: `agent/`
+(`e6abe4538c27e1e48aac7ee69cebde58`, 43 findings, 1 path), `tests/` and a copy
+of `src/` scanned by both versions (identical md5; `src/` scanned from two
+different working trees is not comparable, the text itself changed). Attack-Lab
+corpus unchanged: **113 / 103 D / 7 P / 3 M / 0 FP**. CI-scan equivalent
+(`veyra scan src --config .veyra.toml`): `coverage_status: full`, 0 active
+HIGH/CRITICAL, `Policy: FAIL`, exit 1 -- unchanged.
+
+**Cost.** +5 tests (a repeated line asks the quiet rules once, the loud rule is
+still asked per line, a raise is recorded per line, a new rule list starts
+empty, duplicate lines do not change the report): **1929 passed** under both
+`pytest -q` and `python -m pytest -q`.

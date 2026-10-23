@@ -88,12 +88,50 @@ TRANSFORM = re.compile(
 )
 
 
-def _classify_line(line: str) -> Optional[str]:
-    """Classify a single line into a step category, or None.
+# Every one of the six detectors below needs one of these verbs, and each is a
+# case-insensitive ``\b`` word in the pattern: SOURCE_READ (read/load/open/
+# access/get), SENSITIVE (extract/retrieve/obtain/grab/pull/find), DOWNLOAD
+# (curl/wget/download/fetch/retrieve), NETWORK_SINK (send/upload/post/put/
+# transmit/exfiltrate/push), EXECUTION (run/execute/exec/eval/install/launch/
+# bash/sh/shell/popen/system) and TRANSFORM (transform/encode/convert/format/
+# parse/serialize/decode). "exec" covers "execute", "sh" covers "shell" and
+# "bash", and the stems are matched as substrings of the lowercased line, so
+# the set is a superset of every verb the patterns accept: a segment with none
+# of them cannot match, and returns None without running six regexes.
+#
+# Measured on ``agent/`` (111 083 lines): 25 529 lines reach the detectors,
+# no line answered the prefilter and then matched, and classification went
+# 1.556 s -> 0.908 s on the tree. ``str.lower`` + ``in`` rather than an
+# ``re.IGNORECASE`` alternation of the same words: on the same corpus the
+# alternation was twice as slow as the detectors it was meant to replace.
+_STEP_STEMS = (
+    # SOURCE_READ / SENSITIVE / DOWNLOAD
+    "read", "load", "open", "access", "get", "extract", "retrieve", "obtain",
+    "grab", "pull", "find", "curl", "wget", "download", "fetch",
+    # NETWORK_SINK
+    "send", "upload", "post", "put", "transmit", "exfiltrate", "push",
+    # EXECUTION
+    "run", "exec", "eval", "install", "launch", "bash", "sh", "popen",
+    "system",
+    # TRANSFORM
+    "transform", "encode", "convert", "format", "parse", "serialize",
+    "decode",
+)
 
-    Order matters: DOWNLOAD is checked before NETWORK so that
-    "download ... https://..." is classified as DOWNLOAD, not NETWORK.
-    """
+
+def _may_be_a_step(line: str) -> bool:
+    """True when the line contains a verb one of the six detectors needs."""
+    lowered = line.lower()
+    for stem in _STEP_STEMS:
+        if stem in lowered:
+            return True
+    return False
+
+
+def _classify_uncached(line: str) -> Optional[str]:
+    """Classify a segment with the six detectors, in priority order."""
+    if not _may_be_a_step(line):
+        return None
     if SOURCE_READ.search(line):
         return "SOURCE"
     if SENSITIVE.search(line):
@@ -107,6 +145,44 @@ def _classify_line(line: str) -> Optional[str]:
     if TRANSFORM.search(line):
         return "TRANSFORM"
     return None
+
+
+# ``_classify_line`` is a pure function of the segment text, and the scan asks
+# the same question about the same text more than once:
+# ``analyze_file_chains`` classifies every segment it splits and then hands the
+# same segment to ``_extract_action``, which classifies it again; the attack-path
+# pass (``scanner._build_attack_paths``) splits and classifies every line of
+# every text once more. Measured on ``agent/``: 244 257 calls for about 100 000
+# segments, six regexes each -- 3.1 s of a 20.5 s scan (docs/PERFORMANCE.md).
+# A hit answers with the string the miss computed, so the memo changes how many
+# times the detectors run, never what they say.
+#
+# The memo is per scan: it keys on segment strings (never file text), it is
+# capped, and ``clear_code_line_cache`` drops it at both ends of
+# ``scanner.scan_path``.
+_CLASSIFY_CACHE_SEGMENTS = 32768
+_CLASSIFY_MISS = object()
+_classify_cache: Dict[str, Optional[str]] = {}
+
+
+def _classify_line(line: str) -> Optional[str]:
+    """Classify a single line into a step category, or None.
+
+    Order matters: DOWNLOAD is checked before NETWORK so that
+    "download ... https://..." is classified as DOWNLOAD, not NETWORK.
+
+    Memoised per segment text (see ``_classify_cache``).
+    """
+    cached = _classify_cache.get(line, _CLASSIFY_MISS)
+    if cached is not _CLASSIFY_MISS:
+        return cached  # type: ignore[return-value]
+    category = _classify_uncached(line)
+    if len(_classify_cache) >= _CLASSIFY_CACHE_SEGMENTS:
+        # Past the cap the scan is on to a different vocabulary; start a new
+        # epoch instead of refusing to memoise for the rest of the run.
+        _classify_cache.clear()
+    _classify_cache[line] = category
+    return category
 
 
 # A Python line is an action only when it is code. String literals in Python
@@ -134,12 +210,28 @@ _CODE_LINE_CACHE_FILES = 1024
 
 @lru_cache(maxsize=_CODE_LINE_CACHE_FILES)
 def _scrubbed_python_lines(text: str) -> Optional[Tuple[str, ...]]:
-    """Tokenise one text into comment/string-blanked lines (memoised)."""
+    """Tokenise one text into comment/string-blanked lines (memoised).
+
+    Blanking keeps the line count, the column positions and every character
+    outside a comment or string literal, so the answer is the raw line with each
+    comment/string span replaced by spaces of the same length.
+
+    The spans are collected first and applied per row, right to left, on the
+    *original* line strings: a row with nothing to blank (the overwhelming
+    majority of a real file) is passed through without being copied into a
+    mutable character list. Building ``[list(row) for row in rows]`` for every
+    line of every file was a fifth of the tokenisation phase -- measured on
+    ``agent/`` (279 files, 5.5 M chars): 3.09 s -> 2.59 s, byte-identical
+    output on all 279 files. Tokens do not overlap, so the spans on one row are
+    disjoint and applying them in reverse order gives the same string as
+    applying them in token order.
+    """
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
     except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
         return None
-    rows = [list(line) for line in text.splitlines()]
+    rows = text.splitlines()
+    spans: Dict[int, List[Tuple[int, int]]] = {}
     for tok in tokens:
         if tok.type not in (tokenize.COMMENT, tokenize.STRING):
             continue
@@ -147,12 +239,23 @@ def _scrubbed_python_lines(text: str) -> Optional[Tuple[str, ...]]:
         for row in range(sr, er + 1):
             if row - 1 >= len(rows):
                 break
-            buf = rows[row - 1]
+            length = len(rows[row - 1])
             start = sc if row == sr else 0
-            end = ec if row == er else len(buf)
+            end = ec if row == er else length
             if start < end:
-                buf[start:end] = " " * (end - start)
-    return tuple("".join(row) for row in rows)
+                spans.setdefault(row, []).append((start, end))
+    if not spans:
+        return tuple(rows)
+    out: List[str] = []
+    for index, row in enumerate(rows, start=1):
+        row_spans = spans.get(index)
+        if row_spans is None:
+            out.append(row)
+            continue
+        for start, end in sorted(row_spans, reverse=True):
+            row = row[:start] + " " * (end - start) + row[end:]
+        out.append(row)
+    return tuple(out)
 
 
 def _code_only_lines(text: str) -> Optional[List[str]]:
@@ -168,8 +271,15 @@ def _code_only_lines(text: str) -> Optional[List[str]]:
 
 
 def clear_code_line_cache() -> None:
-    """Forget the memoised tokenisation; ``scanner.scan_path`` calls this."""
+    """Drop every per-scan memo; ``scanner.scan_path`` calls this twice.
+
+    Two answers are memoised for the length of one scan -- the tokenisation of
+    a text (``_scrubbed_python_lines``) and the step category of a segment
+    (``_classify_cache``). Both are keyed on text the scan read, so both are
+    dropped together when the scan that read it ends.
+    """
     _scrubbed_python_lines.cache_clear()
+    _classify_cache.clear()
 
 
 # Deterministic action separators. Deliberately narrow — no general NLP.
@@ -187,6 +297,15 @@ def _split_actions(line: str) -> List[str]:
     no separator returns a single segment. A leading "then"/"and then" on a
     segment (e.g. after a semicolon) is stripped.
     """
+    # Every branch of ``_ACTION_SEPARATOR`` needs a literal ``;`` or ``then``
+    # (any case) in the line, and so does the leading-"then" strip below. A line
+    # with neither therefore splits into exactly one segment: itself, stripped,
+    # or nothing when it is blank -- which is what the regex below would say at
+    # the price of a regex split on every line of every file (docs/PERFORMANCE.md:
+    # 222 166 splits, 5.0 s of a 20.5 s scan).
+    if ";" not in line and "then" not in line.lower():
+        stripped = line.strip()
+        return [stripped] if stripped else []
     parts = _ACTION_SEPARATOR.split(line)
     out = []
     for p in parts:
@@ -286,9 +405,25 @@ def _normalize_object(obj: str) -> str:
     return " ".join(words)
 
 
-def _extract_action(segment: str, line: int = 0) -> Optional[Action]:
-    """Extract a structured Action from a segment, or None if not an action."""
-    cat = _classify_line(segment)
+# ``_extract_action`` starts by classifying its segment. Its callers in
+# ``analyze_file_chains`` have just classified the same segment for the step
+# list, so they pass the answer in rather than ask the same six detectors
+# twice. The sentinel keeps "the caller classified it as no category" distinct
+# from "the caller did not classify it".
+_NOT_CLASSIFIED = object()
+
+
+def _extract_action(
+    segment: str,
+    line: int = 0,
+    category: object = _NOT_CLASSIFIED,
+) -> Optional[Action]:
+    """Extract a structured Action from a segment, or None if not an action.
+
+    ``category`` is the optional pre-computed :func:`_classify_line` answer for
+    this exact segment; omit it and the segment is classified here.
+    """
+    cat = _classify_line(segment) if category is _NOT_CLASSIFIED else category
     if cat is None:
         return None
 
@@ -513,7 +648,9 @@ def analyze_file_chains(
             if cat:
                 steps.append(cat)
                 step_lines.append(lineno)
-            action = _extract_action(segment, lineno)
+            # The same segment, classified once: ``_extract_action`` would
+            # otherwise run the six detectors again to reach the same answer.
+            action = _extract_action(segment, lineno, cat)
             if action is not None:
                 actions.append(action)
 

@@ -465,10 +465,64 @@ DOWNLOAD_EXECUTE = re.compile(
 )
 
 
+# Two cheap questions in front of two large regexes, one per branch. This is
+# the most expensive rule in the scan -- 2.145 s of 8.34 s of rule time on
+# ``agent/`` (docs/PERFORMANCE.md) -- because ``HTTP_CLIENT`` is a wide
+# alternation and ``HTTP_OBJECT_CALL`` carries ``(?i)``.
+#
+# ``HTTP_CLIENT`` needs one of these spellings: the call/declaration branch
+# names ``requests``/``httpx``/``aiohttp``; ``node-fetch``, ``import got`` and
+# ``require('axios'|'node-fetch'|'got')`` come from the dependency branch;
+# ``axios``, ``fetch(``, ``window.fetch(``, ``node-fetch(``, ``got.``,
+# ``urlopen`` and ``urlretrieve(`` are the remaining call forms; ``urllib`` is
+# the two urllib imports. It is case-sensitive, so this test is too.
+#
+# ``HTTP_OBJECT_CALL`` is case-insensitive and needs a receiver that spells
+# ``http``/``https``/``httpx`` or ``session``, one of the seven HTTP verbs
+# (``get`` is deliberately not one of them), and an argument list. A line
+# without all three cannot match either alternative.
+#
+# Both tests only ever *skip* a regex that cannot match, so the detectors say
+# exactly what they said before. Measured on ``agent/`` (111 083 lines):
+# 1.934 s -> 0.176 s for this rule, 805 lines reach the detectors, 0 lines were
+# dropped and then matched by the pattern (both versions run over the whole
+# tree), and the tree's 43 findings are unchanged.
+_HTTP_CLIENT_STEMS = (
+    "requests", "httpx", "aiohttp", "urllib", "axios", "fetch", "got",
+    "urlopen", "urlretrieve",
+)
+_HTTP_VERB_STEMS = (
+    "post", "put", "patch", "delete", "head", "options", "request",
+)
+
+
+def _mentions_http_library(content: str) -> bool:
+    """True when the line spells a client the ``HTTP_CLIENT`` branch names."""
+    for stem in _HTTP_CLIENT_STEMS:
+        if stem in content:
+            return True
+    return False
+
+
+def _calls_http_verb(content: str) -> bool:
+    """True when the line can carry ``HTTP_OBJECT_CALL``'s receiver form."""
+    lowered = content.lower()
+    if "http" not in lowered and "session" not in lowered:
+        return False
+    if "(" not in lowered:
+        return False
+    for stem in _HTTP_VERB_STEMS:
+        if stem in lowered:
+            return True
+    return False
+
+
 @register
 def detect_http_client(content: str, file_path: str, line: int) -> "Finding | None":
-    matched = _live_match(HTTP_CLIENT, content, reject=_imports_no_client)
-    if matched is None:
+    matched = None
+    if _mentions_http_library(content):
+        matched = _live_match(HTTP_CLIENT, content, reject=_imports_no_client)
+    if matched is None and _calls_http_verb(content):
         matched = _live_match(HTTP_OBJECT_CALL, content)
     if matched is not None:
         return Finding(
