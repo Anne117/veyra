@@ -82,17 +82,38 @@ RULE_ERROR_TYPES = frozenset({RULE_ERROR_LINE, RULE_ERROR_FILE})
 # not entered" in the same breath, so the contradiction is visible instead of
 # implied.
 #
-# Two reasons, because there are two different refusals. ``ignored_dir`` is a
-# name the scanner chose to skip (``SKIP_DIRS``). ``symlink_dir`` is a subtree
-# the walk never follows by construction (``os.walk`` without ``followlinks``):
-# the scanner did not decide to skip it, it simply cannot see through the link,
-# and a *file* symlink is still read (``stat`` follows it). That asymmetry is
-# a fact about the target, not a policy -- so it is named, not judged.
+# Three reasons, because there are three different refusals.
+#
+# ``ignored_dir`` -- machine-produced state the scanner chose to skip
+# (``.git``, ``__pycache__``, caches, virtualenvs). Nothing the target's author
+# wrote lives there, so refusing it is not a hole: the verdict does not move.
+#
+# ``vendored_dir`` -- third-party or build output the scanner chose to skip
+# (``node_modules``, ``dist``, ``build``, ``site-packages``, ``.next``,
+# ``target``). This one CAN hold shipped configuration -- an ``.env`` inside an
+# installed package, a secret compiled into a bundle -- and no rule here ever
+# opens it. A scan that stood on top of it therefore may not claim ``full``;
+# this is the owner's decision (b) in ``docs/COVERAGE-GAPS.md``, taken in
+# ``T8`` of ``NIGHT-QUEUE.md``.
+#
+# ``symlink_dir`` -- a subtree the walk never follows by construction
+# (``os.walk`` without ``followlinks``): the scanner did not decide to skip it,
+# it simply cannot see through the link, and a *file* symlink is still read
+# (``stat`` follows it). That asymmetry is a fact about the target, not a
+# policy -- so it is named, not judged.
 
 PRUNE_IGNORED_DIR = "ignored_dir"
+PRUNE_VENDORED_DIR = "vendored_dir"
 PRUNE_SYMLINK_DIR = "symlink_dir"
 
-PRUNE_REASONS = frozenset({PRUNE_IGNORED_DIR, PRUNE_SYMLINK_DIR})
+PRUNE_REASONS = frozenset(
+    {PRUNE_IGNORED_DIR, PRUNE_VENDORED_DIR, PRUNE_SYMLINK_DIR}
+)
+
+# Prune reasons that withdraw the claim of a complete read. A vendored subtree
+# is content the target ships and the scanner never opened; machine state and
+# an unfollowed link are named for the record but do not move the verdict.
+PARTIAL_PRUNE_REASONS = frozenset({PRUNE_VENDORED_DIR})
 
 
 # --- coverage status --------------------------------------------------------
@@ -120,16 +141,22 @@ def coverage_status(
     files_skipped: Sequence[Dict[str, str]],
     rule_errors: Sequence[Dict[str, Any]],
     decode_errors: Sequence[Dict[str, Any]] = (),
+    dirs_pruned: Sequence[Dict[str, str]] = (),
 ) -> str:
     """Classify how much of the target the scan actually inspected.
 
     ``decode_errors`` counts as partial: the file was scanned, but part of its
     text was invented by the decoder, so "full" would claim characters nobody
-    read. ``dirs_pruned`` is deliberately NOT read here (option (b)).
+    read. ``dirs_pruned`` counts only for the reasons in
+    ``PARTIAL_PRUNE_REASONS``: a skipped ``node_modules/`` is content the target
+    ships and no rule opened, while a skipped ``.pytest_cache/`` is the machine's
+    own state.
     """
     if files_scanned <= 0:
         return COVERAGE_NONE
     if files_skipped or rule_errors or decode_errors:
+        return COVERAGE_PARTIAL
+    if any(r.get("reason") in PARTIAL_PRUNE_REASONS for r in dirs_pruned):
         return COVERAGE_PARTIAL
     return COVERAGE_FULL
 

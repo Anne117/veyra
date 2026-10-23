@@ -161,13 +161,13 @@ class ScanResult:
     files_scanned: int = 0
     files_skipped: List[Dict[str, str]] = field(default_factory=list)
     rule_errors: List[Dict[str, Any]] = field(default_factory=list)
-    # Directories the walk never entered, with reason token ``ignored_dir``.
-    # This is a RECORD, not a verdict: ``coverage_status`` deliberately does
-    # not read it, because turning every ``node_modules`` into ``partial``
-    # changes the product's verdict on ordinary repositories -- that trade is
-    # option (b) in ``docs/COVERAGE-GAPS.md`` and is not taken silently here.
-    # Emitted so a report can print "full" together with "these subtrees were
-    # not opened", instead of leaving the reader to assume there were none.
+    # Directories the walk never entered, with a reason token from
+    # ``veyra.coverage``. ``ignored_dir`` (machine state: ``.git``,
+    # ``__pycache__``, caches, virtualenvs) and ``symlink_dir`` are records
+    # only -- the verdict does not move. ``vendored_dir`` (``node_modules``,
+    # ``dist``, ``build``, ``site-packages``) DOES move it: that subtree can
+    # hold shipped configuration no rule here opened, so the scan cannot call
+    # itself ``full``. Owner decision (b), see ``T8`` in ``NIGHT-QUEUE.md``.
     dirs_pruned: List[Dict[str, str]] = field(default_factory=list)
     # Files that were READ but not as the text they hold: the bytes were not
     # UTF-8, so the decoder inserted replacement characters and part of the
@@ -188,14 +188,16 @@ class ScanResult:
         """What the scan actually read: ``full``, ``partial`` or ``none``.
 
         Derived from ``files_scanned`` / ``files_skipped`` / ``rule_errors``
-        (see ``veyra.coverage``). A result built by hand, with no walk behind
-        it, is ``none`` -- it never guesses that its target was covered.
+        / ``decode_errors`` / ``dirs_pruned`` (see ``veyra.coverage``). A
+        result built by hand, with no walk behind it, is ``none`` -- it never
+        guesses that its target was covered.
         """
         return coverage_status(
             self.files_scanned,
             self.files_skipped,
             self.rule_errors,
             self.decode_errors,
+            self.dirs_pruned,
         )
 
     @property

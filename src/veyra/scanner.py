@@ -16,6 +16,7 @@ from veyra.correlation import correlate_detailed
 from veyra.coverage import (
     PRUNE_IGNORED_DIR,
     PRUNE_SYMLINK_DIR,
+    PRUNE_VENDORED_DIR,
     RULE_ERROR_FILE,
     RULE_ERROR_LINE,
     SKIP_BINARY,
@@ -74,13 +75,22 @@ SCAN_EXTENSIONS = {
 # Files always inspected regardless of extension.
 ALWAYS_SCAN = {"SKILL.md", "AGENTS.md", "CLAUDE.md", ".hermes.md", "HERMES.md"}
 
-# Directories we never descend into.
-SKIP_DIRS = {
+# Directories the walk never descends into, split by *why* it refuses them.
+#
+# The split is a statement about the target, not bookkeeping. Machine-produced
+# state holds nothing the target's author wrote: skipping it is not a hole, and
+# a coverage verdict must not move because a checkout carries a
+# ``.pytest_cache``. Vendored and build output is a different claim -- it can
+# ship configuration (an ``.env`` inside an installed package, a secret
+# compiled into a bundle) that no rule here ever opens -- so a scan standing on
+# top of it may not call itself complete. Both are named in ``dirs_pruned``;
+# only the second makes ``coverage_status`` ``partial`` (owner decision (b),
+# ``T8`` in ``NIGHT-QUEUE.md``).
+SKIP_DIRS_MACHINE = {
     ".git",
     ".hg",
     ".svn",
     "__pycache__",
-    "node_modules",
     ".venv",
     "venv",
     "env",
@@ -88,13 +98,23 @@ SKIP_DIRS = {
     ".nox",
     ".pytest_cache",
     ".mypy_cache",
-    "dist",
-    "build",
+    ".ruff_cache",
     ".idea",
     ".vscode",
-    ".eggs",
-    "site-packages",
 }
+
+SKIP_DIRS_VENDORED = {
+    "node_modules",
+    "dist",
+    "build",
+    "site-packages",
+    ".next",
+    "target",
+    ".eggs",
+}
+
+# Kept as one name because callers and the walk only ask "is this skipped".
+SKIP_DIRS = SKIP_DIRS_MACHINE | SKIP_DIRS_VENDORED
 
 # Maximum file size to scan (bytes). Larger files are skipped as "binary/large".
 MAX_FILE_SIZE = 1_000_000  # 1 MB
@@ -181,13 +201,19 @@ def scan_path(
             # "full" while silently standing on top of an unopened
             # node_modules/, dist/ or a symlinked directory.
             #
-            # Two refusals, two names. ``SKIP_DIRS`` is the scanner's own
-            # choice. A symlinked directory is never followed by
+            # Three refusals, three names. ``SKIP_DIRS`` is the scanner's own
+            # choice, and the group it belongs to decides whether the refusal
+            # costs the verdict its "full" (see ``SKIP_DIRS_VENDORED``). A
+            # symlinked directory is never followed by
             # ``os.walk`` (``followlinks=False``), while a symlinked *file*
             # is read -- so the reach of the scan depends on the link type
             # and, without a name here, on nothing the report can state.
             for name in dirnames:
-                if name in SKIP_DIRS:
+                if name in SKIP_DIRS_VENDORED:
+                    coverage.pruned(
+                        str(Path(dirpath) / name), PRUNE_VENDORED_DIR
+                    )
+                elif name in SKIP_DIRS_MACHINE:
                     coverage.pruned(
                         str(Path(dirpath) / name), PRUNE_IGNORED_DIR
                     )

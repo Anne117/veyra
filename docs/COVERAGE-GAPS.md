@@ -471,4 +471,52 @@ Risk: SAFE   Score: 0/100   Coverage: full (1 read, 0 skipped, 0 pruned dirs)   
 Корень репо: 285 read, 2 skipped, 0 lossy, 11 `ignored_dir`, 567 находок, `partial`/`CRITICAL` —
 как в §11.
 
-Остаток: (а)/(б) по `dirs_pruned`/`symlink_dir` — по-прежнему слово владельца.
+Остаток: (а)/(б) по `dirs_pruned`/`symlink_dir` — закрыт в §15 (выбор (б)).
+
+## 15. Выбор владельца: (б) — `SKIP_DIRS` разделён, вендорное поддерево стоит вердикта
+
+Владелец выбрал (б) (T8 `NIGHT-QUEUE.md`). Реализовано ровно это, и граница между группами —
+не «размер каталога», а **кто написал его содержимое**:
+
+* `ignored_dir` — машинно-производное состояние (`.git`, `__pycache__`, `.pytest_cache`, `.venv`,
+  `.mypy_cache`, `.ruff_cache`, а также VCS-метаданные `.hg`/`.svn`, виртуальные окружения
+  `venv`/`env`/`.nox` и настройки редактора `.idea`/`.vscode`): записи нет у автора цели,
+  отказ не дыра, `coverage_status` не меняется;
+* `vendored_dir` — вендорное/сборочное (`node_modules`, `dist`, `build`, `site-packages`, `.next`,
+  `target`, `.eggs`): может содержать поставленный конфиг (`.env` внутри пакета, секрет в бандле),
+  который здесь не открывает ни одно правило → `coverage_status=partial`, а значит
+  `risk_level=UNKNOWN` и `policy_status=UNKNOWN` (§7);
+* `symlink_dir` — по-прежнему только запись. Это осознанная граница: ссылка может вести **вне**
+  цели, и «partial за каждый симлинк» наказывал бы за свойство файловой системы, а не за
+  непрочитанный продукт. Остаток назван, а не спрятан.
+
+Механика: `PRUNE_VENDORED_DIR` в фиксированном `PRUNE_REASONS`; `PARTIAL_PRUNE_REASONS =
+{"vendored_dir"}` — единственное место, где причина спускается в вердикт; `coverage_status`
+читает `dirs_pruned` **только** через этот набор, поэтому группы не могут съехать одна в другую
+без правки одного frozenset (запинено тестом). Словарь причин остался закрытым: `pruned()`
+отвергает токен вне `PRUNE_REASONS`, как и раньше.
+
+Замер (до/после, один и тот же код-путь, `scan_path`; «pruned» — по причинам):
+
+| цель | до | после |
+|---|---|---|
+| `src` (CI-job `scan`) | `full` 56/0, 7 `ignored_dir` | `full` 56/0, 7 `ignored_dir`, 0 `vendored_dir` |
+| `tests` | `full` 210/0, 1 `ignored_dir` | `full` 210/0, 1 `ignored_dir` |
+| `docs` | `full` 15/0, ничего | `full` 15/0, ничего |
+| `agent/` (hermes, 280 файлов) | `full` 280/0, 8 `ignored_dir` | `full` 280/0, 8 `ignored_dir` |
+| `node_modules/pkg/creds.env.txt` + `src/app.py` | `full`/`SAFE`/`PASS`, 0 находок | `partial`/`UNKNOWN`/`UNKNOWN`, 0 находок, exit 0 |
+| дерево только с `__pycache__` | `full`/`SAFE`/`PASS` | `full`/`SAFE`/`PASS` (не двигается) |
+| корпус Attack Lab | `113 / 103 D / 7 P / 3 M / 0 FP`, 118 сырых находок | **идентично** (тот же список находок, `test_attack_lab` 33 passed) |
+
+`veyra scan src --config .veyra.toml`: JSON/SARIF совпадают до правки во всём, кроме двух
+`startLine` AS-006 внутри `scanner.py` (правка добавила 26 строк) — покрытие `full`, 56 read,
+exit 1, как и было. SARIF: `runs[0].properties.coverage.dirs_pruned` совпадает с JSON, схема
+не тронута (аддитивный `properties`). Терминал печатает группы раздельно:
+`Coverage: partial (1 read, 0 skipped, 0 lossy, 0 machine dirs, 1 vendored dirs, 0 linked dirs)`,
+а строка `Policy: UNKNOWN` называет причину (`1 vendored dirs not entered`), а не «0 skipped».
+
+Тесты: `1861 passed` (число не изменилось — четыре теста блока заменены четырьмя, ожидания
+переписаны по решению владельца, а не подогнаны под код); `test_attack_lab` 33 passed.
+
+Остаток: HTML печатает `Pruned directories` одной суммой — числа те же, но веса групп в HTML
+не различить (терминал различает); `symlink_dir` не влияет на вердикт по причине выше.
