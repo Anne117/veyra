@@ -173,9 +173,14 @@ full coverage, or add a `coverage_status` field and an explicit `UNKNOWN`.
 Implemented, additively:
 
 - `ScanResult.coverage_status` ∈ {`full`, `partial`, `none`}, derived from
-  `files_scanned` / `files_skipped` / `rule_errors` in `veyra.coverage`. `none`
-  means nothing was read at all — including a result built by hand with no walk
-  behind it, which no longer inherits the word `SAFE`.
+  `files_scanned` / `files_skipped` / `rule_errors` / `decode_errors` in
+  `veyra.coverage`. `none` means nothing was read at all — including a result
+  built by hand with no walk behind it, which no longer inherits the word `SAFE`.
+- `decode_errors` (G4, §14 of `COVERAGE-GAPS.md`) is the fourth source of
+  `partial`: a file whose bytes were not UTF-8 is scanned with replacement
+  characters and listed there. It is **not** a skip — the file's readable lines
+  did produce findings — but "scanned" is not "read in full", and only the
+  second claim was being made.
 - `ScanResult.risk_level` = score bucket, except that a `SAFE` bucket is returned
   **only** when `coverage_status == full`; otherwise `UNKNOWN`. `score` and
   `risk_level_for_score` are untouched, so no existing number moved.
