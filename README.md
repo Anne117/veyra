@@ -248,7 +248,9 @@ veyra scan ./path --format json
     "coverage_status": "partial",
     "files_scanned": 12,
     "files_skipped": [ { "path": "assets/logo.png", "reason": "not_scannable" } ],
-    "rule_errors": []
+    "rule_errors": [],
+    "dirs_pruned": [ { "path": "node_modules", "reason": "vendored_dir" } ],
+    "decode_errors": []
   },
   "findings": [ ... ],
   "attack_paths": [
@@ -307,35 +309,9 @@ explicit component-context associations are supplied, the additive
 (and omitted when empty). These fields are added **without** changing the
 existing `target`/`score`/`risk_level`/`summary`/`findings` schema.
 
-### Coverage
-
-`coverage` is always present, because a clean report has to state how much of
-the target it actually read:
-
-- `coverage_status` — `full` / `partial` / `none`: whether everything the walk
-  met was actually inspected (`full`), part of it was (`partial`), or nothing
-  was (`none`). This is what makes a zero score readable.
-- `files_scanned` — files whose text was read and whose rules ran.
-- `files_skipped` — every path the scanner refused, with one reason token from
-  a fixed vocabulary: `binary`, `too_large`, `unreadable`, `decode_error`,
-  `not_scannable`. The reason is never an exception message and never a host
-  path glued into prose.
-- `rule_errors` — a rule that raised instead of crashing the scan
-  (`rule_id`, `path`, `line`, `error_type`); `line` is `null` when a file rule
-  failed on the file as a whole, so a whole-file loss stays visible.
-
-The same block is exposed in SARIF under `runs[0].properties.coverage`. Skipped
-files are **not** added to SARIF `artifacts`: they produced no result to attach
-a location to.
-
-`risk_level` is `SAFE` **only** when the score is zero and `coverage_status` is
-`full`. A zero score over a partial or empty read is `UNKNOWN` (`risk_level`
-in JSON, `Risk:` in the terminal report, the status badge in HTML) — the
-scanner did not find anything, which is not the same as the target being
-clean. `UNKNOWN` is not a score bucket and `score` is unchanged: it is the
-statement that no verdict was earned. A non-zero score keeps its bucket even
-on partial coverage, because a proven finding does not become less true when
-a neighbouring file was skipped.
+The `coverage` block carried by every report is documented once, in its own
+section below: see [Coverage](#coverage) for the six fields, their fixed reason
+tokens, and what coverage decides about `SAFE` / `PASS` / `UNKNOWN`.
 
 ### Attack Paths
 
@@ -765,6 +741,89 @@ instructions (`delete production files`, `upload private SSH keys`,
 literal shell commands; separating an instruction from a description of the
 same action in English is not a regex-shaped problem. The decision and its
 revisit conditions are recorded in `docs/obfuscation-audit.md` (E-3b).
+
+## Coverage
+
+Every report says how much of the target the scanner actually read. The
+`coverage` block is always present, in JSON and in SARIF
+(`runs[0].properties.coverage`), because a clean report that does not say what
+it skipped is itself a claim nobody checked:
+
+- `coverage_status` — `full` / `partial` / `none`: at least one file was read
+  and nothing was refused (`full`), something was read but part of the target
+  was not inspected (`partial`), or nothing was read at all (`none`: an empty
+  tree, an entirely refused target, or a result that never went through a walk).
+  Pruned subtrees are named in `dirs_pruned` rather than counted here; see
+  below for which prune reason withdraws `full`.
+- `files_scanned` — how many files were read and had rules run against them.
+- `files_skipped` — every file the scanner refused, as `{path, reason}`. The
+  reason is one fixed token — `not_scannable`, `binary`, `too_large`,
+  `unreadable` — never an exception message and never a host path glued into
+  prose. A file that is read but not as the text it holds is *not* listed here
+  (see `decode_errors`).
+- `dirs_pruned` — every subtree the walk did not enter, as `{path, reason}`:
+  `ignored_dir` (machine state: `.git`, `__pycache__`, caches, virtualenvs),
+  `vendored_dir` (third-party or build output: `node_modules`, `dist`,
+  `build`, `site-packages`), `symlink_dir` (a linked directory, which the walk
+  never follows by construction; a linked *file* is still read).
+- `decode_errors` — files read with replacement characters because the bytes
+  are not UTF-8: `{path, reason: "decode_error"}`. Kept apart from
+  `files_skipped` on purpose — the file was scanned and may have produced
+  findings, but the decoder supplied part of the text, so the read is not full.
+- `rule_errors` — a rule that raised instead of failing the scan: `rule_id`,
+  `path`, `line` (`null` when a file rule failed on the file as a whole) and
+  `error_type` (`line_rule_exception` / `file_rule_exception`). `rule_id` is a
+  token from Veyra's own source, not text taken from the scanned input.
+
+All lists are sorted, so the block is byte-stable across runs.
+
+Coverage is accounting only: it does **not** change `findings`, `score`,
+`attack_paths` or `policy_results`; it does decide whether a zero score may be
+called `SAFE` and whether a violation-free result may be called `PASS`:
+
+- `SAFE` needs a zero score **and** `coverage_status == "full"`. A zero score
+  over a partial or empty read is `UNKNOWN` — not a score bucket, just the
+  statement that no verdict was earned (`score` stays `0`).
+- `PASS` needs no violated policy **and** `coverage_status == "full"`;
+  otherwise `policy_status` is `UNKNOWN`. Without full coverage, "no
+  violations" only means "none found in what was read".
+- A non-zero score keeps its bucket on partial coverage, and a violated policy
+  stays `FAIL`: a proven finding does not become less true because a
+  neighbouring file was skipped.
+
+`full` is a statement about the walk, not a guarantee about the tree. Pruned
+machine state and unfollowed symlink subtrees are reported in `dirs_pruned`
+next to a `full` status, and a pruned `vendored_dir` withdraws `full`
+altogether — it is content the target ships that no rule opened. Read
+`dirs_pruned` and `files_skipped` together with the status. An `UNKNOWN`
+result may still exit `0`: the exit code gates on proven findings and is not a
+completeness claim (see [Exit codes](#exit-codes-ci-friendly)).
+
+An excerpt of a report over a target whose `node_modules/` was pruned and whose
+notes were not UTF-8 — paths are relative to the target:
+
+```json
+{
+  "target": "./skill",
+  "score": 0,
+  "risk_level": "UNKNOWN",
+  "summary": { "critical": 0, "high": 0, "medium": 0, "low": 0, "suppressed": 0 },
+  "findings": [],
+  "coverage": {
+    "coverage_status": "partial",
+    "files_scanned": 3,
+    "files_skipped": [{ "path": "assets/logo.png", "reason": "not_scannable" }],
+    "rule_errors": [],
+    "dirs_pruned": [{ "path": "node_modules", "reason": "vendored_dir" }],
+    "decode_errors": [{ "path": "notes.txt", "reason": "decode_error" }]
+  },
+  "policy_results": [],
+  "policy_status": "UNKNOWN"
+}
+```
+
+Skipped files are **not** added to SARIF `artifacts`: they produced no result
+to attach a location to.
 
 ## 🤖 GitHub Action
 
