@@ -232,6 +232,71 @@ veyra scan ./path --fail-on CRITICAL   # only fail on critical
 veyra scan ./path --fail-on MEDIUM    # fail on medium or higher
 ```
 
+### Baseline / diff (gate on new findings only)
+
+A mature tree usually has findings you already know about. Re-failing CI on
+them forever teaches everyone to ignore the gate, so Veyra can snapshot them
+once and then gate on the **difference**:
+
+```bash
+veyra baseline create ./path                  # -> ./path/.veyra-baseline.json
+veyra baseline create ./path -o ci/baseline.json
+veyra scan ./path --baseline ci/baseline.json
+veyra scan ./path --baseline ci/baseline.json --format json
+```
+
+- `baseline create` writes one record per finding: `rule_id`, `file` relative
+  to the target, `line`, `evidence`, `severity`, sorted and formatted with a
+  stable byte order. Suppressed findings are included, because suppression is a
+  config decision: un-suppressing one later must not report it as new.
+- `scan --baseline` lists only the **new** findings and `--fail-on` counts only
+  those, so a CRITICAL new finding still exits `2`. What a baseline does *not*
+  do is narrow the result: `score`, `risk_level`, `summary()`, the coverage
+  block and `policy_status` keep describing the whole tree, and every finding
+  is still present in JSON, SARIF and HTML, marked `baseline_state`
+  (`new` / `matched`; SARIF's own `baselineState` is `new` / `unchanged`).
+  A matched CRITICAL backlog therefore never renders as `SAFE`, and the
+  terminal report prints a *Known backlog still present* line with its
+  severity mix instead of hiding it.
+- `fixed` findings (in the snapshot, gone from the tree) are counted in every
+  format and printed under *Fixed Since Baseline* in the terminal report, and
+  they never fail the build; a scan never rewrites the snapshot, so "we fixed
+  it" stays a reviewable act (`veyra baseline create` is the only writer).
+- JSON adds one block next to `policy_status`:
+  `"baseline": {"matched": 12, "new": 1, "fixed": 0}`; SARIF repeats it under
+  `runs[0].properties.baseline`, HTML as three summary cards. `matched` is
+  emitted next to `new` on purpose: the part that fails the build is not the
+  part that grows the debt.
+- A snapshot that lives inside its own target (the default location) is not
+  walked — otherwise it would fingerprint its own bytes — but the refusal is
+  **recorded**: the file appears in `coverage.files_skipped` with the reason
+  `baseline_snapshot`, the coverage status drops from `full` to `partial`, and
+  the terminal report names it. A file nobody read is a fact about the read,
+  not a silent omission.
+- The snapshot never carries host context: file paths are relative to the
+  target, and absolute paths, the home directory and `..` are removed from
+  `evidence` too (correlation evidence embeds `file:line` of every
+  contributor). An absolute and a relative target produce byte-identical
+  snapshots, and the output does not depend on `PYTHONHASHSEED`.
+- Matching is the **whole tuple** — no wildcard, no fuzzy line matching, no
+  severity normalisation. A line inserted above a finding therefore makes it
+  `fixed` + `new`, and raising a finding's severity re-flags it. Both
+  directions are deliberate: a "smart" match is a way to pre-seed a baseline
+  and keep a real finding out of the gate.
+- A baseline never mutes the verdict: `policy_status` and the coverage block
+  are computed exactly as before, so a policy violation still fails even when
+  `new == 0`, and a partial read with zero new findings is `UNKNOWN`, not
+  `SAFE`.
+- A missing, unreadable, oversized (> 5 MB or > 100 000 records) or
+  non-regular (directory, FIFO) baseline file exits `2` — a broken gate must
+  not look like an empty one.
+- The snapshot is an input a pull request can edit, and whoever can commit it
+  controls the verdict. Keep it in `CODEOWNERS` under the security reviewers,
+  and read `matched` (not only `new`) when reviewing a diff that changes it.
+  It is also a committed copy of the evidence text (URLs, commands, redacted
+  credential prefixes), so in a public repository treat it as one more
+  published artifact rather than a private one.
+
 ### JSON output
 
 ```bash
@@ -758,9 +823,13 @@ it skipped is itself a claim nobody checked:
 - `files_scanned` — how many files were read and had rules run against them.
 - `files_skipped` — every file the scanner refused, as `{path, reason}`. The
   reason is one fixed token — `not_scannable`, `binary`, `too_large`,
-  `unreadable` — never an exception message and never a host path glued into
-  prose. A file that is read but not as the text it holds is *not* listed here
-  (see `decode_errors`).
+  `unreadable`, `baseline_snapshot` — never an exception message and never a
+  host path glued into prose. `baseline_snapshot` is the one skip the scanner
+  takes on the caller's instruction: a baseline file living inside the tree it
+  belongs to (`veyra scan <target> --baseline <file>`). It is recorded and it
+  withdraws `full`, because a file in the tree that no rule read is a gap in
+  the read, whoever asked for it. A file that is read but not as the text it
+  holds is *not* listed here (see `decode_errors`).
 - `dirs_pruned` — every subtree the walk did not enter, as `{path, reason}`:
   `ignored_dir` (machine state: `.git`, `__pycache__`, caches, virtualenvs),
   `vendored_dir` (third-party or build output: `node_modules`, `dist`,

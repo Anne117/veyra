@@ -19,6 +19,7 @@ from veyra.coverage import (
     PRUNE_VENDORED_DIR,
     RULE_ERROR_FILE,
     RULE_ERROR_LINE,
+    SKIP_BASELINE,
     SKIP_BINARY,
     SKIP_DECODE_ERROR,
     SKIP_NOT_SCANNABLE,
@@ -193,8 +194,21 @@ def _clear_line_rule_cache() -> None:
 def scan_path(
     target: str,
     component_context: Optional[List[ComponentContextAssociation]] = None,
+    exclude_paths: Optional[List[str]] = None,
 ) -> ScanResult:
     """Scan a file or directory and return a ScanResult.
+
+    ``exclude_paths`` names files the caller owns and the walk must not read
+    (a baseline snapshot living inside the target). They are skipped before
+    any rule sees them, and the skip is RECORDED in coverage
+    (``baseline_snapshot``), because the file is target content nobody read:
+    the report says how many files were skipped and ``coverage_status`` turns
+    ``full`` into ``partial``. An unrecorded exclusion would be a detection
+    hole that still claims a complete read -- the same silence the coverage
+    block exists to end. Without the exclusion itself, a snapshot of a tree
+    that sits inside that same tree fingerprints its own bytes, the next run
+    sees a changed chain evidence line, and every scan manufactures a "new"
+    finding.
 
     ``component_context`` is an OPTIONAL additive, explicit input: a list of
     already-validated :class:`ComponentContextAssociation` objects. When
@@ -227,9 +241,15 @@ def scan_path(
     findings: List[Finding] = []
     file_texts: List[str] = []  # (text, path) pairs for step-sequence analysis
     root = Path(target)
+    excluded = {
+        os.path.abspath(str(candidate)) for candidate in (exclude_paths or ()) if candidate
+    }
 
     if root.is_file():
-        findings.extend(_scan_file(root, rules, file_rules, file_texts, coverage))
+        if excluded and os.path.abspath(str(root)) in excluded:
+            coverage.skipped(str(root), SKIP_BASELINE)
+        else:
+            findings.extend(_scan_file(root, rules, file_rules, file_texts, coverage))
     elif root.is_dir():
         for dirpath, dirnames, filenames in os.walk(root):
             # Name every subtree the walk refuses to enter. The name is a
@@ -261,6 +281,12 @@ def scan_path(
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             for fname in filenames:
                 fpath = Path(dirpath) / fname
+                if excluded and os.path.abspath(str(fpath)) in excluded:
+                    # Recorded, not silently dropped: the file is in the tree,
+                    # no rule read it, and the report must say so (coverage
+                    # turns ``partial``). See the docstring above.
+                    coverage.skipped(str(fpath), SKIP_BASELINE)
+                    continue
                 findings.extend(
                     _scan_file(fpath, rules, file_rules, file_texts, coverage)
                 )

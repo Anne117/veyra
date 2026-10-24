@@ -166,6 +166,18 @@ def _build_results(
                 }
             )
 
+        # Baseline diff (``veyra scan --baseline``). SARIF 2.1.0 owns this
+        # concept: ``baselineState`` says whether a result is ``new`` or
+        # ``unchanged`` against a previous run. A matched finding is therefore
+        # still a result with its full level and location -- it is marked, not
+        # deleted, and the run-level counts below repeat the shape the JSON
+        # reporter emits. Absent when no baseline was applied, so a plain scan
+        # produces the same document as before.
+        if f.baseline_state == "new":
+            r["baselineState"] = "new"
+        elif f.baseline_state == "matched":
+            r["baselineState"] = "unchanged"
+
         results.append(r)
     return results
 
@@ -375,6 +387,13 @@ def render_sarif(result: ScanResult) -> str:
     # `properties` only: no SARIF structure added, no result invented. A
     # consumer must not read a run without policy results as "policies passed".
     run_props["policy"] = {"policy_status": result.policy_status}
+    # Run-level baseline diff, identical in shape to the JSON block. ``matched``
+    # and ``fixed`` are emitted next to ``new``: a consumer that reads only the
+    # new count cannot tell a clean tree from a gate on top of a known backlog,
+    # which is exactly what ``baselineState`` per result and this block exist
+    # to prevent. Omitted entirely when no baseline was applied.
+    if result.baseline is not None:
+        run_props["baseline"] = dict(result.baseline)
     if run_props:
         run["properties"] = run_props
     doc: Dict[str, Any] = {

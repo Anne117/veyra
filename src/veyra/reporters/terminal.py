@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
+from veyra.baseline import BaselineDiff
 from veyra.coverage import (
     PRUNE_IGNORED_DIR,
     PRUNE_SYMLINK_DIR,
     PRUNE_VENDORED_DIR,
+    SKIP_BASELINE,
 )
 from veyra.models import POLICY_UNKNOWN, ScanResult, Severity
 
@@ -23,6 +27,15 @@ def _pruned_counts(result: ScanResult) -> dict[str, int]:
     return counts
 
 
+def _baseline_skips(result: ScanResult) -> list[str]:
+    """Files the walk refused because the caller named them as its baseline."""
+    return [
+        record["path"]
+        for record in result.files_skipped
+        if record.get("reason") == SKIP_BASELINE
+    ]
+
+
 def _unknown_reasons(result: ScanResult) -> list[str]:
     """Why the verdict is not a PASS, in the terms the scan actually recorded."""
     reasons: list[str] = []
@@ -38,12 +51,27 @@ def _unknown_reasons(result: ScanResult) -> list[str]:
     return reasons or ["nothing was read"]
 
 
-def render_terminal(result: ScanResult) -> str:
+def _matched_by_severity(result: ScanResult) -> dict[str, int]:
+    """Baseline-matched findings still present, counted per severity."""
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+    for f in result.findings:
+        if f.baseline_state == "matched" and not f.suppressed:
+            counts[f.severity.value] = counts.get(f.severity.value, 0) + 1
+    return {sev: n for sev, n in counts.items() if n}
+
+
+def render_terminal(
+    result: ScanResult, baseline: Optional[BaselineDiff] = None
+) -> str:
     lines: list[str] = []
     lines.append("Veyra Security Report")
     lines.append(SEP)
     lines.append("")
     lines.append(f"Target: {result.target}")
+    # Score and risk always describe the WHOLE tree, baseline or not: they are
+    # read off ``result.findings``, which the diff annotates but never
+    # shortens. A run whose only findings are matched therefore still reads
+    # CRITICAL / 100 -- never "clean" -- and the gate alone is narrowed.
     lines.append(f"Risk: {result.risk_level}")
     lines.append(f"Score: {result.score}/100")
     # A score without its denominator invites reading "0 findings" as
@@ -55,10 +83,12 @@ def render_terminal(result: ScanResult) -> str:
     # ``partial``. A single "N pruned dirs" number would let the reader assume
     # both weigh the same.
     pruned = _pruned_counts(result)
+    excluded = _baseline_skips(result)
     lines.append(
         "Coverage: "
         f"{result.coverage_status} "
         f"({result.files_scanned} read, {len(result.files_skipped)} skipped"
+        f", {len(excluded)} baseline snapshot"
         f", {len(result.decode_errors)} lossy"
         f", {pruned[PRUNE_IGNORED_DIR]} machine dirs"
         f", {pruned[PRUNE_VENDORED_DIR]} vendored dirs"
@@ -78,9 +108,45 @@ def render_terminal(result: ScanResult) -> str:
             f"{', '.join(reasons)})"
         )
     lines.append(policy_line)
+    if baseline is not None:
+        # ``matched`` sits next to ``new``: the number that grew is the debt,
+        # and a gate that reports only its failures hides it. The note keeps
+        # "0 new" from being read as "clean": the score above is the whole
+        # tree, only the exit code is narrowed.
+        lines.append(
+            f"Baseline: matched={baseline.matched} new={baseline.new} "
+            f"fixed={baseline.fixed} "
+            "(finding list and --fail-on count NEW only; score, risk, "
+            "coverage and policy cover ALL findings)"
+        )
+        backlog = _matched_by_severity(result)
+        if backlog:
+            detail = ", ".join(f"{sev} {n}" for sev, n in backlog.items())
+            lines.append(
+                f"Known backlog still present (matched, not failing): {detail}"
+            )
+    for path in excluded:
+        # The snapshot inside the target is target content no rule read. It is
+        # in coverage as a skip (so the status is not "full") and it is named
+        # here, so the exclusion is a recorded decision, not a silent hole.
+        lines.append(
+            f"Baseline snapshot not scanned (counted in coverage): {path}"
+        )
     lines.append("")
 
-    for f in result.findings:
+    # Only the new findings are listed: the operator acts on those, and the
+    # matched backlog is summarised above instead of buried in the output.
+    shown = (
+        result.findings
+        if baseline is None
+        else [f for f in result.findings if f.baseline_state == "new"]
+    )
+    if baseline is not None and not shown:
+        lines.append("No new findings. This is not a clean tree: see the score,")
+        lines.append("the known backlog line and the coverage status above.")
+        lines.append("")
+
+    for f in shown:
         sev = f.severity.value
         loc = f"{f.file}"
         if f.line:
@@ -107,8 +173,18 @@ def render_terminal(result: ScanResult) -> str:
             lines.append(f"          Matched: {f.matched_text}")
         lines.append("")
 
+    # Findings the baseline still lists and this tree no longer produces.
+    # Printed, never silently dropped: "we fixed it" has to be a claim someone
+    # can read, and a scan must not rewrite the snapshot to make it true.
+    if baseline is not None and baseline.fixed_records:
+        lines.append("Fixed Since Baseline (informational, does not fail)")
+        lines.append("-------------------------------------------------")
+        for record in baseline.fixed_records:
+            lines.append(f"{record.severity:<8}  {record.rule_id}  {record.location}")
+        lines.append("")
+
     s = result.summary()
-    lines.append("Summary")
+    lines.append("Summary (all findings, baseline or not)" if baseline else "Summary")
     lines.append("-------")
     lines.append(f"Critical: {s['critical']}")
     lines.append(f"High:     {s['high']}")

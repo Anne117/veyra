@@ -31,6 +31,15 @@ SKIP_TOO_LARGE = "too_large"
 SKIP_UNREADABLE = "unreadable"
 SKIP_DECODE_ERROR = "decode_error"
 SKIP_NOT_SCANNABLE = "not_scannable"
+# A caller-owned artifact the walk was told not to read: a baseline snapshot
+# that lives inside the tree it describes. The file is real target content --
+# it sits in the tree, it is committed, and a rule would have read it -- so
+# refusing it is a hole in the read and is recorded as one. Recording it also
+# withdraws ``full``: a scan that skipped a file may not call itself complete
+# (see ``coverage_status``). Without this, an in-tree baseline made the walk
+# drop a ``.json`` file in silence while the report still said "everything was
+# read".
+SKIP_BASELINE = "baseline_snapshot"
 
 SKIP_REASONS = frozenset(
     {
@@ -39,6 +48,7 @@ SKIP_REASONS = frozenset(
         SKIP_UNREADABLE,
         SKIP_DECODE_ERROR,
         SKIP_NOT_SCANNABLE,
+        SKIP_BASELINE,
     }
 )
 

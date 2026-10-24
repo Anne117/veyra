@@ -88,6 +88,13 @@ class Finding:
     cwe: List[str] = field(default_factory=list)
     confidence: Confidence = Confidence.MEDIUM
     matched_text: str = ""
+    # Baseline diff state, set only by ``veyra scan --baseline`` (T12):
+    # ``"new"`` for a finding absent from the snapshot, ``"matched"`` for one
+    # the snapshot already lists. ``None`` means no baseline was applied, and
+    # then the key is not emitted at all, so a plain scan's JSON shape is
+    # unchanged. It is a report annotation, never an input to detection: the
+    # finding is still reported with its own severity, file and line.
+    baseline_state: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -102,6 +109,9 @@ class Finding:
         # Do not emit empty "matched_text" when absent.
         if not d.get("matched_text"):
             d.pop("matched_text", None)
+        # Do not emit "baseline_state": null for a scan without a baseline.
+        if d.get("baseline_state") is None:
+            d.pop("baseline_state", None)
         return d
 
 
@@ -153,7 +163,10 @@ class ScanResult:
     # Additive coverage accounting. What this scan actually READ, what it
     # refused, and why. Reasons are fixed tokens from ``veyra.coverage``
     # (``binary``, ``too_large``, ``unreadable``, ``decode_error``,
-    # ``not_scannable``), never free text and never a host path in prose.
+    # ``not_scannable``, ``baseline_snapshot``), never free text and never a
+    # host path in prose. ``baseline_snapshot`` is the one caller-requested
+    # skip: a baseline file inside the tree it describes is not scanned, and
+    # the skip is recorded so ``full`` is withdrawn (T12).
     # ``rule_errors`` records a rule that raised (``line`` is None when the
     # rule failed on the file as a whole). Zero/empty means "no tree was
     # walked or nothing was refused" -- it NEVER by itself means "everything
@@ -177,6 +190,13 @@ class ScanResult:
     # ``partial``, and therefore a zero score into ``UNKNOWN`` rather than
     # ``SAFE``.
     decode_errors: List[Dict[str, str]] = field(default_factory=list)
+    # Additive diff against a baseline snapshot (``veyra scan --baseline``).
+    # ``{"matched": n, "new": n, "fixed": n}`` when a baseline was applied,
+    # ``None`` otherwise -- so a scan without ``--baseline`` keeps its exact
+    # previous JSON shape. The counts describe the findings that were compared,
+    # not a verdict: ``policy_status`` and ``coverage`` are computed from the
+    # same data as before and are never narrowed by this block.
+    baseline: Optional[Dict[str, int]] = None
 
     @property
     def score(self) -> int:
@@ -308,6 +328,12 @@ class ScanResult:
         # representation is stable and complete regardless of findings.
         d["policy_results"] = [r.to_dict() for r in self.policy_results]
         d["policy_status"] = self.policy_status
+        # Additive baseline diff. Present only when a baseline was applied, so
+        # the shape of a plain scan is unchanged. ``matched`` is emitted next to
+        # ``new`` on purpose: a growing backlog must be visible, not only the
+        # part of it that fails the build.
+        if self.baseline is not None:
+            d["baseline"] = dict(self.baseline)
         # Additive component-security-scope projection. Present only when the
         # caller supplied explicit scope data (never inferred); omitted when
         # empty so clean/unchanged scans keep the same stable shape.

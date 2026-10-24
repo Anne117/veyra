@@ -111,6 +111,16 @@ def _summary_html(result: ScanResult) -> str:
         cells.append(("Highest attack risk", _esc(highest["score"])))
         cells.append(("Highest attack type", _esc(highest["attack_type"])))
 
+    # Baseline diff, next to the status it annotates. The status cell above is
+    # derived from ALL findings (see ScanResult.score / risk_level), so a
+    # matched backlog still shows its real risk here; these three cells add
+    # how much of it the gate is currently allowing through.
+    if result.baseline is not None:
+        data = result.baseline
+        cells.append(("Baseline matched", _esc(data.get("matched", 0))))
+        cells.append(("Baseline new", _esc(data.get("new", 0))))
+        cells.append(("Baseline fixed", _esc(data.get("fixed", 0))))
+
     cards = "".join(
         f'<div class="stat"><div class="stat-label">{_esc(label)}</div>'
         f'<div class="stat-value">{value}</div></div>'
@@ -531,6 +541,10 @@ def _findings_html(result: ScanResult) -> str:
             loc += f":{_esc(f.line)}"
         status = "Suppressed" if f.suppressed else "Active"
         status_cls = "status-suppressed" if f.suppressed else "status-active"
+        if not f.suppressed and f.baseline_state == "new":
+            status, status_cls = "New", "status-violated"
+        elif not f.suppressed and f.baseline_state == "matched":
+            status, status_cls = "Baseline", "status-pass"
         rows.append(
             "<tr>"
             f'<td class="mono">{_esc(f.rule_id)}</td>'

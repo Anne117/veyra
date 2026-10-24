@@ -7,6 +7,15 @@ import json
 import sys
 
 from veyra.attack_lab import run_attack_lab
+from veyra.baseline import (
+    BaselineError,
+    apply_baseline,
+    baseline_path_for_target,
+    build_records,
+    load_baseline,
+    scan_root,
+    write_baseline,
+)
 from veyra.models import Severity
 from veyra.reporters import render_html, render_json, render_sarif, render_terminal
 from veyra.scanner import scan_path
@@ -52,6 +61,44 @@ def build_parser() -> argparse.ArgumentParser:
         default="HIGH",
         help="Minimum severity that causes a non-zero exit (default: HIGH).",
     )
+    scan.add_argument(
+        "--baseline",
+        default=None,
+        metavar="FILE",
+        help=(
+            "Mark every finding as new or matched against this baseline "
+            "snapshot (see 'veyra baseline create'). --fail-on then counts "
+            "new findings only; the report keeps all of them and fixed "
+            "findings are printed but never fail."
+        ),
+    )
+
+    baseline_p = sub.add_parser(
+        "baseline",
+        help="Snapshot known findings so CI can gate on new ones only.",
+    )
+    baseline_sub = baseline_p.add_subparsers(
+        dest="baseline_command", required=True
+    )
+    bcreate = baseline_sub.add_parser(
+        "create",
+        help="Write the fingerprints of the findings this target produces now.",
+    )
+    bcreate.add_argument("target", help="File or directory to snapshot.")
+    bcreate.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help=(
+            "Baseline file to write (default: <target>/.veyra-baseline.json "
+            "for a directory, <target>.baseline.json for a file)."
+        ),
+    )
+    bcreate.add_argument(
+        "--config",
+        default=None,
+        help="Path to a .veyra.toml config file (default: auto-discover).",
+    )
 
     threats_p = sub.add_parser(
         "threats",
@@ -95,15 +142,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _exit_code(result, fail_on: str) -> int:
+def _exit_code(result, fail_on: str, only_new: bool = False) -> int:
     """Exit code based on the failure threshold.
 
     0 = no findings at or above the threshold.
     1 = findings at or above the threshold (but below CRITICAL).
     2 = CRITICAL findings.
+
+    ``only_new`` restricts the gate to findings the baseline does not already
+    list. It is a filter over the SAME finding list the report shows -- the
+    score, risk level, summary and policy verdict keep describing the whole
+    tree, so the report can never claim a matched backlog is clean. A finding
+    without a ``baseline_state`` (not compared to any snapshot) counts as new:
+    the gate fails closed.
     """
     threshold = _SEVERITY_ORDER[fail_on]
     active = [f for f in result.findings if not f.suppressed]
+    if only_new:
+        active = [f for f in active if f.baseline_state != "matched"]
 
     if any(f.severity == Severity.CRITICAL for f in active):
         return 2
@@ -207,13 +263,40 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "scan":
         try:
-            result = scan_path(args.path)
+            # The snapshot may live inside the target (that is the default
+            # location). It is the caller's own artifact, so the walk must not
+            # read it -- otherwise the baseline fingerprints its own bytes and
+            # every run invents a new finding from the previous run's file.
+            # The refusal is recorded as a coverage skip (reason
+            # ``baseline_snapshot``), so the run says "partial" instead of
+            # claiming a complete read it did not perform.
+            result = scan_path(
+                args.path,
+                exclude_paths=[args.baseline] if args.baseline else None,
+            )
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 2
 
         config = load_config(args.config or args.path)
         result.findings = apply_suppression(result.findings, config)
+
+        # Baseline diff (optional). A missing, unreadable, oversized or
+        # truncated snapshot is exit 2: an unusable gate must not be mistaken
+        # for an empty one, and it must not silently pass a build either.
+        baseline_diff = None
+        if args.baseline is not None:
+            try:
+                records = load_baseline(args.baseline)
+            except BaselineError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 2
+            # The walk already skipped the snapshot file (see the scan_path
+            # call above); excluding it here as well keeps a baseline stored
+            # outside the target from ever contributing a finding.
+            result, baseline_diff = apply_baseline(
+                result, args.path, records, exclude_paths=[args.baseline]
+            )
 
         if args.format == "json":
             print(render_json(result))
@@ -222,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.format == "html":
             print(render_html(result))
         else:
-            print(render_terminal(result))
+            print(render_terminal(result, baseline=baseline_diff))
 
         # Policy security gate: a policy violation (policy_status == "FAIL")
         # forces a non-zero exit (at least 1). The severity-based exit code is
@@ -230,13 +313,44 @@ def main(argv: list[str] | None = None) -> int:
         # a clean/low-severity (0) result to 1. The single source of truth for
         # the policy part is the finalized ScanResult policy status.
         #
+        # A baseline annotates the findings (new / matched) and adds the
+        # diff block; it does NOT replace the finding list. The severity gate
+        # below counts only the new ones, while score, risk level, summary,
+        # the reports and the policy gate keep reading the whole tree -- a
+        # baseline may mute a finding from the gate, never turn a matched
+        # backlog into a clean report or a proven policy violation into a pass.
+        #
         # "UNKNOWN" (no violation proven, target not fully read) does NOT fail
         # the build: an unread .png next door must not turn every CI run red.
         # It is also not a pass -- the exit code is a gate, not a verdict, and
         # the verdict is UNKNOWN in JSON, SARIF, HTML and the terminal report.
-        severity_code = _exit_code(result, args.fail_on)
+        severity_code = _exit_code(
+            result, args.fail_on, only_new=baseline_diff is not None
+        )
         policy_code = 1 if result.policy_status == "FAIL" else 0
         return max(severity_code, policy_code)
+
+    if args.command == "baseline":
+        if args.baseline_command == "create":
+            output = args.output or baseline_path_for_target(args.target)
+            try:
+                result = scan_path(args.target, exclude_paths=[output])
+            except FileNotFoundError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 2
+            config = load_config(args.config or args.target)
+            result.findings = apply_suppression(result.findings, config)
+            try:
+                records = build_records(
+                    result.findings,
+                    scan_root(args.target),
+                )
+                write_baseline(output, records)
+            except BaselineError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 2
+            print(f"Baseline: {len(records)} findings written to {output}")
+            return 0
 
     if args.command == "threats":
         catalogs = _threat_catalogs()
