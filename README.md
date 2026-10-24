@@ -297,6 +297,45 @@ veyra scan ./path --baseline ci/baseline.json --format json
   credential prefixes), so in a public repository treat it as one more
   published artifact rather than a private one.
 
+### Explaining one record (`veyra explain`)
+
+```
+veyra explain <finding-id|path-id> --target ./path --format text
+veyra explain --target ./path        # list the ids this run derives
+```
+
+One record, explained from a fresh scan: no LLM, no network, no report file.
+
+```
+veyra explain fnd-4edeaf87744f --target ./path
+```
+
+- A finding id is derived (`fnd-` + 12 hex digits of SHA-256) from the same
+  five-field tuple the baseline fingerprints: `rule_id`, the file relative to
+  the scan root, `line`, the path-scrubbed `evidence`, `severity`. The exact
+  recipe is in `docs/EXPLAIN.md` and is executed as written by a test.
+- A path id is the full 64-hex `AttackPath.path_id`. Prefixes are rejected:
+  they are ambiguous by construction.
+- The output is a run header (target, `coverage_status`, `policy_status`), a
+  record block that only restates real `Finding` / `AttackPath` fields, and —
+  for a path — a proof check that re-evaluates the recorded `attack_type`
+  against the record's **stored** nodes and edges and prints
+  `proof-result: proven` or `not-proven`. The type definition is printed as a
+  definition, never as a claim about the record.
+- Explaining one record is not a verdict on the target: `partial` / `none`
+  coverage is printed as `UNKNOWN`, `suppressed` findings are printed as
+  suppressed with their reason, and a finding without a line prints `(none)`
+  rather than a number.
+- A malformed, unknown or ambiguous id exits `2` with the message on stderr and
+  an empty stdout; the ids that do exist are listed next to the rejected one.
+  Two findings that agree on all five fields share an id, and `explain` reports
+  that ambiguity instead of picking the first.
+- `evidence`, `matched_text`, file names, titles and node labels are
+  repository-controlled text: they go through the baseline's host-path
+  scrubber and one shared control-character escaper
+  (`veyra.sanitize.escape_untrusted`) before printing, so a repository cannot
+  forge a line or emit ANSI escapes into a CI log.
+
 ### JSON output
 
 ```bash

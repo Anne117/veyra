@@ -16,6 +16,13 @@ from veyra.baseline import (
     scan_root,
     write_baseline,
 )
+from veyra.explain import (
+    ExplainError,
+    classify_id,
+    invalid_id_message,
+    render_explanation,
+    render_index,
+)
 from veyra.models import Severity
 from veyra.reporters import render_html, render_json, render_sarif, render_terminal
 from veyra.scanner import scan_path
@@ -139,6 +146,43 @@ def build_parser() -> argparse.ArgumentParser:
         default="terminal",
         help="Output format (default: terminal).",
     )
+
+    explain = sub.add_parser(
+        "explain",
+        help=(
+            "Explain one finding or attack path of a fresh scan, without an "
+            "LLM: which rule fired, on which line, with which evidence, or "
+            "which nodes/edges/breakpoints a path is made of."
+        ),
+    )
+    explain.add_argument(
+        "record_id",
+        nargs="?",
+        default=None,
+        help=(
+            "Finding id (fnd-<12 lowercase hex>) or full attack path id "
+            "(64 lowercase hex). Omit it to list the ids this target derives."
+        ),
+    )
+    explain.add_argument(
+        "--target",
+        default=".",
+        help="File or directory to scan for the record (default: .).",
+    )
+    explain.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Path to a .veyra.toml config file (default: auto-discover next to "
+            "the target), so the suppression state shown here matches 'scan'."
+        ),
+    )
+    explain.add_argument(
+        "--format",
+        choices=["text"],
+        default="text",
+        help="Output format. Only 'text' exists: T13 reads no report file.",
+    )
     return parser
 
 
@@ -255,6 +299,46 @@ def _render_attack_lab(lab) -> str:
         lines.append(f"  [{c['result']:<18}] {c['category']}/{c['name']}")
     lines.append("")
     return "\n".join(lines)
+
+
+def _run_explain(args) -> int:
+    """Explain one record, or list the ids the target derives.
+
+    Order matters: the id shape is validated first, so a malformed id never
+    reaches the filesystem. Every failure is exit 2 with the message on stderr
+    and nothing on stdout -- a partial explanation would look like a complete
+    one.
+    """
+    raw_id = args.record_id
+    kind = None
+    if raw_id is not None:
+        kind = classify_id(raw_id)
+        if kind is None:
+            print(invalid_id_message(raw_id), file=sys.stderr)
+            return 2
+
+    try:
+        result = scan_path(args.target)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+
+    # Same suppression pass as ``scan``: the explained record must be the
+    # record the report shows, including its "suppressed" state.
+    result.findings = apply_suppression(
+        result.findings, load_config(args.config or args.target)
+    )
+
+    try:
+        if raw_id is None:
+            print(render_index(result, args.target), end="")
+        else:
+            assert kind is not None  # narrowed by the shape check above
+            print(render_explanation(result, args.target, raw_id, kind), end="")
+    except ExplainError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -377,6 +461,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(_render_attack_lab(lab))
         return 0
+
+    if args.command == "explain":
+        return _run_explain(args)
 
     parser.print_help()
     return 0
