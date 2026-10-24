@@ -182,6 +182,28 @@ python -m venv .venv
 
 Requires Python 3.9+.
 
+## ⚡ Quickstart: see it work in three commands
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # 1. environment + install
+.venv/bin/veyra demo                                          # 2. scan the demo fixture
+xdg-open veyra-demo.html                                      # 3. open the report (macOS: open veyra-demo.html)
+```
+
+`veyra demo` scans the four local files in `tests/fixtures/demo/` (a prompt
+injection, a `curl | bash` installer, a `shell=True` helper and an MCP config)
+with no network access, prints a short summary, and writes
+`veyra-demo.html` into the current directory. It refuses to overwrite an
+existing file or to write through a symlink: pass `--force` to replace a file,
+or `--out other.html` to write elsewhere. The demo is a walkthrough of the
+report format on a known fixture — it is **not** corpus coverage (that is
+`veyra attack-lab` with its 113 cases) and not a verdict on your own code. If
+the scan cannot read the whole fixture, the summary says `UNKNOWN` with the
+reason. The fixture lives outside the package, so `veyra demo` needs a source
+checkout and fails with an explicit message when there is none; inside an
+installed wheel, name the checkout with
+`VEYRA_DEMO_FIXTURE=<checkout>/tests/fixtures/demo`.
+
 ## 🚀 Usage
 
 ```bash

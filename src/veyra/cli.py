@@ -183,6 +183,28 @@ def build_parser() -> argparse.ArgumentParser:
         default="text",
         help="Output format. Only 'text' exists: T13 reads no report file.",
     )
+
+    demo = sub.add_parser(
+        "demo",
+        help=(
+            "Scan a built-in local fixture and write veyra-demo.html next to "
+            "the caller. Offline; a walkthrough, not a corpus measurement."
+        ),
+    )
+    demo.add_argument(
+        "--out",
+        default="veyra-demo.html",
+        metavar="FILE",
+        help="Where to write the HTML report (default: ./veyra-demo.html).",
+    )
+    demo.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Allow replacing an existing regular file at --out. A symlink is "
+            "never written through, with or without this flag."
+        ),
+    )
     return parser
 
 
@@ -464,6 +486,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "explain":
         return _run_explain(args)
+
+    if args.command == "demo":
+        # Imported here, not at module import time: `veyra scan` must not
+        # depend on the demo fixture existing in the installation.
+        from veyra.demo import DemoError, run_demo
+
+        try:
+            outcome = run_demo(args.out, force=args.force)
+        except DemoError as e:
+            # Nothing has been printed on stdout: a demo that cannot write
+            # its report must not leave a half-report that looks complete.
+            print(f"Error: {e}", file=sys.stderr)
+            return 2
+        print(outcome.report, end="")
+        return 0
 
     parser.print_help()
     return 0

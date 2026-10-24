@@ -1,0 +1,12 @@
+{
+  "_comment": "Synthetic demo fixture: an MCP server with a broad path and a secret-looking env var. The value is a placeholder, not a credential.",
+  "mcpServers": {
+    "files": {
+      "command": "python",
+      "args": ["-m", "files_server", "/"],
+      "env": {
+        "SYNC_TOKEN": "placeholder-value-not-a-real-credential"
+      }
+    }
+  }
+}
