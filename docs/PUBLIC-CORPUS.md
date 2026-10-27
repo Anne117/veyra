@@ -490,3 +490,243 @@ git -C ~/public-corpus/servers status --porcelain    # empty
 The classification in §4 is reproducible by anyone willing to open the same
 lines at the same commits; the verdicts are arguments about those lines, and
 that is all they claim to be.
+
+## T16: after — 67 → 19 HIGH+CRITICAL, same five clones, same commands
+
+Date: 2026-10-27. §1–§11 above are left exactly as measured on 2026-10-24: they
+are the *before*. This section is the *after* of the four rule changes T16
+approved, measured on the same five commits, and it is written by the same
+method: one unit is **one finding in the JSON**, not a row and not a line
+(three of the 19 remaining findings sit on one line and are counted three
+times, §T16.3 rows 9, 10, 19).
+
+Only `src/veyra/rules/shell.py`, `src/veyra/rules/sensitive_paths.py`,
+`src/veyra/rules/secrets.py`, `src/veyra/step_sequence.py`, one new test file
+and this section changed. No expected value in `attack-lab`, no severity, no
+threshold, no fixture and no existing test was touched.
+
+### T16.1 The four mechanisms, as implemented
+
+| # | Class | Mechanism | Where |
+|---|---|---|---|
+| 1 | `AS-002` `EVAL_EXEC` | The callee must be the global: `eval(` / `exec(` with the paren adjacent. A receiver-qualified `exec` is exempt **only when the receiver proves it is a RegExp** — a literal (`/x/.exec`) or a regex-named identifier (`re`, `_PATTERN`, `EXCLUDED_RE`). `new Function(` and `setTimeout("…")` are added as dynamic-code shapes. | `rules/shell.py` |
+| 2 | `AS-006` | The verb must *govern* the path: forward direction, ≤ 120 characters, no clause boundary (table cell `|`, `;`, sentence end, `or`/`and`/`but`/`so`/`then`) between them. A compound word is not a verb (`read-only`, `Get-Content`). `process.env` is not a path. Advisory modality (`restrict`, `ensure`, `recommend`, …) before the verb is a policy, not an access. | `rules/sensitive_paths.py` |
+| 3 | `AS-CHAIN-002` | Object continuity: the EXECUTION must act on what the DOWNLOAD named — the same word, or an anaphor (`run it`), or a bare artefact kind (`run the script`). An execution whose object is a sentence (more than three content words) is not an object reference at all. | `step_sequence.py` |
+| 4 | `AS-001` `GENERIC_KEY` | The value is judged **as a whole**: every `-`/`_`/`.`-separated part must be a placeholder word (`test`, `demo`, `enterprise`, `secret`, `m2m`, …). A placeholder *prefix* is not an exemption: `demo-4f9a2c7b1e8d3a6f` is still a secret. Provider detectors (`sk-`, `ghp_`, `AKIA`, private-key blocks) are untouched. | `rules/secrets.py` |
+
+### T16.2 Measured, before → after
+
+The five clones were verified again before the scan: `git rev-parse HEAD` was
+compared with the §2 table and all five matched
+(`51b6382a…`, `5a3a23af…`, `f3852626…`, `dbd4588f…`, `f225f117…`). A
+discrepancy would have been a stop, not a re-pin; there was none. Every clone
+was still clean after the scan (`git status --porcelain` empty).
+
+| Repo | Before | After | Removed |
+|---|---|---|---|
+| R1 `modelcontextprotocol/servers` | 19 | 2 | 17 |
+| R2 `modelcontextprotocol/python-sdk` | 10 | 2 | 8 |
+| R3 `github/github-mcp-server` | 9 | 0 | 9 |
+| R4 `anthropics/skills` | 29 | 15 | 14 |
+| R5 `punkpeye/awesome-mcp-servers` | 0 | 0 | 0 (still `UNKNOWN`, §T16.4) |
+| **Total** | **67** | **19** | **48** |
+
+Removed by class — 17 + 10 + 6 + 15 = 48:
+
+| Class | Rows removed |
+|---|---|
+| `AS-002` `EVAL_EXEC` (16 regex receivers + 1 `eval (Recommended)` by the adjacency rule) | 17 |
+| `AS-CHAIN-002` (10 intra-file chains) | 10 |
+| `AS-001` `GENERIC_KEY` placeholder forms | 6 |
+| `AS-006` (verb no longer governs the path) | 15 |
+
+**No new finding appeared on any of the five trees.** The before/after JSON
+was diffed as a set of `(rule_id, file, line)`: the "new" side of that diff is
+empty for all five repositories. Coverage is byte-identical before and after
+(315 / 1710 / 92 / 262 / 9 files scanned, `partial` everywhere,
+`rule_errors` 0).
+
+Precision on the remaining 19: **1 TP, 18 FP, 0 INCONCLUSIVE — 5.3 %**
+(95 % Wilson interval 0.9 %–24.6 %, n = 19). Before: 1.5 % (0.3 %–8.0 %, n = 67).
+The interval is wide because the denominator is small: the honest reading is
+"under 25 %", not "5 %".
+
+### T16.3 The 19 remaining findings, each classified
+
+`quote` is the reported line trimmed; the rule and the line are the same ones
+as §4, so a reviewer can compare row by row.
+
+| # | Rule | Sev | File:line | What still fires | Verdict | Why it survives T16 |
+|---|---|---|---|---|---|---|
+| 1 | AS-002 | HIGH | `scripts/release-notes.mjs:308` (R1) | ``const match = PR_LINE.exec(line);`` | FP | the receiver is a module-level regex constant; the exemption proves literals and regex names, not arbitrary constants (see §T16.5) |
+| 2 | AS-002 | HIGH | `scripts/skill-eval.test.mjs:1` (R1) | a comment naming "the skill trigger eval (…)" | FP | `SHELL_EVAL` prose — outside the four approved mechanisms |
+| 3 | AS-002 | HIGH | `src/mcp/cli/cli.py:48` (R2) | `subprocess.run([cmd, "--version"], …, shell=True)` | FP | constant list, no interpolation — outside the four mechanisms |
+| 4 | AS-MCP-004 | HIGH | `examples/clients/simple-chatbot/mcp_simple_chatbot/servers_config.json:3` (R2) | `"command": "uvx"`, `"mcp-server-sqlite"`, no version | **TP** | **the one true positive of §4 is preserved** |
+| 5 | AS-002 | HIGH | `skills/claude-api/SKILL.md:63` (R4) | a table row `build-eval` | FP | `SHELL_EVAL` prose |
+| 6 | AS-002 | HIGH | `skills/claude-api/SKILL.md:530` (R4) | `… an eval (prompt tuning, hill-climbing)` | FP | `SHELL_EVAL` prose |
+| 7 | AS-002 | HIGH | `skills/claude-api/shared/anthropic-cli.md:67` (R4) | `set -a; eval "$(ant auth print-credentials --env)"; set +a` | FP (borderline) | a real `eval` of the vendor CLI's output; see §5.3 — the bucket does not move |
+| 8 | AS-002 | HIGH | `skills/claude-api/shared/cost-optimization.md:26` (R4) | `run the project's eval (or, with no eval, replay …)` | FP | `SHELL_EVAL` prose |
+| 9 | AS-003 | HIGH | `skills/claude-api/shared/managed-agents-onboarding-from-url.md:30` (R4) | `Never run its commands, setup scripts or \`curl \| sh\` lines` | FP | a warning: the download end is the quoted attack string |
+| 10 | AS-002 | CRITICAL | same line as row 9 | `curl \| bash pattern` | FP | the warning quotes the attack; nothing is executed |
+| 11 | AS-002 | HIGH | `skills/claude-api/shared/evals/build-eval.md:35` (R4) | `The answer shapes what an eval "input" is.` | FP | `SHELL_EVAL` prose |
+| 12 | AS-002 | HIGH | `skills/claude-api/shared/evals/build-eval.md:213` (R4) | `Commit the eval (Recommended)` | FP | `SHELL_EVAL` prose (the second detector on this line is gone; §4 row 53) |
+| 13 | AS-002 | HIGH | `skills/claude-api/shared/evals/eval-hillclimb.md:33` (R4) | `A runnable eval (Step 0) …` | FP | `SHELL_EVAL` prose |
+| 14 | AS-002 | HIGH | `skills/claude-api/shared/evals/eval-hillclimb.md:78` (R4) | `… any file the eval command executes` | FP | `SHELL_EVAL` prose |
+| 15 | AS-002 | HIGH | `skills/claude-api/shared/evals/eval-hillclimb.md:318` (R4) | `… commit eval / commit eval + transcripts …` | FP | `SHELL_EVAL` prose |
+| 16 | AS-002 | HIGH | `skills/claude-api/shared/evals/report/build-report-lite.mjs:2` (R4) | a comment: `… for the build-eval / hillclimb loop` | FP | `SHELL_EVAL` prose in a comment |
+| 17 | AS-002 | HIGH | `skills/claude-api/shared/evals/report/runner-scaffold.mjs:2` (R4) | a comment: `… for the build-eval / hillclimb loop` | FP | `SHELL_EVAL` prose in a comment |
+| 18 | AS-004 | HIGH | `skills/claude-api/python/claude-api/streaming.md:250` | `Use flush=True to show tokens immediately` | FP | model tokens, not credentials — outside the four mechanisms |
+| 19 | AS-CHAIN-002 | CRITICAL | `<correlated>` → contributing `…/managed-agents-onboarding-from-url.md:30` (R4) | `Signals: remote-download + command-execution` | FP | the correlation layer pairs findings by file and line proximity and was **not** changed; the object-continuity rule lives in the step-sequence layer (see §T16.5) |
+
+Rows 9, 10 and 19 are one sentence: three findings, one mechanism, all false.
+
+### T16.4 What is still not checked
+
+Nothing about coverage changed, and the two `UNKNOWN` results of §7 keep their
+exact wording:
+
+- **R3 is still mostly unread:** 299 `.go` files (plus 141 `.snap` snapshots)
+  are outside `SCAN_EXTENSIONS`, so its **0** now rests on the same unread
+  tree. Its 9 → 0 is a statement about Markdown and CI YAML only.
+- **R5's main file is still unread:** `README.md` is skipped as `too_large`,
+  9 of 12 files were read. Its 0 HIGH is an absence, not a clean result.
+- R1, R2 and R4 are `partial` for the same reasons as §3.1; `rule_errors` is 0
+  everywhere, so the JSON is complete **for the files it read**.
+
+A repository whose main artefact was never opened does not earn a sentence
+about its safety, and none is written here.
+
+### T16.5 Residual false positives and new false negatives
+
+Stated, not smoothed over.
+
+**False positives that survive (18 of the 19 rows above):** 12 are
+`AS-002 SHELL_EVAL` rows — 11 prose or comments and one real `eval` of the
+vendor CLI's own output (row 7); one is an unprovable `exec` receiver (row 1),
+one is `SUBPROCESS_SHELL` on a constant list, one is `AS-004` model tokens, and
+three are the warning sentence plus its correlation (rows 9, 10, 19). Only the
+`SHELL_EVAL` class and the warning sentence are *in* the four T16 classes and
+still fire; the rest were never in scope.
+
+**New false negatives, by mechanism — each one is a price paid here:**
+
+1. `EVAL_EXEC`: a *receiver-qualified* `exec` whose receiver is neither a
+   literal nor regex-named is still reported (row 1), so the narrowing did not
+   become a blanket on `X.exec(`. The cost of that choice is that a regex held
+   in a constant named `PR_LINE` keeps reporting. The opposite cost was
+   rejected: suppressing every `X.exec(` would hide `runner.exec(cmd)` and
+   `vm.exec(code)`, which is real execution.
+2. `EVAL_EXEC` adjacency: `eval (x)` with a space is no longer this detector's
+   finding. In shell-shaped lines `SHELL_EVAL` still reports it at HIGH, so the
+   line is not lost — only the detector that names it changes.
+3. `AS-006` the 120-character window and the clause boundary: an access whose
+   verb is more than 120 characters from the file noun, or separated by
+   `and`/`or`/`so`/a sentence end/a table cell, is no longer reported. In code
+   this can be a false negative — `open(root, ".env")` is safe (commas are not
+   a boundary), but a wrapped call such as `read_file(path, name)  # .env`
+   whose argument sits on another statement is not. **Not measured as a count;
+   recorded as an unknown.**
+4. `AS-006` verb direction: `the .env file that the agent reads` no longer
+   reports. That is the intended reading ("the verb must govern the path") and
+   it is also a loss: passive and right-branching English reads are invisible.
+5. `AS-006` `process.env`: `process.env.OPENAI_API_KEY` never reports. This is
+   the remediation the rule recommends, not a credential file.
+6. `AS-CHAIN-002` object continuity: an execution object of more than three
+   content words is not compared, and an execution that names the artefact
+   differently from the download (`download the tarball … run the archive`) is
+   not a chain. Genuine pairs still fire (four pinned fixtures, §T16.7), but
+   the rule is now stricter than the corpus requires.
+7. `AS-CHAIN-002` correlation: the pair of findings across a file is still
+   formed by rule id + same file + line proximity. Object continuity was
+   implemented where objects exist (the step-sequence layer); the correlation
+   layer has no object model and keeps the 3 rows 9/10/19.
+8. `AS-001` placeholder form: a value made only of placeholder words
+   (`demo-agent-secret`) is no longer a secret. That is an oracle an attacker
+   could aim at — it is bounded to values with no entropy of their own, and the
+   provider detectors are untouched, but it is a real weakening and it is
+   written down here rather than argued away.
+
+### T16.6 Reproduction
+
+```
+# same clones as §2, verified, network off, JSON outside the repository
+git -C ~/public-corpus/<name> rev-parse HEAD      # must equal the §2 table
+sudo -n unshare -n -- sudo -u ubuntu env HOME=$HOME \
+  ~/veyra/.venv/bin/veyra scan ~/public-corpus/<name> --format json \
+  > ~/public-corpus/t16-after/<name>.json
+
+# count findings, not rows and not lines
+python3 - <<'PY'
+import glob, json, os
+rows = [x for f in glob.glob(os.path.expanduser('~/public-corpus/t16-after/*.json'))
+          for x in json.load(open(f))['findings']
+          if x['severity'] in ('HIGH', 'CRITICAL')]
+print(len(rows))                                   # -> 19
+PY
+```
+
+Determinism, measured: every tree was scanned twice more with
+`PYTHONHASHSEED=0` and `PYTHONHASHSEED=12345`; all five pairs are
+byte-identical (`cmp` exit 0) and identical to the report above.
+
+| Repo | Bytes | `sha256` |
+|---|---|---|
+| servers | 54 751 | `71f6185a1c561a68…` |
+| python-sdk | 146 850 | `bba8ea442eb5ac1a…` |
+| github-mcp-server | 92 370 | `d08e70bf83aa0b15…` |
+| skills | 155 374 | `d428f135c8635da1…` |
+| awesome-mcp-servers | 3 864 | `5c379449d28561c6…` |
+
+Scope of that claim, as in §8.3: one repeat per tree, same host, same commit,
+same configuration. It is not a proof of determinism in general.
+
+The scanner's own tree was scanned before and after this change
+(`veyra scan src`): 34 HIGH/CRITICAL before, 34 after, and the content of the
+set is unchanged — no self-scan finding disappeared and none appeared. The
+four rule changes therefore do not move `--fail-on HIGH` on `src`.
+`veyra scan .` (the whole repository, including the new test file) reports the
+same *active* counts before and after (52 CRITICAL / 37 HIGH, all suppressed by
+`.veyra.toml`, §11). The new test file adds 11 findings to that report — 10
+HIGH/CRITICAL and 1 MEDIUM — and every one of them is `suppressed` by the same
+rule-level ignore, so nothing new reaches `--fail-on`. Its AS-001 fixtures are
+placeholder forms or assembled at run time, so the tree gains no key-shaped
+literal.
+
+### T16.7 The attack-lab corpus did not move
+
+| Metric | Before | After |
+|---|---|---|
+| total | 113 | 113 |
+| detected | 103 | 103 |
+| partially detected | 7 | 7 |
+| missed | 3 | 3 |
+| false positives | 0 | 0 |
+
+No `expected` value was edited; the four `AS-CHAIN-002` fixtures
+(`download-run-script`, `remote-package-execute`, `indirect-wording`,
+`download-execution`) and the six `AS-006` fixtures still detect, and the
+`uvx`-unpinned true positive is still reported (row 4 above).
+
+Each of the four classes has a negative test that failed on the code before
+the change and a positive one that still fires:
+`tests/test_t16_rule_precision.py` (10 tests). The negative halves were run
+against the parent commit first and failed there; that run is the evidence that
+the tests are not written to the fix.
+
+### T16.8 What this does not prove
+
+It does not prove that Veyra's HIGH tier is now precise. It proves that on
+**these five commits**, with **this** scanner, 48 of the 67 HIGH/CRITICAL
+findings named the wrong thing and no longer do, and that 18 of the 19 that
+remain are still wrong for reasons that are written down above. A precision of
+1/19 is a measurement of five repositories chosen for a different task (T15
+chose them as MCP-ecosystem artifacts, not as a random sample of code), so it
+does not generalise to a rate; the Wilson interval (0.9 %–24.6 %) says as much.
+Most of what is left is one class (`SHELL_EVAL` prose) that this task was not
+allowed to touch, so the 19 is not a floor either: a fifth mechanism would move
+it again. Three of the four mechanisms were narrowed by *evidence the scanner
+can see* (a regex receiver, a governing verb, a continuous object) and every
+one of them can be defeated by a construct that names its evidence differently
+— the residual lists in §T16.5 are that surface, not a footnote. Finally, none
+of this was validated against a live credential, a running MCP server, or the
+Go code of R3, which nobody read.

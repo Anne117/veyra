@@ -521,6 +521,116 @@ def _find_sequence(
     return None
 
 
+# --- Object continuity for DOWNLOAD -> EXECUTION ---------------------------
+# A download and an execution in the same file, twenty lines apart, are not a
+# sequence unless the execution acts on what was downloaded. Measured on the
+# public corpus (docs/PUBLIC-CORPUS.md §6): all 10 intra-file AS-CHAIN-002 rows
+# paired a DOWNLOAD with an EXECUTION whose object was something else -- an
+# install prerequisite, a doc heading, a JSON field name, an unrelated "run it".
+#
+# Continuity holds when the execution's object
+#   1. names a word the download's object also names (`deployment script` ->
+#      `deployment script`, `signed installer file` -> `installer script`), or
+#   2. is an anaphor (`download the script ... run it`) -- "it" can only mean
+#      the thing just named, or
+#   3. is a bare artefact kind (`run the script`, `execute the package`): the
+#      execution names the artefact by kind and nothing else, so it can only
+#      refer to the artefact the download named.
+# Rule 3 is the loosest of the three and is the one that keeps this
+# repository's own pinned fixture (`Download the installer ... Run the script`)
+# green; its residual risk is recorded in the document, not hidden.
+_OBJECT_STOPWORDS = frozenset({
+    "the", "a", "an", "this", "that", "these", "those", "and", "or", "but",
+    "for", "not", "with", "from", "into", "via", "using", "all", "every",
+    "your", "our", "their", "my", "its", "you", "can", "will", "are", "was",
+    "has", "have", "been", "when", "then", "than", "also", "only", "just",
+})
+# The verb of a step names the action, never the object it acts on: in
+# "Install Go ... / Install golangci-lint ... let `script/lint` install the
+# pinned version" the shared word is the verb, and a verb is not an object.
+_ACTION_WORDS = frozenset({
+    "run", "runs", "running", "execute", "executes", "exec", "eval", "install",
+    "installs", "launch", "bash", "shell", "popen", "system", "fetch", "fetches",
+    "download", "downloads", "curl", "wget", "retrieve", "retrieves", "read",
+    "write", "open", "load", "get", "make", "add", "use", "call", "send",
+    "setup", "lint", "build", "test",
+})
+_ANAPHORA = frozenset({"it", "them", "this", "that", "these", "those",
+                        "itself", "themselves"})
+_ARTEFACT_KINDS = frozenset({
+    "script", "installer", "package", "binary", "executable", "program",
+    "tool", "archive", "bundle", "plugin", "payload", "setup", "deployment",
+    "file", "module", "application", "image", "container",
+})
+_MAX_EXEC_OBJECT_WORDS = 3
+# Shortest word that may stand for the downloaded object: below this length a
+# substring hit is a coincidence ("code" inside "encode"), not a reference.
+_MIN_OBJECT_WORD = 5
+
+
+def _object_words(obj: str) -> List[str]:
+    """Content words of a normalized object phrase (never its verbs)."""
+    return [
+        w for w in obj.split()
+        if len(w) >= _MIN_OBJECT_WORD
+        and w not in _OBJECT_STOPWORDS
+        and w not in _ACTION_WORDS
+    ]
+
+
+def _same_object(download: Action, execution: Action) -> bool:
+    """True when the execution acts on the object the download named."""
+    exec_obj = execution.object.strip(" .")
+    if exec_obj in _ANAPHORA:
+        return True
+    exec_words = _object_words(exec_obj)
+    if not exec_words:
+        return False
+    # An execution that names its object at all names it in a noun phrase.
+    # A long phrase is a sentence *about* something, and any word it happens to
+    # share with the download's object is a coincidence of subject matter:
+    # "…read the relevant files…" and "…all SDK languages use the same
+    # multi-file layout…" share "language" and nothing else.
+    if len(exec_words) > _MAX_EXEC_OBJECT_WORDS:
+        return False
+    # The execution names the downloaded object: the word it uses is the one
+    # the download used. Containment, not equality, because a download's object
+    # often arrives glued to its URL (`https//host/bootstrap.sh`) while the
+    # execution names the file alone (`bootstrap.sh`).
+    downloaded = download.object.lower()
+    if any(word in downloaded for word in exec_words):
+        return True
+    return all(w in _ARTEFACT_KINDS for w in exec_words)
+
+
+def _find_download_execute(
+    steps: List[str], actions: List[Optional[Action]], lines: List[int]
+) -> Optional[List[int]]:
+    """First DOWNLOAD -> EXECUTION whose objects are continuous, within span.
+
+    Same locality rule as ``_find_sequence``: every matched step must lie at
+    most ``CHAIN_MAX_LINE_SPAN`` lines after the download. The nearest
+    continuous pair wins, so a distant unrelated pair cannot mask a close one.
+    """
+    for i, step in enumerate(steps):
+        if step != "DOWNLOAD":
+            continue
+        download = actions[i]
+        if download is None:
+            continue
+        for j in range(i + 1, len(steps)):
+            if lines[j] - lines[i] > CHAIN_MAX_LINE_SPAN:
+                break
+            if steps[j] != "EXECUTION":
+                continue
+            execution = actions[j]
+            if execution is None:
+                continue
+            if _same_object(download, execution):
+                return [i, j]
+    return None
+
+
 def _evidence_for(steps: List[str], indices: List[int]) -> str:
     """Build a human-readable evidence string from matched step indices."""
     labels = {
@@ -636,6 +746,7 @@ def analyze_file_chains(
     # ("and then", "then", ";"), each producing its own step in order.
     steps: List[str] = []
     step_lines: List[int] = []
+    step_actions: List[Optional[Action]] = []
     actions: List[Action] = []
     code_lines = _code_only_lines(text) if file_path.lower().endswith(".py") else None
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -653,6 +764,10 @@ def analyze_file_chains(
             action = _extract_action(segment, lineno, cat)
             if action is not None:
                 actions.append(action)
+            # One entry per step, so the object of a step can be read back
+            # (``_find_download_execute``); a step without an action has none.
+            if cat:
+                step_actions.append(action)
 
     chains: List[Tuple[Finding, int, int]] = []
 
@@ -685,12 +800,12 @@ def analyze_file_chains(
         ))
 
     # Chain 2: DOWNLOAD -> EXECUTION (download-and-execute).
-    dl_idx = _find_sequence(
-        steps,
-        ["DOWNLOAD", "EXECUTION"],
-        lines=step_lines,
-        max_span=CHAIN_MAX_LINE_SPAN,
-    )
+    #
+    # The execution must consume what the download produced (see
+    # ``_find_download_execute``). Category adjacency alone is not a sequence:
+    # in the public corpus every intra-file AS-CHAIN-002 paired a download with
+    # an execution of something else.
+    dl_idx = _find_download_execute(steps, step_actions, step_lines)
     if dl_idx:
         chains.append((
             Finding(

@@ -137,6 +137,40 @@ def _is_placeholder_literal(value: str) -> bool:
     return any(fragment in lowered for fragment in _PLACEHOLDER_FRAGMENTS)
 
 
+# Whole-value placeholder forms (T16). Setup docs and fixtures write
+# credentials as a *phrase*: ``test-token``, ``demo-m2m-secret``,
+# ``enterprise-secret``. The value is judged as a whole: every
+# ``-``/``_``/``.``-separated part must be one of these words, so a marker plus
+# real entropy (`demo-4f9a2c7b1e8d3a6f`) is still a secret -- a prefix is not an
+# exemption. Measured on the public corpus: 6 of 67 HIGH/CRITICAL rows, 6 of
+# them this class (docs/PUBLIC-CORPUS.md §6, §"T16: after").
+_PLACEHOLDER_WORDS = frozenset({
+    "test", "tests", "demo", "example", "examples", "sample", "dummy", "fake",
+    "mock", "stub", "placeholder", "your", "my", "our", "here", "change",
+    "changeme", "xxx", "redacted", "secret", "secrets", "token", "tokens",
+    "key", "keys", "apikey", "api", "password", "passwd", "pass", "pwd",
+    "enterprise", "client", "agent", "app", "finance", "m2m", "service",
+    "local", "dev", "staging", "sandbox", "default", "value", "string",
+})
+# Longest placeholder phrase that is still a placeholder; a longer value is a
+# phrase, not a form, and its length suggests assembled entropy.
+_MAX_PLACEHOLDER_LENGTH = 48
+
+
+def _is_placeholder_value(value: str) -> bool:
+    """True when the whole value is a placeholder phrase, not a credential.
+
+    Shape test on the *entire* value (see ``_PLACEHOLDER_WORDS``), never on a
+    substring: ``demo-token`` is a placeholder, ``demo-<random>`` is not.
+    """
+    if len(value) > _MAX_PLACEHOLDER_LENGTH:
+        return False
+    parts = [p for p in re.split(r"[-_.]", value.lower()) if p]
+    if not parts:
+        return False
+    return all(p in _PLACEHOLDER_WORDS for p in parts)
+
+
 def _followed_by_call(content: str, end: int) -> bool:
     """True when the captured value is the callee of a call (``re.compile(``)."""
     return end < len(content) and content[end] == "("
@@ -256,6 +290,8 @@ def detect_generic_key(content: str, file_path: str, line: int) -> "Finding | No
     if _is_filler_padding(value):
         return None
     if _is_placeholder_literal(value):
+        return None
+    if _is_placeholder_value(value):
         return None
     if _followed_by_call(content, m.end(2)):
         return None

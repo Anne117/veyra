@@ -58,8 +58,58 @@ SUBPROCESS_SHELL = re.compile(r"subprocess\.(?:run|call|Popen|check_call|check_o
 # os.system / os.popen
 OS_SYSTEM = re.compile(r"\bos\.(?:system|popen)\s*\(")
 
-# eval/exec of a variable (potentially untrusted)
-EVAL_EXEC = re.compile(r"\b(?:eval|exec)\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\)")
+# eval/exec of a variable (potentially untrusted).
+#
+# The callee must be the *global*: `eval`/`exec` immediately followed by `(`,
+# taking a plain identifier (a space before the paren spells the noun "eval"
+# plus a parenthetical, which is prose, not a call). The argument shape is
+# unchanged from before T16; only the callee is.
+#
+# A receiver-qualified call -- an object's `exec` method -- is a *method* call,
+# and on the public corpus 17 of 67 HIGH rows were `RegExp.prototype.exec`
+# (docs/PUBLIC-CORPUS.md §6): `/^src\/([^/]+)\//.exec`, `re.exec`, `PR_LINE.exec`.
+# A regex match is not code execution. Suppressing every receiver-qualified
+# `exec` would hide real execution through a wrapper (`runner.exec`,
+# `vm.exec`), which would be a new false negative, so the exemption is by
+# *receiver*: a regex literal (`/x/.exec`) or a name that says regex
+# (`re.exec`, `_PATTERN.exec`). A receiver this rule cannot read (a
+# module-level constant called `PR_LINE`) still reports; the residual FP is
+# recorded in docs/PUBLIC-CORPUS.md.
+EVAL_EXEC = re.compile(r"\b(eval|exec)\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\)")
+
+# A regex literal immediately to the left of the `.`, flags included.
+_REGEX_LITERAL_RECEIVER = re.compile(r"/(?:[^/\\\n]|\\.)+/[gimsuyd]*$")
+# Receivers named the way regexes are named.
+_REGEX_RECEIVER_NAMES = frozenset(
+    {"re", "regex", "regexp", "rex", "rgx", "pattern", "matcher", "regexobj"}
+)
+_REGEX_RECEIVER_SUFFIX = re.compile(r"(?:^|_)(?:re|regex|regexp|pattern|matcher)$")
+
+# Dynamic code built from a string without a call to eval/exec.
+NEW_FUNCTION = re.compile(r"\bnew\s+Function\s*\(")
+TIMEOUT_STRING = re.compile(r"\bsetTimeout\(\s*[\"'`]")
+
+
+def _has_regexp_receiver(content: str, callee_start: int) -> bool:
+    """True when the ``exec`` at ``callee_start`` is called on a RegExp.
+
+    Only a receiver that *says* it is a regex is exempted -- a literal
+    (``/x/.exec``) or a conventional name (``re``, ``_PATTERN``). Anything else
+    is an unproven receiver and stays reportable (see ``EVAL_EXEC``).
+    """
+    left = content[:callee_start].rstrip()
+    if not left.endswith("."):
+        return False
+    receiver = left[:-1].rstrip().rstrip("?")
+    if _REGEX_LITERAL_RECEIVER.search(receiver):
+        return True
+    name = re.search(r"([A-Za-z_$][\w$]*)\s*$", receiver)
+    if name is None:
+        return False
+    lowered = name.group(1).lower()
+    return lowered in _REGEX_RECEIVER_NAMES or bool(
+        _REGEX_RECEIVER_SUFFIX.search(lowered)
+    )
 
 # commands built from variables (user-controlled input)
 COMMAND_FROM_VAR = re.compile(r"(?:subprocess|os\.system|os\.popen)\([^)]*\+[^)]*\)")
@@ -133,7 +183,10 @@ def detect_os_system(content: str, file_path: str, line: int) -> "Finding | None
 
 @register
 def detect_eval_exec(content: str, file_path: str, line: int) -> "Finding | None":
-    if EVAL_EXEC.search(content):
+    for m in EVAL_EXEC.finditer(content):
+        # Only a RegExp's `exec` is exempt: a regex match is not execution.
+        if m.group(1) == "exec" and _has_regexp_receiver(content, m.start(1)):
+            continue
         return Finding(
             rule_id="AS-002",
             severity=Severity.HIGH,
@@ -143,6 +196,17 @@ def detect_eval_exec(content: str, file_path: str, line: int) -> "Finding | None
             line=line,
             evidence="eval/exec of a variable",
             remediation="Avoid eval/exec; use safe parsing or allowlists.",
+        )
+    if NEW_FUNCTION.search(content) or TIMEOUT_STRING.search(content):
+        return Finding(
+            rule_id="AS-002",
+            severity=Severity.HIGH,
+            title="Dynamic code execution",
+            description="Code compiled or scheduled from a string executes untrusted code.",
+            file=file_path,
+            line=line,
+            evidence="dynamic code construction",
+            remediation="Avoid new Function/setTimeout with a string; call a function instead.",
         )
     return None
 
